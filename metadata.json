@@ -1,0 +1,6 @@
+{
+  "name": "Open VetSim - Veterinary Anesthesia Simulator",
+  "description": "Comprehensive real-time veterinary anesthesia and critical care simulator with pharmacokinetic modeling, multi-species clinical scenarios, multi-parameter vital monitor, and emergency resuscitation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
