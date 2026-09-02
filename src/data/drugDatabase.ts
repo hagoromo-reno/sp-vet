@@ -37,6 +37,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.15,
       warningDescription: 'Bólus rápido intensifica vasodilatação e hipotensão por bloqueio alfa-1.',
     },
+    receptorProfile: {
+      alpha1: { affinity: 0.90, intrinsicEfficacy: -0.90 }, // competitive antagonist of vascular alpha-1
+    },
     effectHR: -0.05,
     effectBP: -0.35, // significant vasodilation / hypotension
     effectRR: -0.1,
@@ -80,6 +83,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.40,
       warningDescription: 'Bólus IV rápido causa pico de vasoconstrição (PAM > 130) seguido de bradicardia severa imediata (FC < 35) e Bloqueio AV de 2º grau!',
+    },
+    receptorProfile: {
+      alpha2: { affinity: 0.98, intrinsicEfficacy: 1.0 },
+      alpha1: { affinity: 0.25, intrinsicEfficacy: 0.85 }, // peripheral vasoconstrictor component
     },
     effectHR: -0.65,
     effectBP: 0.20,
@@ -126,6 +133,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.45,
       warningDescription: 'Bólus IV rápido provoca bradicardia súbita, bloqueios cardíacos e risco de parada respiratória em ruminantes.',
     },
+    receptorProfile: {
+      alpha2: { affinity: 0.94, intrinsicEfficacy: 1.0 },
+      alpha1: { affinity: 0.35, intrinsicEfficacy: 0.70 },
+    },
     effectHR: -0.60,
     effectBP: 0.15,
     effectRR: -0.30,
@@ -170,6 +181,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.35,
       warningDescription: 'Bradicardia intensa com bloqueio AV em equinos.',
+    },
+    receptorProfile: {
+      alpha2: { affinity: 0.96, intrinsicEfficacy: 1.0 },
+      alpha1: { affinity: 0.30, intrinsicEfficacy: 0.75 },
     },
     effectHR: -0.60,
     effectBP: 0.20,
@@ -216,6 +231,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.05,
       warningDescription: 'Mínimo impacto hemodinâmico; sinergismo potente com opioides.',
     },
+    receptorProfile: {
+      gabaA: { bzdAllosteric: 0.95 },
+    },
     effectHR: -0.04,
     effectBP: -0.06,
     effectRR: -0.12,
@@ -259,6 +277,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.20,
       warningDescription: 'Propilenoglicol em bólus IV rápido causa hipotensão, flebite e arritmias cardíacas.',
+    },
+    receptorProfile: {
+      gabaA: { bzdAllosteric: 0.88 },
     },
     effectHR: -0.02,
     effectBP: -0.06,
@@ -308,6 +329,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.30,
       warningDescription: 'Bólus IV rápido causa liberação aguda maciça de histamina, vasodilatação, broncoespasmo e colapso pressórico.',
     },
+    receptorProfile: {
+      muOpioid: { affinity: 0.88, intrinsicEfficacy: 0.95 },
+      kappaOpioid: { affinity: 0.30, intrinsicEfficacy: 0.60 },
+    },
     effectHR: -0.22,
     effectBP: -0.12,
     effectRR: -0.28,
@@ -352,6 +377,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.18,
       warningDescription: 'Bradicardia vagal dose-dependente e discreta depressão respiratória.',
     },
+    receptorProfile: {
+      muOpioid: { affinity: 0.95, intrinsicEfficacy: 1.0 },
+      nmdaPoreBlock: 0.40,
+    },
     effectHR: -0.18,
     effectBP: -0.06,
     effectRR: -0.20,
@@ -395,6 +424,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.40,
       warningDescription: 'Bólus rápido de fentanil induz apneia imediata e bradicardia vagal severa!',
+    },
+    receptorProfile: {
+      muOpioid: { affinity: 0.99, intrinsicEfficacy: 1.0 },
     },
     effectHR: -0.30,
     effectBP: -0.08,
@@ -531,6 +563,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.50,
       warningDescription: 'Bólus IV ultrarrápido causa vasodilatação súbita, apneia e queda pressórica.',
     },
+    receptorProfile: {
+      gabaA: { propofolBarbiturateDirect: 0.95, directChlorideGating: 0.85 },
+    },
     effectHR: -0.05,
     effectBP: -0.35, // vasodilation
     effectRR: -0.70, // transient apnea
@@ -573,6 +608,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.30,
       warningDescription: 'Bólus rápido pode induz apneia transitória; excelente perfil hemodinâmico.',
     },
+    receptorProfile: {
+      gabaA: { neurosteroidSite: 0.95, directChlorideGating: 0.80 },
+    },
     effectHR: 0.05,
     effectBP: -0.15,
     effectRR: -0.50,
@@ -614,6 +652,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.25,
       warningDescription: 'Bólus rápido induz padrão respiratório apnêustico, rigidez muscular, taquicardia e pico hipertensivo.',
+    },
+    receptorProfile: {
+      nmdaPoreBlock: 0.95,
+      beta1: { affinity: 0.30, intrinsicEfficacy: 0.70 },
     },
     effectHR: 0.35,
     effectBP: 0.30,
@@ -786,6 +828,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.25,
       warningDescription: 'Bólus IV ultrarrápido pode causar hipotensão súbita e taquicardia por bloqueio simpático abrupto.',
     },
+    receptorProfile: {
+      alpha2: { affinity: 0.99, intrinsicEfficacy: 0.0 }, // pure competitive antagonist
+    },
     effectHR: 0.50,
     effectBP: -0.10,
     effectRR: 0.25,
@@ -830,6 +875,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.10,
       warningDescription: 'Reversão abrupta pode causar dor aguda e descarga simpática.',
     },
+    receptorProfile: {
+      muOpioid: { affinity: 0.99, intrinsicEfficacy: 0.0 }, // pure competitive antagonist
+    },
     effectHR: 0.20,
     effectBP: 0.10,
     effectRR: 0.60,
@@ -872,6 +920,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.05,
       warningDescription: 'Reversão segura e bem tolerada.',
+    },
+    receptorProfile: {
+      gabaA: { bzdAllosteric: 0.0 }, // neutral allosteric antagonist
     },
     effectHR: 0.05,
     effectBP: 0.05,
@@ -964,6 +1015,11 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.50,
       warningDescription: 'Se aplicado em paciente com ritmo cardíaco normal ou isquemia, pode desencadear Taquicardia Ventricular e Fibrilação Ventricular!',
     },
+    receptorProfile: {
+      alpha1: { affinity: 0.85, intrinsicEfficacy: 1.0 },
+      beta1: { affinity: 0.95, intrinsicEfficacy: 1.0 },
+      beta2: { affinity: 0.80, intrinsicEfficacy: 1.0 },
+    },
     effectHR: 0.85,
     effectBP: 0.90,
     effectRR: 0.30,
@@ -1008,6 +1064,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.15,
       warningDescription: 'Doses sub-terapêuticas ou início de bólus podem causar bradicardia paradoxal temporária por estimulação vagal central.',
     },
+    receptorProfile: {
+      m2: { affinity: 0.95, intrinsicEfficacy: -1.0 }, // muscarinic M2 competitive antagonist
+      m3: { affinity: 0.90, intrinsicEfficacy: -1.0 },
+    },
     effectHR: 0.70,
     effectBP: 0.25,
     effectRR: 0.10,
@@ -1046,10 +1106,14 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       apneaRisk: 0.0,
       hypotensionSeverity: 0.0,
       reflexBradycardiaRisk: 0.0,
-      arrhythmiaRisk: 0.15,
+      arrhythmiaRisk: 0.10,
       histamineRelease: false,
       lethalityRiskScore: 0.10,
       warningDescription: 'Aumento gradual e sustentado da frequência cardíaca.',
+    },
+    receptorProfile: {
+      m2: { affinity: 0.92, intrinsicEfficacy: -1.0 },
+      m3: { affinity: 0.95, intrinsicEfficacy: -1.0 },
     },
     effectHR: 0.55,
     effectBP: 0.20,
@@ -1093,6 +1157,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.65,
       warningDescription: 'PERIGO EM FELINOS: Bólus IV rápido em gatos induz colapso vascular fulminante, bradicardia extrema, convulsões e parada cardiorrespiratória!',
+    },
+    receptorProfile: {
+      naVChannelBlock: 0.92,
     },
     effectHR: -0.10,
     effectBP: -0.08,
@@ -1139,6 +1206,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.20,
       warningDescription: 'Doses excessivas (> 15 mcg/kg/min) causam taquiarritmias ventriculares.',
     },
+    receptorProfile: {
+      beta1: { affinity: 0.95, intrinsicEfficacy: 1.0 },
+      beta2: { affinity: 0.40, intrinsicEfficacy: 0.60 },
+    },
     effectHR: 0.15,
     effectBP: 0.65,
     effectRR: 0.0,
@@ -1181,6 +1252,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.35,
       warningDescription: 'Vasoconstrição periférica intensa com aumento de pós-carga.',
+    },
+    receptorProfile: {
+      alpha1: { affinity: 0.95, intrinsicEfficacy: 1.0 },
+      beta1: { affinity: 0.70, intrinsicEfficacy: 0.80 },
     },
     effectHR: 0.10,
     effectBP: 0.85,
@@ -1356,6 +1431,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.80,
       warningDescription: 'Bólus rápido libera histamina (hipotensão acentuada) e causa paralisia respiratória total imediata!',
     },
+    receptorProfile: {
+      nm: { affinity: 0.98, intrinsicEfficacy: -1.0 }, // competitive neuromuscular blocker
+    },
     effectHR: 0.0,
     effectBP: -0.15,
     effectRR: -1.0, // complete respiratory paralysis
@@ -1399,6 +1477,11 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.50,
       warningDescription: 'Bólus sem atropina prévia causa crise colinérgica, bradicardia extrema e PCR por assistolia!',
     },
+    receptorProfile: {
+      acheInhibition: 0.95,
+      m2: { affinity: 0.60, intrinsicEfficacy: 0.80 },
+      m3: { affinity: 0.70, intrinsicEfficacy: 0.90 },
+    },
     effectHR: -0.50,
     effectBP: -0.15,
     effectRR: 0.30,
@@ -1441,6 +1524,7 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.0,
       warningDescription: 'Reversão direta por encapsulamento químico.',
     },
+    receptorProfile: {},
     effectHR: 0.05,
     effectBP: 0.05,
     effectRR: 0.50,
@@ -1487,6 +1571,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.60,
       warningDescription: 'Injeção intravascular inadvertida causa cardiotoxicidade refratária!',
+    },
+    receptorProfile: {
+      naVChannelBlock: 0.98,
     },
     effectHR: -0.05,
     effectBP: -0.15,

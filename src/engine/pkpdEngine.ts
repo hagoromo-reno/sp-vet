@@ -12,20 +12,26 @@ import {
   JawTone,
   MucousMembraneColor,
   CapillaryRefillTime,
+  CellularBiophysicsState,
 } from '../types/simulator';
 import { SPECIES_DATABASE } from '../data/speciesData';
 import { VETERINARY_DRUG_DATABASE } from '../data/drugDatabase';
+import { CellularReceptorsEngine, ReceptorStateSnapshot } from './cellularReceptors';
+import { SpeciesPhysiologyEngine, SPECIES_CELLULAR_CONFIGS } from './speciesPhysiology';
+import { HemodynamicCircuitEngine } from './hemodynamicCircuit';
+import { RespiratoryGasExchangeEngine } from './respiratoryGasExchange';
+import { DynamicInteractionsEngine } from './dynamicInteractions';
 
 export class PKPDEngine {
   /**
-   * High-fidelity veterinary PK/PD, receptor biochemistry, and organ pathophysiology engine.
-   * Accurately simulates:
-   * 1. Multi-compartment drug disposition and bio-phase equilibration (ke0).
-   * 2. Receptor-level allosteric GABA-A potentiation (Benzodiazepine + Opioid + Propofol synergy).
-   * 3. Realistic veterinary induction protocols (e.g. Midazolam + Methadone + Propofol) for dogs & cats.
-   * 4. Species-specific clearances (feline glucuronidation, canine vagotonia, bovine alpha-2 sensitivity).
-   * 5. Guedel planes (jaw tone, palpebral/corneal reflexes, eye rotation).
-   * 6. Acute bolus hemodynamics, respiratory arrest (apnea), cardiac arrest thresholds, and biological death.
+   * Advanced multi-system biophysical simulation engine:
+   * 1. Multi-compartment pharmacokinetics & bio-phase equilibration (ke0).
+   * 2. Receptor-level allosteric cooperativity and competitive displacement (Schild law).
+   * 3. Closed-loop cardiovascular mechanics (Frank-Starling inotropy, SVR, stroke volume, baroreceptor reflex).
+   * 4. Medullary pre-Bötzinger respiratory rhythm, intrapulmonary V/Q shunt, and acid-base equilibrium.
+   * 5. Deep species-specific abstraction (Canine vagotonia, Feline UGT1A6 deficit/lidocaine toxicity,
+   *    Equine recumbency myopathy/shunt, Bovine alpha-2D hypersensitivity/ruminal bloat).
+   * 6. Neurological Guedel planes, reflex mapping, and resuscitation kinetics.
    */
   public static stepSimulation(
     dtSeconds: number,
@@ -38,6 +44,7 @@ export class PKPDEngine {
     previousVitals?: VitalSigns
   ): { vitals: VitalSigns; updatedDoses: ActiveDrugDose[]; equipmentUpdates: Partial<AnesthesiaEquipmentState> } {
     const speciesInfo = SPECIES_DATABASE[patient.species] || SPECIES_DATABASE.canine;
+    const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
     const dtMin = dtSeconds / 60.0;
 
     // Previous state accumulators
@@ -52,9 +59,7 @@ export class PKPDEngine {
     let asystoleSeconds = previousVitals?.asystoleSecondsElapsed || 0;
     let cprSeconds = previousVitals?.cprSecondsElapsed || 0;
 
-    // ----------------------------------------------------
-    // PATIENT DEMOGRAPHICS & SPECIES METABOLIC VULNERABILITIES
-    // ----------------------------------------------------
+    // Demographic modifiers
     const ageTotalYears = patient.ageYears + (patient.ageMonths || 0) / 12;
     const isPediatric = ageTotalYears < 0.6; // < 7 months
     const isGeriatric = (
@@ -66,39 +71,12 @@ export class PKPDEngine {
       (patient.species === 'avian' && ageTotalYears >= 8)
     );
 
-    // Clearance and sensitivity modifiers
-    let drugClearanceFactor = 1.0;
-    let cardiovascularReserveFactor = 1.0;
-    let hypoxiaDesaturationMultiplier = 1.0;
-
-    if (patient.species === 'feline') {
-      // Felines have deficient glucuronidation (UGT1A6/UGT1A9 deficit)
-      drugClearanceFactor *= 0.85;
-      hypoxiaDesaturationMultiplier *= 1.25;
-    } else if (patient.species === 'canine') {
-      // Canines have strong vagal responsiveness to pure opioids
-      drugClearanceFactor *= 1.0;
-    } else if (patient.species === 'rabbit' || patient.species === 'avian') {
-      drugClearanceFactor *= 1.4; // High metabolic rate
-      hypoxiaDesaturationMultiplier *= 2.2;
-    }
-
-    if (isPediatric) {
-      drugClearanceFactor *= 0.65; // Immature hepatic microsomal clearance
-      cardiovascularReserveFactor *= 0.70; // Non-compliant myocardium, rate-dependent cardiac output
-      hypoxiaDesaturationMultiplier *= 2.2; // High VO2 and small FRC
-    } else if (isGeriatric) {
-      drugClearanceFactor *= 0.65; // Reduced GFR and hepatic blood flow
-      cardiovascularReserveFactor *= 0.60; // Diastolic stiffness, low ischemia threshold
-      hypoxiaDesaturationMultiplier *= 1.35;
-    }
-
-    if (patient.weightKg < 4.0) {
-      hypoxiaDesaturationMultiplier *= 1.25;
-    }
+    let drugClearanceFactor = speciesConfig.glucuronidationClearanceMultiplier;
+    if (isPediatric) drugClearanceFactor *= 0.65;
+    if (isGeriatric) drugClearanceFactor *= 0.65;
 
     // ----------------------------------------------------
-    // 1. ACTIVE DRUG PHARMACOKINETICS (BIO-PHASE EQUILIBRATION)
+    // 1. PHARMACOKINETICS: BIO-PHASE EQUILIBRATION (ke0)
     // ----------------------------------------------------
     const updatedDoses: ActiveDrugDose[] = [];
     const activeDrugEffects: Record<string, { drugDef: DrugDefinition; Ce: number; Cp: number; bolusShockMagnitude: number; totalDoseAdministered: number }> = {};
@@ -117,14 +95,13 @@ export class PKPDEngine {
       let isFastBolusShockTriggered = dose.isFastBolusShockTriggered || false;
       let shockMagnitude = 0;
 
-      // Delivery progress
       const deliveryDuration = dose.deliveryDurationSec || 1;
       const deliveryFraction = deliveryDuration > 0 ? Math.min(1.0, deliveryElapsed / deliveryDuration) : 1.0;
       if (deliveryFraction >= 1.0) {
         isFullyDelivered = true;
       }
 
-      // Fast Bolus Acute Shock calculation
+      // Acute Fast Bolus Hemodynamic Shock
       if (dose.administrationSpeed === 'bolus_rapid' && !isFastBolusShockTriggered && transitLagRemaining <= 0) {
         isFastBolusShockTriggered = true;
         const recommendedDose = drugDef.recommendedDose[patient.species] || drugDef.recommendedDose.canine;
@@ -135,7 +112,7 @@ export class PKPDEngine {
         }
       }
 
-      // PK Disposition (Two-compartment + Effect Site bio-phase)
+      // Two-compartment PK + Bio-phase (ke0)
       if (transitLagRemaining <= 0) {
         const rec = drugDef.recommendedDose[patient.species] || drugDef.recommendedDose.canine;
         const typicalDose = rec?.typical || 1.0;
@@ -163,36 +140,36 @@ export class PKPDEngine {
         newCe = Math.max(0, newCe + ke0 * (newCp - newCe) * dtMin);
       }
 
-      // Toxicological Overdose Checks
+      // Species-Specific Toxicological Overdose Triggers
       const rec = drugDef.recommendedDose[patient.species] || drugDef.recommendedDose.canine;
       const overdoseRatio = dose.dosePerKg / (rec?.max || 1.0);
 
-      // 1. Bovine Extreme Sensitivity to Xylazine (Alpha-2D isoform)
-      if (patient.species === 'bovine' && drugDef.id === 'xylazine' && dose.dosePerKg > 0.20) {
+      // A. Bovine Xylazine Extreme Hypersensitivity (alpha-2D)
+      if (patient.species === 'bovine' && drugDef.id === 'xylazine' && dose.dosePerKg > 0.15) {
         fatalOverdoseTriggered = true;
-        fatalToxicityReason = `Intoxicação Letal por Xilazina em Bovino (Dose ${dose.dosePerKg} mg/kg = ${(dose.dosePerKg / 0.05).toFixed(1)}x a dose terapêutica; receptores alfa-2D hiper-responsivos)`;
+        fatalToxicityReason = `Intoxicação Letal por Xilazina em Bovino (Dose ${dose.dosePerKg} mg/kg = ${(dose.dosePerKg / 0.05).toFixed(1)}x a dose de segurança; receptores alfa-2D hiper-responsivos)`;
       }
 
-      // 2. Feline Acute Lidocaine IV Toxicity
+      // B. Feline Acute Lidocaine IV Toxicity
       if (patient.species === 'feline' && drugDef.id === 'lidocaine_2pct' && dose.route.includes('IV') && (dose.dosePerKg > 1.2 || dose.administrationSpeed === 'bolus_rapid')) {
         fatalOverdoseTriggered = true;
-        fatalToxicityReason = 'Colapso Cardiocerebral e Depressão Miocárdica Fulminante por Lidocaína IV em Felino (Déficit congênito de glicuronidação)';
+        fatalToxicityReason = 'Colapso Cardiocerebral e Depressão Miocárdica Fulminante por Lidocaína IV em Felino (Déficit congênito de conjugação e alta toxicidade de canais NaV)';
       }
 
-      // 3. Rapid Potassium Chloride (KCl) bolus
+      // C. Potassium Chloride Rapid Bolus
       if (drugDef.id === 'potassium_chloride' && (dose.administrationSpeed === 'bolus_rapid' || dose.dosePerKg > 0.6)) {
         fatalOverdoseTriggered = true;
         fatalToxicityReason = 'Parada Cardíaca Instantânea em Diástole por Hipercalemia Fulminante (Bólus IV de Cloreto de Potássio)';
       }
 
-      // 4. Massive single-drug overdose
-      if (overdoseRatio >= 3.8 && (drugDef.category === 'induction' || drugDef.category === 'opioid_analgesic' || drugDef.category === 'premedication')) {
+      // D. Massive Single-Drug Overdose
+      if (!fatalOverdoseTriggered && overdoseRatio >= 3.8 && (drugDef.category === 'induction' || drugDef.category === 'opioid_analgesic' || drugDef.category === 'premedication')) {
         fatalOverdoseTriggered = true;
         fatalToxicityReason = `Sobredosagem Maciça Fatal por ${drugDef.name} (${overdoseRatio.toFixed(1)}x acima da dose máxima de segurança)`;
       }
 
-      // Retain in active pool
-      if (newCp > 0.003 || newCe > 0.003 || transitLagRemaining > 0 || (dose.isCRI && (dose.criRatePerKgMin || 0) > 0)) {
+      // Retain active doses
+      if (newCp > 0.002 || newCe > 0.002 || transitLagRemaining > 0 || (dose.isCRI && (dose.criRatePerKgMin || 0) > 0)) {
         const updatedDose: ActiveDrugDose = {
           ...dose,
           deliveryElapsedSec: deliveryElapsed,
@@ -216,70 +193,7 @@ export class PKPDEngine {
     }
 
     // ----------------------------------------------------
-    // 2. COMPETITIVE ANTAGONIST / REVERSAL KINETICS
-    // ----------------------------------------------------
-    // Atipamezole reversing Alpha-2 (Dexmedetomidine, Xylazine, Detomidine)
-    const atipamezoleCe = activeDrugEffects['atipamezole']?.Ce || 0;
-    if (atipamezoleCe > 0.03) {
-      ['dexmedetomidine', 'xylazine', 'detomidine'].forEach((id) => {
-        if (activeDrugEffects[id]) {
-          activeDrugEffects[id].Ce = Math.max(0, activeDrugEffects[id].Ce - atipamezoleCe * 2.8);
-        }
-      });
-    }
-
-    // Naloxone reversing Opioids (Morphine, Methadone, Fentanyl, etc.)
-    const naloxoneCe = activeDrugEffects['naloxone']?.Ce || 0;
-    if (naloxoneCe > 0.03) {
-      ['morphine', 'methadone', 'fentanyl', 'butorphanol', 'buprenorphine', 'tramadol'].forEach((id) => {
-        if (activeDrugEffects[id]) {
-          activeDrugEffects[id].Ce = Math.max(0, activeDrugEffects[id].Ce - naloxoneCe * 3.0);
-        }
-      });
-    }
-
-    // Flumazenil reversing Benzodiazepines (Midazolam, Diazepam)
-    const flumazenilCe = activeDrugEffects['flumazenil']?.Ce || 0;
-    if (flumazenilCe > 0.03) {
-      ['midazolam', 'diazepam'].forEach((id) => {
-        if (activeDrugEffects[id]) {
-          activeDrugEffects[id].Ce = Math.max(0, activeDrugEffects[id].Ce - flumazenilCe * 2.8);
-        }
-      });
-    }
-
-    // Neostigmine reversing Atracurium NMBA
-    const neostigmineCe = activeDrugEffects['neostigmine']?.Ce || 0;
-    if (neostigmineCe > 0.03 && activeDrugEffects['atracurium']) {
-      activeDrugEffects['atracurium'].Ce = Math.max(0, activeDrugEffects['atracurium'].Ce - neostigmineCe * 2.5);
-    }
-
-    // Sugammadex reversing NMBA
-    const sugammadexCe = activeDrugEffects['sugammadex']?.Ce || 0;
-    if (sugammadexCe > 0.03 && activeDrugEffects['atracurium']) {
-      activeDrugEffects['atracurium'].Ce = Math.max(0, activeDrugEffects['atracurium'].Ce - sugammadexCe * 3.5);
-    }
-
-    // Lipid Emulsion 20% (Intralipid "Lipid Sink") reversing Local Anesthetic Toxicity
-    const lipidCe = activeDrugEffects['lipid_emulsion_20']?.Ce || 0;
-    if (lipidCe > 0.03) {
-      ['lidocaine_2pct', 'bupivacaine_05'].forEach((id) => {
-        if (activeDrugEffects[id]) {
-          activeDrugEffects[id].Ce = Math.max(0, activeDrugEffects[id].Ce - lipidCe * 2.8);
-          activeDrugEffects[id].Cp = Math.max(0, activeDrugEffects[id].Cp - lipidCe * 2.8);
-        }
-      });
-    }
-
-    // Synchronize post-reversal Ce back into updatedDoses array
-    updatedDoses.forEach((d) => {
-      if (activeDrugEffects[d.drugId]) {
-        d.currentCe = activeDrugEffects[d.drugId].Ce;
-      }
-    });
-
-    // ----------------------------------------------------
-    // 3. INHALATION ANESTHETIC PHARMACOKINETICS & CIRCUIT
+    // 2. INHALATION PHARMACOKINETICS
     // ----------------------------------------------------
     let deliveredVaporizerPct = 0;
     if (equipment.isVaporizerOn && equipment.oxygenFlowLMin > 0.1 && equipment.intubationStatus === 'intubated_tracheal') {
@@ -289,409 +203,150 @@ export class PKPDEngine {
     const macSpecies = equipment.vaporizerType === 'isoflurane' ? speciesInfo.macValues.isoflurane : speciesInfo.macValues.sevoflurane;
     const inhalantCe = deliveredVaporizerPct / macSpecies; // 1.0 = 1 MAC
 
-    // Inhalation acute overdose
-    if (deliveredVaporizerPct >= 4.0 && equipment.oxygenFlowLMin > 0.3 && inhalantCe >= 2.8) {
+    if (deliveredVaporizerPct >= 4.5 && equipment.oxygenFlowLMin > 0.3 && inhalantCe >= 2.8) {
       fatalOverdoseTriggered = true;
       fatalToxicityReason = `Sobredosagem Letal por Anestésico Inalatório (${equipment.vaporizerType.toUpperCase()} a ${deliveredVaporizerPct}% = ${(inhalantCe).toFixed(1)} MAC com colapso miocárdico e vasomotor)`;
     }
 
-    let sodaLimeExhaustionPct = equipment.sodaLimeExhaustionPct;
-    if (equipment.circuitType.includes('circle') && equipment.oxygenFlowLMin > 0.1) {
-      sodaLimeExhaustionPct = Math.min(100, sodaLimeExhaustionPct + (dtSeconds / 3600) * 8.0);
-    }
-
     // ----------------------------------------------------
-    // 4. CHEMICAL RECEPTOR OCCUPANCY & SYNERGY MODEL
+    // 3. CELLULAR RECEPTOR & TRANSDUCTION ENGINE
     // ----------------------------------------------------
-    const activeInteractions: VitalSigns['activeDrugInteractions'] = [];
-
-    // Extract receptor agonist effect-site concentrations (Ce)
-    const alpha2Ce = Math.max(activeDrugEffects['dexmedetomidine']?.Ce || 0, activeDrugEffects['xylazine']?.Ce || 0, activeDrugEffects['detomidine']?.Ce || 0);
-    const opioidCe = Math.max(activeDrugEffects['fentanyl']?.Ce || 0, activeDrugEffects['methadone']?.Ce || 0, activeDrugEffects['morphine']?.Ce || 0, activeDrugEffects['butorphanol']?.Ce || 0, activeDrugEffects['buprenorphine']?.Ce || 0);
-    const benzoCe = Math.max(activeDrugEffects['midazolam']?.Ce || 0, activeDrugEffects['diazepam']?.Ce || 0);
-    const hypnoticDirectCe = (activeDrugEffects['propofol']?.Ce || 0) + (activeDrugEffects['alfaxalone']?.Ce || 0) + (activeDrugEffects['etomidate']?.Ce || 0) + (activeDrugEffects['thiopental']?.Ce || 0);
-    const dissociativeCe = activeDrugEffects['ketamine']?.Ce || 0;
-    const anticholinergicCe = Math.max(activeDrugEffects['atropine']?.Ce || 0, activeDrugEffects['glycopyrrolate']?.Ce || 0);
-    const inotropeCe = Math.max(activeDrugEffects['epinephrine']?.Ce || 0, activeDrugEffects['norepinephrine']?.Ce || 0, activeDrugEffects['dobutamine']?.Ce || 0, activeDrugEffects['dopamine']?.Ce || 0, activeDrugEffects['ephedrine']?.Ce || 0);
-    const nmbaCe = activeDrugEffects['atracurium']?.Ce || 0;
-    const acepromazineCe = activeDrugEffects['acepromazine']?.Ce || 0;
-    const localCe = activeDrugEffects['lidocaine_2pct']?.Ce || 0 + (activeDrugEffects['bupivacaine_05pct']?.Ce || 0);
-
-    let fatalAlpha2AtropineTrigger = false;
-    let fatalSympathomimeticStormTrigger = false;
-
-    // INTERACTION 1: Alpha-2 Agonist + Anticholinergic (Dexmedetomidine/Xylazine + Atropine)
-    if (alpha2Ce > 0.25 && anticholinergicCe > 0.25) {
-      activeInteractions.push({
-        title: 'Alfa-2 Agonista + Anticolinérgico (Dexmedetomidina + Atropina)',
-        severity: 'lethal',
-        description: 'Taquicardia forçada contra vasoconstrição periférica severa (Pós-carga extrema). Risco imediato de crise hipertensiva, isquemia miocárdica transmural aguda e Fibrilação Ventricular.',
-        pharmacologyMechanism: 'Bloqueio parassimpático vagal forçando cronotropismo positivo contra resistência vascular sistêmica aumentada por estimulação alfa-2 pós-sináptica periférica.',
-      });
-
-      ischemiaScore = Math.min(1.0, ischemiaScore + (dtSeconds / 15) * 0.85);
-      if (ischemiaScore > 0.55 && !isAlreadyArrested) {
-        fatalAlpha2AtropineTrigger = true;
-      }
-    }
-
-    // INTERACTION 2: Opioid + Hypnotic + Benzodiazepine (Neuroleptanalgesia & Induction Synergy)
-    if (opioidCe > 0.25 && benzoCe > 0.25 && (hypnoticDirectCe > 0.25 || inhalantCe > 0.5)) {
-      activeInteractions.push({
-        title: 'Sinergismo de Neuroleptoanalgesia e Indução GABA-érgica',
-        severity: 'info',
-        description: 'Potencialização alostérica no receptor GABA-A com poupança de até 70% na dose de propofol/isoflurano e relaxamento mandibular perfeito.',
-        pharmacologyMechanism: 'Modulação alostérica positiva no complexo GABA-A por benzodiazepínicos potencializando a abertura de canais de Cloro pelo propofol, somada à inibição nociceptiva bulbar pelos receptores mu-opioides.',
-      });
-    }
-
-    // INTERACTION 3: Sympathomimetic Storm (Excessive Epinephrine)
-    if (inotropeCe > 0.85 && !isAlreadyArrested) {
-      activeInteractions.push({
-        title: 'Tempestade Adrenérgica e Taquiarritmia Maligna',
-        severity: 'lethal',
-        description: 'Hiperestimulação beta-1/alfa-1 provocando taquicardia extrema (>240 bpm), encurtamento crítico da diástole com isquemia coronariana e FV/TV sem pulso.',
-        pharmacologyMechanism: 'Sobrecarga intracelular de cálcio por fosforilação de fosfolambano via AMPc, precipitando pós-despolarizações precoces e tardias (EAD/DAD).',
-      });
-
-      ischemiaScore = Math.min(1.0, ischemiaScore + (dtSeconds / 12) * 0.9);
-      if (ischemiaScore > 0.50) {
-        fatalSympathomimeticStormTrigger = true;
-      }
-    }
-
-    // INTERACTION 4: NMBA without Mechanical Ventilation
-    if (nmbaCe > 0.20 && !equipment.isVentilatorActive && equipment.intubationStatus !== 'intubated_tracheal') {
-      activeInteractions.push({
-        title: 'Bloqueio Neuromuscular sem Suporte Ventilatório',
-        severity: 'lethal',
-        description: 'Paralisia diafragmática completa por bloqueio nicotínico sem via aérea pérvia ou ventilação mecânica. Asfixia rápida com anóxia progressiva.',
-        pharmacologyMechanism: 'Antagonismo competitivo dos receptores colinérgicos nicotínicos na placa motora terminal (diafragma e músculos intercostais).',
-      });
-    }
-
-    // ----------------------------------------------------
-    // 5. DOSE-RESPONSE PHARMACODYNAMICS (HILL EQUATIONS & GUEDEL DEPTH)
-    // ----------------------------------------------------
-    // Calculate synergistic neuroleptanalgesia & MAC reduction
-    const macReductionFactor = Math.min(
-      0.75,
-      0.35 * benzoCe + 0.45 * opioidCe + 0.60 * alpha2Ce + 0.30 * acepromazineCe + 0.35 * dissociativeCe
+    const receptors: ReceptorStateSnapshot = CellularReceptorsEngine.computeReceptorState(
+      patient,
+      updatedDoses,
+      inhalantCe,
+      equipment.vaporizerType
     );
-    const effectiveMacNeeded = Math.max(0.25, 1.0 - macReductionFactor);
-    const normalizedInhalantDrive = (inhalantCe / effectiveMacNeeded) * 1.1;
 
-    // Allosteric multi-drug synergy multiplier for GABA-A activation:
-    const gabaAllostericSynergy = 1.0 + 1.8 * benzoCe + 1.4 * opioidCe + 2.8 * (benzoCe * opioidCe) + 2.0 * alpha2Ce;
-
-    // Total Effective Hypnotic Drive at brain effect-site:
-    const effectiveHypnoticDrive =
-      (hypnoticDirectCe + 0.85 * dissociativeCe + 0.95 * normalizedInhalantDrive) * gabaAllostericSynergy +
-      0.35 * benzoCe +
-      0.30 * opioidCe +
-      0.55 * alpha2Ce +
-      0.25 * acepromazineCe;
-
-    // Sigmoidal Hill Equation for Anesthetic Depth (0 - 100):
-    // EC50 = 1.0, gamma = 2.4
-    const hillGamma = 2.4;
-    const hillNumerator = Math.pow(Math.max(0, effectiveHypnoticDrive), hillGamma);
-    const hillDenominator = Math.pow(1.0, hillGamma) + hillNumerator;
-    let rawDepthScore = 100 * (hillNumerator / hillDenominator);
-
-    // Apply species tolerance tuning
-    if (patient.species === 'feline' && dissociativeCe > 0.3 && benzoCe === 0) {
-      // Feline without benzo may exhibit cataleptic rigidity and higher sympathetic arousal
-      rawDepthScore = Math.max(20, rawDepthScore * 0.85);
+    // Synchronize post-reversal concentrations back into doses
+    if (receptors.reversalCe.atipamezole > 0.05) {
+      ['dexmedetomidine', 'xylazine', 'detomidine'].forEach((id) => {
+        const d = updatedDoses.find((dose) => dose.drugId === id);
+        if (d) d.currentCe = Math.max(0, d.currentCe - receptors.reversalCe.atipamezole * 2.8);
+      });
     }
-
-    let anestheticDepthScore = Math.min(100, Math.max(0, rawDepthScore));
-
-    // Antinociceptive (Analgesia) Score (0 - 100):
-    const rawAnalgesicDrive = 1.8 * opioidCe + 1.2 * alpha2Ce + 0.9 * dissociativeCe + 0.7 * localCe;
-    const surgicalAnalgesiaPct = Math.min(100, Math.round(100 * (Math.pow(rawAnalgesicDrive, 2) / (Math.pow(0.9, 2) + Math.pow(rawAnalgesicDrive, 2)))));
-
-    // Muscle Relaxation Score (0 - 100):
-    const rawRelaxDrive = 1.2 * benzoCe + 0.9 * alpha2Ce + 1.0 * hypnoticDirectCe + 1.1 * normalizedInhalantDrive + 2.8 * nmbaCe + 0.4 * acepromazineCe - 0.4 * dissociativeCe;
-    const muscleRelaxationPct = Math.min(100, Math.max(0, Math.round(100 * (Math.pow(Math.max(0, rawRelaxDrive), 2) / (Math.pow(1.0, 2) + Math.pow(Math.max(0, rawRelaxDrive), 2))))));
-
-    // ----------------------------------------------------
-    // 6. CARDIOVASCULAR & HEMODYNAMIC DYNAMICS
-    // ----------------------------------------------------
-    let deltaHRScore = 0;
-    let deltaBPScore = 0;
-    let deltaRRScore = 0;
-    let antiarrhythmicFactor = 0;
-    let acuteBolusHypotension = 0;
-    let acuteAlpha2Hypertension = 0;
-    let acuteAlpha2Bradycardia = 0;
-    let acuteApneaRisk = 0;
-
-    for (const key of Object.keys(activeDrugEffects)) {
-      const { drugDef, Ce, bolusShockMagnitude } = activeDrugEffects[key];
-      deltaHRScore += drugDef.effectHR * Ce;
-      deltaBPScore += drugDef.effectBP * Ce;
-      deltaRRScore += drugDef.effectRR * Ce;
-
-      if (drugDef.specialTraits?.causesArrhythmogenicityReduction) {
-        antiarrhythmicFactor += Ce;
-      }
-
-      if (bolusShockMagnitude > 0 && drugDef.fastBolusRisk) {
-        acuteApneaRisk = Math.max(acuteApneaRisk, drugDef.fastBolusRisk.apneaRisk * bolusShockMagnitude);
-        if (drugDef.fastBolusRisk.hypotensionSeverity > 0) {
-          acuteBolusHypotension += drugDef.fastBolusRisk.hypotensionSeverity * bolusShockMagnitude * 35;
-        }
-        if (drugDef.specialTraits?.causesInitialHypertensionReflexBradycardia) {
-          acuteAlpha2Hypertension += 45 * bolusShockMagnitude;
-          acuteAlpha2Bradycardia += 0.60 * bolusShockMagnitude;
-        }
-      }
+    if (receptors.reversalCe.naloxone > 0.05) {
+      ['morphine', 'methadone', 'fentanyl', 'butorphanol', 'buprenorphine'].forEach((id) => {
+        const d = updatedDoses.find((dose) => dose.drugId === id);
+        if (d) d.currentCe = Math.max(0, d.currentCe - receptors.reversalCe.naloxone * 3.0);
+      });
     }
-
-    if (alpha2Ce > 0.2 && anticholinergicCe > 0.2) {
-      acuteAlpha2Hypertension += 75 * Math.min(1.5, alpha2Ce * anticholinergicCe);
-      deltaHRScore += 1.4 * anticholinergicCe;
-      acuteAlpha2Bradycardia = 0;
-    }
-
-    let baselineHR = patient.baselineVitals.hr;
-    let baselineMAP = patient.baselineVitals.map;
-
-    let targetHR = baselineHR * (1 + deltaHRScore * 0.85);
-    let targetMAP = baselineMAP * (1 + deltaBPScore * 0.80);
-
-    targetMAP -= acuteBolusHypotension;
-    targetMAP += acuteAlpha2Hypertension;
-    targetHR *= (1 - acuteAlpha2Bradycardia);
-
-    // Inhalation cardiovascular depression
-    if (inhalantCe > 1.1) {
-      targetMAP -= (inhalantCe - 1.1) * 24;
-      targetHR -= (inhalantCe - 1.1) * 12;
-    }
-
-    // Surgical stimulation response (tachycardia & hypertension if depth or analgesia is insufficient)
-    if (isSurgicalStimulationActive) {
-      if (anestheticDepthScore < 45 || surgicalAnalgesiaPct < 35) {
-        targetHR += 38;
-        targetMAP += 30;
-      } else if (anestheticDepthScore < 65 || surgicalAnalgesiaPct < 60) {
-        targetHR += 14;
-        targetMAP += 10;
-      }
-    }
-
-    // Pathology shock
-    if (patient.pathologyConditions.hypovolemiaSeverity) {
-      const severity = patient.pathologyConditions.hypovolemiaSeverity;
-      targetMAP *= (1 - severity * 0.50);
-      targetHR *= (1 + severity * 0.45);
-    }
-
-    // Fluids
-    if (equipment.isFluidPumpRunning && equipment.fluidRateMlPerHour > 0) {
-      const infusedVolumeMl = (equipment.fluidRateMlPerHour / 3600) * dtSeconds;
-      const volumeRatio = infusedVolumeMl / (patient.weightKg * 10);
-      targetMAP += volumeRatio * 18;
+    if (receptors.reversalCe.flumazenil > 0.05) {
+      ['midazolam', 'diazepam'].forEach((id) => {
+        const d = updatedDoses.find((dose) => dose.drugId === id);
+        if (d) d.currentCe = Math.max(0, d.currentCe - receptors.reversalCe.flumazenil * 2.8);
+      });
     }
 
     // ----------------------------------------------------
-    // 7. RESPIRATORY PHYSIOLOGY, APNEA & OXYGENATION
+    // 4. SPECIES PHYSIOLOGICAL & CELLULAR PARTICULARITIES
     // ----------------------------------------------------
-    const isIntubated = equipment.intubationStatus === 'intubated_tracheal';
-    const isEsophageal = equipment.intubationStatus === 'intubated_esophageal';
-    const isUnintubated = equipment.intubationStatus === 'unintubated' || equipment.intubationStatus === 'extubated';
-    const isFullyParalyzed = nmbaCe > 0.20;
+    const prevMAP = previousVitals?.meanArterialPressure ?? patient.baselineVitals.map;
+    const prevHR = previousVitals?.heartRate ?? patient.baselineVitals.hr;
+    const isRecumbent = true; // patient on surgical table
+    const isAtropineActive = (activeDrugEffects['atropine']?.Ce || 0) > 0.05;
 
-    let baselineRR = patient.baselineVitals.rr;
-    let spontaneousRR = baselineRR * (1 + deltaRRScore * 0.80);
+    const speciesEval = SpeciesPhysiologyEngine.evaluateParticularities(
+      patient,
+      simTimeSeconds,
+      prevMAP,
+      receptors.alpha2Drive,
+      receptors.muOpioidDrive,
+      receptors.naVBlockade,
+      receptors.volatileSiteOccupancy,
+      isRecumbent,
+      isAtropineActive
+    );
 
-    // Apnea Thresholds (Respiratory Arrest)
-    let isRespiratoryArrest = false;
-    let apneaCause = '';
+    // ----------------------------------------------------
+    // 5. HEMODYNAMIC CIRCUIT & CLOSED-LOOP BAROREFLEX
+    // ----------------------------------------------------
+    const hemodynamics = HemodynamicCircuitEngine.stepHemodynamics(
+      dtSeconds,
+      simTimeSeconds,
+      patient,
+      receptors,
+      equipment,
+      resuscitation,
+      isSurgicalStimulationActive,
+      prevMAP,
+      prevHR,
+      ischemiaScore,
+      speciesEval.ruminalBloatSeverity
+    );
 
-    if (isFullyParalyzed) {
-      spontaneousRR = 0;
-      isRespiratoryArrest = true;
-      apneaCause = 'Parada Respiratória por Bloqueio Neuromuscular (Atracúrio sem ventilação mecânica)';
-    } else if (anestheticDepthScore > 88) {
-      spontaneousRR = 0;
-      isRespiratoryArrest = true;
-      apneaCause = 'Parada Respiratória por Depressão Bulbar Profunda (Plano anestésico excessivo / Estágio IV)';
-    } else if (acuteApneaRisk > 0.70) {
-      spontaneousRR = 0;
-      isRespiratoryArrest = true;
-      apneaCause = 'Apneia Aguda por Bólus IV Rápido de Hipnótico/Opioide';
-    } else if (opioidCe > 0.75 && hypnoticDirectCe > 0.70) {
-      spontaneousRR = 0;
-      isRespiratoryArrest = true;
-      apneaCause = 'Parada Respiratória por Sinergismo Depressor Opioide + Hipnótico';
-    } else if (anestheticDepthScore > 68) {
-      spontaneousRR *= 0.50; // Moderate Bradypnea in Stage III Plane 2
-    } else if (anestheticDepthScore > 48) {
-      spontaneousRR *= 0.75; // Mild Bradypnea in Stage III Plane 1
+    ischemiaScore = hemodynamics.myocardialIschemiaScore;
+    if (speciesEval.myopathyIschemiaRiskScore > 0.4) {
+      ischemiaScore = Math.min(1.0, ischemiaScore + speciesEval.myopathyIschemiaRiskScore * 0.15 * dtMin);
     }
 
-    if (isSurgicalStimulationActive && anestheticDepthScore < 50 && !isFullyParalyzed && spontaneousRR > 0) {
-      spontaneousRR *= 1.40;
-    }
+    // ----------------------------------------------------
+    // 6. RESPIRATORY GAS EXCHANGE & ACID-BASE ENGINE
+    // ----------------------------------------------------
+    const respiration = RespiratoryGasExchangeEngine.stepRespiration(
+      dtSeconds,
+      simTimeSeconds,
+      patient,
+      receptors,
+      equipment,
+      isSurgicalStimulationActive,
+      previousVitals?.pulseOximetrySpO2 ?? patient.baselineVitals.spo2,
+      previousVitals?.arterialBloodGases.paO2 ?? 98,
+      hypoxiaSeconds,
+      previousVitals?.arterialBloodGases.lactate ?? patient.baselineVitals.lactateMmolL,
+      speciesEval.shuntFractionPct,
+      speciesEval.ruminalBloatSeverity
+    );
 
-    spontaneousRR = Math.max(0, Math.round(spontaneousRR));
+    hypoxiaSeconds = respiration.hypoxiaSecondsAccumulated;
 
-    let finalRR = spontaneousRR;
-    let tidalVolumeMl = patient.weightKg * 12;
-    let currentPaw = 0;
-
-    if (equipment.isVentilatorActive && equipment.ventilatorMode !== 'spontaneous') {
-      finalRR = equipment.ventilatorSettings.rateBpm;
-      tidalVolumeMl = equipment.ventilatorSettings.tidalVolumeMl;
-      currentPaw = equipment.ventilatorSettings.pipPressureLimitCmH2O;
-      isRespiratoryArrest = false;
-    } else {
-      currentPaw = spontaneousRR > 0 ? (equipment.aplValveState === 'closed' ? 24 : 2) : 0;
-    }
-
-    const minuteVolumeL = (finalRR * tidalVolumeMl) / 1000.0;
-
-    // Barotrauma
+    // Barotrauma Check
     let barotraumaCollapse = false;
     if (equipment.aplValveState === 'closed' && equipment.oxygenFlowLMin > 1.2 && equipment.reservoirBagVolumeMl > 2400) {
       barotraumaCollapse = true;
       fatalOverdoseTriggered = true;
-      fatalToxicityReason = 'Pneumotórax Hipertensivo / Barotrauma Pulmonar (Válvula APL fechada com sobrepressão crítica)';
-    }
-
-    // Capnography Dynamics
-    let etco2 = patient.baselineVitals.etco2;
-    let fico2 = 0;
-    let capnogramType: CapnogramType = 'normal';
-
-    if (sodaLimeExhaustionPct > 60 && equipment.circuitType.includes('circle')) {
-      fico2 = Math.round(((sodaLimeExhaustionPct - 60) / 40) * 14);
-      etco2 += fico2;
-      capnogramType = 'rebreathing_elevated_baseline';
-    }
-
-    if (isEsophageal || (isUnintubated && finalRR === 0) || isAlreadyArrested) {
-      etco2 = isEsophageal || isAlreadyArrested ? 0 : etco2;
-      if (isEsophageal || isAlreadyArrested) capnogramType = 'cardiac_arrest_flat';
-    } else {
-      if (finalRR === 0) {
-        etco2 = 0;
-        capnogramType = 'cardiac_arrest_flat';
-      } else if (minuteVolumeL > patient.weightKg * 0.28) {
-        etco2 = Math.max(16, Math.round(38 - (minuteVolumeL - patient.weightKg * 0.28) * 4));
-        capnogramType = 'hyperventilation';
-      } else if (minuteVolumeL < patient.weightKg * 0.10) {
-        etco2 = Math.min(85, Math.round(38 + (patient.weightKg * 0.10 - minuteVolumeL) * 12));
-        capnogramType = 'hypoventilation';
-      }
-    }
-
-    // Oxygenation & Hypoxia Cascade
-    let paO2 = isIntubated && equipment.oxygenFlowLMin > 0.3 ? 380 : 95;
-    let spo2 = previousVitals?.pulseOximetrySpO2 || patient.baselineVitals.spo2;
-    const isBreathingAdequately = (finalRR > 0 && tidalVolumeMl > 0) || (equipment.isVentilatorActive && equipment.oxygenFlowLMin > 0.2);
-
-    if (isEsophageal || !isBreathingAdequately || (isUnintubated && spontaneousRR === 0)) {
-      // Realistic desaturation rate (e.g. 0.4% per second in standard dog)
-      const desatSpeed = 0.40 * hypoxiaDesaturationMultiplier;
-      spo2 = Math.max(0, spo2 - dtSeconds * desatSpeed);
-      paO2 = Math.max(10, paO2 - dtSeconds * 3.5 * hypoxiaDesaturationMultiplier);
-    } else if (spo2 < 98) {
-      spo2 = Math.min(100, spo2 + dtSeconds * 2.8);
-      paO2 = Math.min(380, paO2 + dtSeconds * 16.0);
-    }
-
-    if (patient.pathologyConditions.brachycephalicObstruction && isUnintubated && anestheticDepthScore > 18) {
-      spo2 = Math.max(60, spo2 - dtSeconds * 0.35);
-      capnogramType = 'obstructive_shark_fin';
-    }
-
-    // Hypoxia accumulation
-    if (spo2 < 82 || paO2 < 55) {
-      hypoxiaSeconds += dtSeconds;
-    } else {
-      hypoxiaSeconds = Math.max(0, hypoxiaSeconds - dtSeconds * 0.6);
+      fatalToxicityReason = 'Pneumotórax Hipertensivo / Barotrauma Pulmonar (Válvula APL fechada com sobrepressão sustentada)';
     }
 
     // ----------------------------------------------------
-    // 8. CARDIAC ARREST THRESHOLDS & LETHAL ARREST PROGRESSION
+    // 7. DYNAMIC EMERGENT INTERACTIONS
     // ----------------------------------------------------
-    const isCoronaryHypoperfused = targetMAP < (isGeriatric ? 55 : 40);
-    const isExtremeTachycardic = targetHR > (speciesInfo.normalVitals.hrMax * 1.55);
-    const isSevereHypertensive = targetMAP > 190;
+    const isVentilatorActive = equipment.isVentilatorActive && equipment.ventilatorMode !== 'spontaneous';
+    const isIntubated = equipment.intubationStatus === 'intubated_tracheal';
+    const activeDrugInteractions = DynamicInteractionsEngine.evaluateDynamicInteractions(
+      patient,
+      receptors,
+      isVentilatorActive,
+      isIntubated
+    );
 
-    if (hypoxiaSeconds > 25 || isCoronaryHypoperfused || isExtremeTachycardic || isSevereHypertensive) {
-      const ischemRate = (isExtremeTachycardic && isSevereHypertensive ? 0.9 : 0.45) / cardiovascularReserveFactor;
-      ischemiaScore = Math.min(1.0, ischemiaScore + (dtSeconds / 60) * ischemRate);
-    } else {
-      ischemiaScore = Math.max(0, ischemiaScore - (dtSeconds / 60) * 0.20);
-    }
-
+    // ----------------------------------------------------
+    // 8. CARDIAC ARREST & BIOLOGICAL DEATH STATE MACHINE
+    // ----------------------------------------------------
     let triggeredArrestNow = false;
 
-    // A. Extreme Tachycardia / Sympathomimetic Collapse
-    const fatalHRThreshold = patient.species === 'canine' ? 245 : patient.species === 'feline' ? 280 : patient.species === 'equine' ? 115 : 160;
-    if (targetHR >= fatalHRThreshold && simTimeSeconds > 15 && !isAlreadyArrested) {
-      if (ischemiaScore > 0.40 || (previousVitals?.heartRate && previousVitals.heartRate > fatalHRThreshold)) {
-        triggeredArrestNow = true;
-        arrestType = 'ventricular_fibrillation';
-        arrestCause = `Parada Cardíaca por Taquiarritmia e Fibrilação Ventricular (FC crítica de ${Math.round(targetHR)} bpm com isquemia coronariana transmural e colapso de enchimento diastólico)`;
-      }
-    }
-
-    // B. Alpha-2 + Atropine Induced Lethal Crisis
-    if (fatalAlpha2AtropineTrigger && !isAlreadyArrested) {
+    if (hemodynamics.isArrestTriggered && !isAlreadyArrested) {
       triggeredArrestNow = true;
-      arrestType = 'ventricular_fibrillation';
-      arrestCause = 'Parada Cardiorrespiratória por Fibrilação Ventricular decorrente de Crise Hipertensiva e Isquemia Miocárdica Aguda (Interação Letal: Alfa-2 + Atropina)';
+      arrestType = hemodynamics.arrestType || 'ventricular_fibrillation';
+      arrestCause = hemodynamics.arrestCause;
     }
 
-    // C. Sympathomimetic Overdose Storm
-    if (fatalSympathomimeticStormTrigger && !isAlreadyArrested) {
-      triggeredArrestNow = true;
-      arrestType = 'pulseless_ventricular_tachycardia';
-      arrestCause = 'Parada Cardíaca por Taquicardia Ventricular Sem Pulso / Fibrilação Ventricular pós-Hiperestimulação Adrenérgica Maciça';
-    }
-
-    // D. Critical Asphyxia / Prolonged Hypoxia (SpO2 < 50% or Hypoxia > 90s)
-    if ((hypoxiaSeconds > (isPediatric ? 50 : 95) || (spo2 < 20 && simTimeSeconds > 25)) && !isAlreadyArrested) {
-      triggeredArrestNow = true;
-      arrestType = 'asystole';
-      arrestCause = `Parada Cardiorrespiratória por Anóxia Miocárdica e Asfixia Aguda (${Math.round(hypoxiaSeconds)}s em hipóxia crítica)`;
-    }
-
-    // E. Extreme Critical Bradycardia
-    const fatalBradyThreshold = patient.species === 'canine' ? (isPediatric ? 55 : 28) : patient.species === 'feline' ? 55 : patient.species === 'equine' ? 14 : 20;
-    if (targetHR <= fatalBradyThreshold && simTimeSeconds > 15 && !isAlreadyArrested) {
-      triggeredArrestNow = true;
-      arrestType = 'asystole';
-      arrestCause = `Parada Cardíaca em Assistolia por Bradicardia Extrema e Choque Cardiogênico Terminal (FC ${Math.round(targetHR)} bpm)`;
-    }
-
-    // F. Direct Toxic Overdose / Fatal Overdose
     if (fatalOverdoseTriggered && !isAlreadyArrested) {
       triggeredArrestNow = true;
-      arrestType = drugDefIdArrestType(fatalToxicityReason);
+      arrestType = fatalToxicityReason.includes('Fibrilação') ? 'ventricular_fibrillation' : 'asystole';
       arrestCause = fatalToxicityReason;
     }
 
-    // G. Terminal Hypotension (MAP < 22 mmHg sustained)
-    if (targetMAP < 22 && simTimeSeconds > 30 && !isAlreadyArrested) {
+    if (hypoxiaSeconds > (isPediatric ? 45 : 90) && !isAlreadyArrested) {
       triggeredArrestNow = true;
-      arrestType = 'pea';
-      arrestCause = 'Parada Cardíaca por Dissociação Eletromecânica (AESP) decorrente de Choque Hipovolêmico / Vasodilatador Irreversível (PAM < 22 mmHg)';
+      arrestType = 'asystole';
+      arrestCause = `Parada Cardiorrespiratória por Anóxia Miocárdica Aguda (${Math.round(hypoxiaSeconds)}s em hipóxia crítica)`;
     }
 
     if (triggeredArrestNow) {
       isAlreadyArrested = true;
     }
 
-    // ----------------------------------------------------
-    // 9. BIOLOGICAL DEATH DETERMINATION (IRREVERSIBLE ARREST)
-    // ----------------------------------------------------
     if (isAlreadyArrested) {
       if (resuscitation.isCPRActive) {
         cprSeconds += dtSeconds;
@@ -699,96 +354,22 @@ export class PKPDEngine {
         asystoleSeconds += dtSeconds;
       }
 
-      const deathThresholdSec = isPediatric ? 100 : 160;
+      const deathThresholdSec = isPediatric ? 95 : 155;
       if ((asystoleSeconds > deathThresholdSec || (cprSeconds > 360 && asystoleSeconds > 60)) && !isAlreadyDead) {
         isAlreadyDead = true;
         deathTime = simTimeSeconds;
-        deathCause = arrestCause || 'Morte Encefálica e Circulatória Irreversível decorrente de Parada Cardiorrespiratória Refratária';
+        deathCause = arrestCause || 'Morte Biológica Irreversível por Parada Cardiorrespiratória Refratária';
       }
     }
 
     // ----------------------------------------------------
-    // 10. RHYTHM & HEMODYNAMIC ASSIGNMENT
+    // 9. GUEDEL STAGE & CLINICAL REFLEX ENGINE
     // ----------------------------------------------------
-    let rhythm: CardiacRhythm = 'sinus';
-    let pulseQuality: 'Forte e Cheio' | 'Normal' | 'Fraco / Filiforme' | 'Célere / Saltão' | 'Ausente' = 'Normal';
+    // Pure continuous mapping from GABA-A chloride conductance (gCl-) and nociception
+    const gCl = receptors.gabaAChlorideConductance;
+    let anestheticDepthScore = Math.min(100, Math.round((gCl / 3.0) * 85));
+    if (gCl >= 3.0) anestheticDepthScore = Math.min(100, 85 + Math.round(((gCl - 3.0) / 1.5) * 15));
 
-    if (isAlreadyDead) {
-      rhythm = 'asystole';
-      targetHR = 0;
-      targetMAP = 0;
-      spo2 = 0;
-      etco2 = 0;
-      finalRR = 0;
-      capnogramType = 'cardiac_arrest_flat';
-      pulseQuality = 'Ausente';
-    } else if (isAlreadyArrested) {
-      if (resuscitation.isCPRActive) {
-        rhythm = 'pulseless_electrical_activity';
-        targetHR = resuscitation.compressionsPerMin || 110;
-        targetMAP = 35 * (resuscitation.compressionDepthQuality || 0.8);
-        pulseQuality = 'Fraco / Filiforme';
-        etco2 = Math.round(16 * (resuscitation.compressionDepthQuality || 0.8));
-        capnogramType = 'normal';
-      } else {
-        rhythm = arrestType === 'ventricular_fibrillation'
-          ? 'ventricular_fibrillation'
-          : arrestType === 'pulseless_ventricular_tachycardia'
-          ? 'ventricular_tachycardia'
-          : 'asystole';
-        targetHR = 0;
-        targetMAP = 0;
-        spo2 = 0;
-        etco2 = 0;
-        finalRR = 0;
-        capnogramType = 'cardiac_arrest_flat';
-        pulseQuality = 'Ausente';
-      }
-    } else {
-      if (ischemiaScore > 0.70 || (patient.pathologyConditions.hyperkalemiaSeverity && patient.pathologyConditions.hyperkalemiaSeverity > 0.85)) {
-        rhythm = 'ventricular_tachycardia';
-        targetHR = Math.max(210, targetHR);
-      } else if (ischemiaScore > 0.35 || patient.pathologyConditions.gastricDilatationVolvulus) {
-        rhythm = 'ventricular_premature_complexes';
-      } else if (acuteAlpha2Bradycardia > 0.25 || (alpha2Ce > 0.6 && antiarrhythmicFactor < 0.2 && anticholinergicCe < 0.1)) {
-        rhythm = 'av_block_2nd_degree';
-        targetHR = Math.min(speciesInfo.normalVitals.hrMin * 0.6, targetHR);
-      } else if (targetHR < speciesInfo.normalVitals.hrMin * 0.8) {
-        rhythm = 'sinus_bradycardia';
-      } else if (targetHR > speciesInfo.normalVitals.hrMax * 1.25) {
-        rhythm = 'sinus_tachycardia';
-      } else {
-        rhythm = 'sinus';
-      }
-
-      if (targetMAP < 50) {
-        pulseQuality = 'Fraco / Filiforme';
-      } else if (targetMAP > 120) {
-        pulseQuality = 'Célere / Saltão';
-      } else {
-        pulseQuality = 'Normal';
-      }
-    }
-
-    const finalHR = isAlreadyArrested && !resuscitation.isCPRActive ? 0 : Math.max(0, Math.min(360, Math.round(targetHR)));
-    const finalMAP = isAlreadyArrested && !resuscitation.isCPRActive ? 0 : Math.max(0, Math.min(240, Math.round(targetMAP)));
-    const pulsePressure = Math.round(finalMAP * 0.45);
-    const finalSysBP = isAlreadyArrested && !resuscitation.isCPRActive ? 0 : finalMAP + Math.round(pulsePressure * 0.6);
-    const finalDiaBP = isAlreadyArrested && !resuscitation.isCPRActive ? 0 : Math.max(0, finalMAP - Math.round(pulsePressure * 0.4));
-
-    // ----------------------------------------------------
-    // 11. BODY TEMPERATURE DYNAMICS
-    // ----------------------------------------------------
-    let tempC = previousVitals?.bodyTemperatureC || patient.baselineVitals.tempC;
-    const thermalLossRate = patient.weightKg < 2.0 ? 0.0011 : patient.weightKg < 8.0 ? 0.0005 : 0.0002;
-    tempC -= thermalLossRate * dtSeconds;
-    if (equipment.warmingBlanketActive) {
-      tempC = Math.min(38.8, tempC + 0.0007 * dtSeconds);
-    }
-
-    // ----------------------------------------------------
-    // 12. CLINICAL GUEDEL STAGE & PHYSICAL REFLEX ENGINE
-    // ----------------------------------------------------
     let guedelStage: VitalSigns['guedelStage'] = 'Estágio I (Voluntário)';
     let eyePosition: EyePosition = 'central_light';
     let palpebralReflex: ReflexStrength = 'brisk';
@@ -797,6 +378,8 @@ export class PKPDEngine {
     let pedalReflex: ReflexStrength = 'brisk';
     let surgicalTolerancePct = 0;
 
+    const analgesiaPct = Math.round(receptors.nociceptiveInhibition * 100);
+
     if (isAlreadyDead || isAlreadyArrested) {
       guedelStage = 'Estágio IV (Depressão Bulbar / Parada)';
       eyePosition = 'central_deep_dilated';
@@ -805,47 +388,45 @@ export class PKPDEngine {
       jawTone = 'flaccid';
       pedalReflex = 'absent';
       surgicalTolerancePct = 100;
-    } else if (anestheticDepthScore < 22) {
-      // Estágio I: Conscious or light tranquilization
+    } else if (gCl < 0.35) {
+      // Estágio I (Consciente / Sedação Leve)
       guedelStage = 'Estágio I (Voluntário)';
       eyePosition = 'central_light';
       palpebralReflex = 'brisk';
       cornealReflex = 'brisk';
-      jawTone = benzoCe > 0.4 ? 'moderate' : 'rigid';
+      jawTone = receptors.bzdAllostericOccupancy > 0.4 ? 'moderate' : 'rigid';
       pedalReflex = 'brisk';
-      surgicalTolerancePct = Math.min(25, surgicalAnalgesiaPct * 0.25);
-    } else if (anestheticDepthScore < 48) {
-      // Estágio I / II: Deep Neuroleptanalgesia / Sedation (Midazolam + Methadone / Dexmedetomidine)
+      surgicalTolerancePct = Math.min(25, analgesiaPct * 0.25);
+    } else if (gCl < 0.90) {
+      // Estágio II (Excitação / Delírio / Sedação Profunda)
       guedelStage = 'Estágio II (Excitação/Delírio)';
       eyePosition = 'central_light';
       palpebralReflex = 'moderate';
       cornealReflex = 'brisk';
-      jawTone = muscleRelaxationPct > 50 ? 'moderate' : 'rigid';
-      pedalReflex = surgicalAnalgesiaPct > 60 ? 'moderate' : 'brisk';
-      surgicalTolerancePct = Math.round(25 + surgicalAnalgesiaPct * 0.25);
-    } else if (anestheticDepthScore < 68) {
-      // Estágio III Plano 1 (Leve / Indução Recém-Instalada):
-      // Propofol bolus delivered, mandible relaxed, palpebral sluggish, ventromedial eye rotation!
+      jawTone = receptors.bzdAllostericOccupancy > 0.5 || receptors.alpha2Drive > 0.4 ? 'moderate' : 'rigid';
+      pedalReflex = analgesiaPct > 60 ? 'moderate' : 'brisk';
+      surgicalTolerancePct = Math.round(25 + analgesiaPct * 0.25);
+    } else if (gCl < 1.70) {
+      // Estágio III Plano 1 (Anestesia Leve / Indução Recém-Instalada):
+      // Relaxamento mandibular perfeito para intubação orotraqueal!
       guedelStage = 'Estágio III Plano 1 (Leve)';
       eyePosition = 'ventromedial_surgical';
       palpebralReflex = 'sluggish';
       cornealReflex = 'brisk';
-      jawTone = 'relaxed_surgical'; // Unlocked mandible for intubation!
-      pedalReflex = surgicalAnalgesiaPct > 70 ? 'absent' : 'sluggish';
-      surgicalTolerancePct = Math.round(65 + surgicalAnalgesiaPct * 0.20);
-    } else if (anestheticDepthScore < 85) {
-      // Estágio III Plano 2 (Cirúrgico Ideal):
-      // Full surgical anesthesia, absent palpebral, preserved corneal, ventromedial eye, relaxed jaw
+      jawTone = 'relaxed_surgical';
+      pedalReflex = analgesiaPct > 70 ? 'absent' : 'sluggish';
+      surgicalTolerancePct = Math.round(65 + analgesiaPct * 0.20);
+    } else if (gCl < 2.70) {
+      // Estágio III Plano 2 (Plano Cirúrgico Ideal):
       guedelStage = 'Estágio III Plano 2 (Cirúrgico)';
       eyePosition = 'ventromedial_surgical';
       palpebralReflex = 'absent';
       cornealReflex = 'moderate';
       jawTone = 'relaxed_surgical';
       pedalReflex = 'absent';
-      surgicalTolerancePct = Math.round(92 + (surgicalAnalgesiaPct / 100) * 8);
-    } else if (anestheticDepthScore < 95) {
-      // Estágio III Plano 3 (Profundo):
-      // Excessive depth, central dilated eye, flaccid tone, sluggish corneal
+      surgicalTolerancePct = Math.round(92 + (analgesiaPct / 100) * 8);
+    } else if (gCl < 3.50) {
+      // Estágio III Plano 3 (Anestesia Profunda):
       guedelStage = 'Estágio III Plano 3 (Profundo)';
       eyePosition = 'central_deep_dilated';
       palpebralReflex = 'absent';
@@ -854,7 +435,7 @@ export class PKPDEngine {
       pedalReflex = 'absent';
       surgicalTolerancePct = 100;
     } else {
-      // Estágio IV (Depressão Bulbar e Risco Terminal)
+      // Estágio IV (Depressão Bulbar)
       guedelStage = 'Estágio IV (Depressão Bulbar / Parada)';
       eyePosition = 'central_deep_dilated';
       palpebralReflex = 'absent';
@@ -865,7 +446,7 @@ export class PKPDEngine {
     }
 
     // ----------------------------------------------------
-    // 13. MUCOUS MEMBRANE & PERFUSION
+    // 10. PHYSICAL EXAM & PERFUSION
     // ----------------------------------------------------
     let mmColor: MucousMembraneColor = 'pink';
     let crt: CapillaryRefillTime = '1 - 2s (normal)';
@@ -873,30 +454,29 @@ export class PKPDEngine {
     if (isAlreadyDead || isAlreadyArrested) {
       mmColor = 'gray_moribund';
       crt = 'absent';
-    } else if (spo2 < 78) {
+    } else if (respiration.pulseOximetrySpO2 < 78) {
       mmColor = 'cyanotic';
       crt = '> 3s (poor perfusion)';
-    } else if (finalMAP < 45 || patient.pathologyConditions.hypovolemiaSeverity) {
+    } else if (hemodynamics.meanArterialPressure < 45 || patient.pathologyConditions.hypovolemiaSeverity) {
       mmColor = 'pale';
       crt = '> 3s (poor perfusion)';
     } else if (patient.pathologyConditions.sepsisVasodilation) {
       mmColor = 'brick_red';
       crt = '< 1s (hyperdynamic)';
-    } else if (alpha2Ce > 0.35) {
+    } else if (receptors.alpha2Drive > 0.35) {
       mmColor = 'pale';
       crt = '2 - 3s (sluggish)';
     }
 
-    const tofCount = isFullyParalyzed ? 0 : nmbaCe > 0.12 ? 2 : 4;
+    const tofCount = receptors.nmOccupancy > 0.85 ? 0 : receptors.nmOccupancy > 0.40 ? 2 : 4;
 
-    // Blood Gases
-    const paCO2 = isAlreadyDead ? 90 : etco2 > 0 ? etco2 + 5.0 : (isRespiratoryArrest ? 75 : 40);
-    let lactate = patient.baselineVitals.lactateMmolL;
-    if (finalMAP < 50 || hypoxiaSeconds > 25 || isAlreadyArrested) {
-      lactate = Math.min(16.0, lactate + (dtSeconds / 60) * 1.8);
+    // Body Temperature Dynamics
+    let tempC = previousVitals?.bodyTemperatureC ?? patient.baselineVitals.tempC;
+    const thermalLossRate = patient.weightKg < 2.0 ? 0.0011 : patient.weightKg < 8.0 ? 0.0005 : 0.0002;
+    tempC -= thermalLossRate * dtSeconds;
+    if (equipment.warmingBlanketActive) {
+      tempC = Math.min(38.8, tempC + 0.0007 * dtSeconds);
     }
-
-    const pH = Math.max(6.70, Math.min(7.60, 7.40 - (paCO2 - 40) * 0.008 - (lactate - 1.0) * 0.045));
 
     // Detailed clinical autopsy report if dead
     let deathDetailedSummary;
@@ -904,70 +484,132 @@ export class PKPDEngine {
       deathDetailedSummary = {
         primaryCause: deathCause || 'Parada Cardiorrespiratória Refratária',
         contributingFactors: [
-          `Espécie: ${patient.species.toUpperCase()} (${patient.weightKg} kg, ${ageTotalYears < 1 ? `${patient.ageMonths} meses` : `${patient.ageYears} anos`})`,
-          isPediatric ? 'Paciente Pediátrico: Débito cardíaco dependente de FC e reserva funcional restrita' : '',
-          isGeriatric ? 'Paciente Geriátrico: Baixa reserva coronariana e menor clearance farmacológico' : '',
-          hypoxiaSeconds > 30 ? `Exposição a Hipóxia Grave por ${Math.round(hypoxiaSeconds)} segundos` : '',
-          activeInteractions.length > 0 ? `Interações Farmacêuticas Detectadas: ${activeInteractions.map((i) => i.title).join(', ')}` : '',
-          isRespiratoryArrest ? `Apneia prévia: ${apneaCause}` : '',
+          `Espécie: ${patient.species.toUpperCase()} (${patient.weightKg} kg)`,
+          speciesEval.particularities.filter((p) => p.isActive).map((p) => `${p.name}: ${p.clinicalImpact}`).join(' | '),
+          activeDrugInteractions.map((i) => `${i.title} (${i.severity.toUpperCase()})`).join(', '),
+          hypoxiaSeconds > 25 ? `Exposição a Hipóxia Crítica por ${Math.round(hypoxiaSeconds)} segundos` : '',
+          ischemiaScore > 0.5 ? `Isquemia Miocárdica Transmural Severa (${(ischemiaScore * 100).toFixed(0)}%)` : '',
         ].filter(Boolean),
         chronology: [
-          `Tempo 00:00: Início do procedimento anestésico para ${patient.name}`,
-          isRespiratoryArrest ? `Apneia/Parada respiratória identificada: ${apneaCause}` : '',
-          arrestCause ? `Parada Cardiorrespiratória desencadeada: ${arrestCause}` : '',
-          asystoleSeconds > 0 ? `Período em colapso/assistolia sem fluxo espontâneo: ${Math.round(asystoleSeconds)}s` : '',
-          `Declaração de Óbito Clínico e Encefálico com midríase fixa paralítica e assistolia refratária`,
+          `Tempo 00:00: Procedimento para ${patient.name} (${patient.surgicalProcedure})`,
+          respiration.isRespiratoryArrest ? `Apneia detectada: ${respiration.respiratoryArrestCause}` : '',
+          arrestCause ? `Parada Cardiorrespiratória: ${arrestCause}` : '',
+          asystoleSeconds > 0 ? `Período em colapso/assistolia: ${Math.round(asystoleSeconds)}s` : '',
+          `Declaração de Óbito Encefálico e Cardiopulmonar Irreversível`,
         ].filter(Boolean),
         autopsyFindings: [
-          `Acidose Metabólica e Respiratória Terminal (pH ${pH.toFixed(2)}, PaCO2 ${Math.round(paCO2)} mmHg, Lactato ${lactate.toFixed(1)} mmol/L)`,
-          `Isquemia Miocárdica Transmural Global (Índice de Isquemia: ${(ischemiaScore * 100).toFixed(0)}%)`,
-          `Mucosas cinzentas/cianóticas com ausência total de perfusão capilar`,
-          `Pupilas em midríase paralítica bilateral com abolição de reflexo corneano e palpebral`,
+          `Gasometria Terminal: pH ${respiration.arterialBloodGases.pH}, PaCO2 ${respiration.arterialBloodGases.paCO2} mmHg, Lactato ${respiration.arterialBloodGases.lactate} mmol/L`,
+          `Índice Isquêmico Cardíaco: ${(ischemiaScore * 100).toFixed(0)}%`,
+          `Cianose/palidez profunda com tempo de enchimento capilar ausente`,
+          `Pupilas em midríase paralítica fixa bilateral e ausência de reflexo corneal`,
         ],
       };
     }
 
+    // Synchronize final vitals under arrest/death
+    let finalHR = hemodynamics.heartRate;
+    let finalMAP = hemodynamics.meanArterialPressure;
+    let finalSysBP = hemodynamics.systolicBP;
+    let finalDiaBP = hemodynamics.diastolicBP;
+    let finalRhythm = hemodynamics.cardiacRhythm;
+    let finalRR = respiration.respiratoryRate;
+    let finalSpO2 = respiration.pulseOximetrySpO2;
+    let finalEtCO2 = respiration.etCO2;
+    let pulseQuality = hemodynamics.pulseQuality;
+    let capnogramType = respiration.capnogramType;
+
+    if (isAlreadyDead) {
+      finalHR = 0;
+      finalMAP = 0;
+      finalSysBP = 0;
+      finalDiaBP = 0;
+      finalRR = 0;
+      finalSpO2 = 0;
+      finalEtCO2 = 0;
+      finalRhythm = 'asystole';
+      pulseQuality = 'Ausente';
+      capnogramType = 'cardiac_arrest_flat';
+    } else if (isAlreadyArrested) {
+      if (resuscitation.isCPRActive) {
+        finalHR = resuscitation.compressionsPerMin || 110;
+        finalMAP = Math.round(35 * (resuscitation.compressionDepthQuality || 0.8));
+        finalSysBP = finalMAP + 15;
+        finalDiaBP = Math.max(5, finalMAP - 10);
+        finalRhythm = 'pulseless_electrical_activity';
+        pulseQuality = 'Fraco / Filiforme';
+        finalEtCO2 = Math.round(16 * (resuscitation.compressionDepthQuality || 0.8));
+        capnogramType = 'normal';
+      } else {
+        finalHR = 0;
+        finalMAP = 0;
+        finalSysBP = 0;
+        finalDiaBP = 0;
+        finalRR = 0;
+        finalSpO2 = 0;
+        finalEtCO2 = 0;
+        finalRhythm = arrestType === 'ventricular_fibrillation'
+          ? 'ventricular_fibrillation'
+          : arrestType === 'pulseless_ventricular_tachycardia'
+          ? 'ventricular_tachycardia'
+          : 'asystole';
+        pulseQuality = 'Ausente';
+        capnogramType = 'cardiac_arrest_flat';
+      }
+    }
+
+    // ----------------------------------------------------
+    // 11. CELLULAR BIOPHYSICS SNAPSHOT
+    // ----------------------------------------------------
+    const cellularState: CellularBiophysicsState = {
+      cAMPMyocardial: Number(receptors.cAMPMyocardial.toFixed(2)),
+      cAMPVascular: Number(receptors.cAMPVascular.toFixed(2)),
+      intracellularCalcium: Number(receptors.intracellularCalcium.toFixed(2)),
+      chlorideConductanceGabaA: Number(receptors.gabaAChlorideConductance.toFixed(2)),
+      nociceptiveInhibition: Number(receptors.nociceptiveInhibition.toFixed(2)),
+      nmbaReceptorBlockade: Number(receptors.nmOccupancy.toFixed(2)),
+      cardiacOutputLMin: hemodynamics.cardiacOutputLMin,
+      strokeVolumeMl: hemodynamics.strokeVolumeMl,
+      systemicVascularResistanceDyne: hemodynamics.systemicVascularResistanceDyne,
+      inotropicStateEmax: hemodynamics.inotropicStateEmax,
+      baroreceptorGain: hemodynamics.baroreceptorGain,
+      baroreceptorVagalTone: hemodynamics.baroreceptorVagalTone,
+      pulmonaryShuntFractionPct: Number(speciesEval.shuntFractionPct.toFixed(1)),
+      speciesParticularities: speciesEval.particularities,
+    };
+
     const vitals: VitalSigns = {
       heartRate: finalHR,
-      cardiacRhythm: rhythm,
+      cardiacRhythm: finalRhythm,
       systolicBP: finalSysBP,
       diastolicBP: finalDiaBP,
       meanArterialPressure: finalMAP,
-      pulseOximetrySpO2: Math.round(Math.max(0, spo2)),
+      pulseOximetrySpO2: finalSpO2,
       respiratoryRate: finalRR,
-      tidalVolumeMl: Math.round(tidalVolumeMl),
-      minuteVolumeL: Number(minuteVolumeL.toFixed(2)),
-      respiratoryPattern: finalRR === 0 ? 'apneic' : finalRR > baselineRR * 1.5 ? 'tachypneic' : 'eupneic',
-      etCO2: Math.round(Math.max(0, etco2)),
-      fiCO2: Math.round(Math.max(0, fico2)),
+      tidalVolumeMl: respiration.tidalVolumeMl,
+      minuteVolumeL: respiration.minuteVolumeL,
+      respiratoryPattern: respiration.respiratoryPattern,
+      etCO2: finalEtCO2,
+      fiCO2: respiration.fiCO2,
       capnogramType,
       bodyTemperatureC: Number(tempC.toFixed(1)),
-      arterialBloodGases: {
-        pH: Number(pH.toFixed(2)),
-        paO2: Math.round(Math.max(0, paO2)),
-        paCO2: Math.round(Math.max(0, paCO2)),
-        bicarbonate: 22,
-        lactate: Number(lactate.toFixed(1)),
-        potassium: patient.baselineVitals.potassiumMeqL,
-        hematocritPct: patient.baselineVitals.hctPct,
-      },
-      anestheticDepthScore: Math.round(anestheticDepthScore),
+      arterialBloodGases: respiration.arterialBloodGases,
+      anestheticDepthScore,
       guedelStage,
       eyePosition,
       palpebralReflex,
       cornealReflex,
       jawTone,
       pedalReflex,
-      surgicalTolerancePct: Math.round(surgicalTolerancePct),
+      surgicalTolerancePct,
       trainOfFourCount: tofCount,
       mucousMembraneColor: mmColor,
       capillaryRefillTime: crt,
       pulseQuality,
-      perfusionIndex: Number((Math.max(0, (finalMAP / 85) * (spo2 / 100))).toFixed(2)),
+      perfusionIndex: Number((Math.max(0, (finalMAP / 85) * (finalSpO2 / 100))).toFixed(2)),
 
-      // Critical & Lethal Organ States
-      isRespiratoryArrest,
-      respiratoryArrestCause: isRespiratoryArrest ? apneaCause : undefined,
+      // Organ Failures & Arrest States
+      isRespiratoryArrest: respiration.isRespiratoryArrest,
+      respiratoryArrestCause: respiration.isRespiratoryArrest ? respiration.respiratoryArrestCause : undefined,
       isCardiacArrest: isAlreadyArrested,
       cardiacArrestCause: arrestCause,
       cardiacArrestType: arrestType,
@@ -977,33 +619,24 @@ export class PKPDEngine {
       deathDetailedSummary,
       asystoleSecondsElapsed: Math.round(asystoleSeconds),
       cprSecondsElapsed: Math.round(cprSeconds),
-      activeDrugInteractions: activeInteractions,
+      activeDrugInteractions,
       myocardialIschemiaScore: Number(ischemiaScore.toFixed(2)),
       hypoxiaExposureSeconds: Math.round(hypoxiaSeconds),
-      severeAcidosisRisk: pH < 7.15,
+      severeAcidosisRisk: respiration.arterialBloodGases.pH < 7.15,
       barotraumaCollapse,
       felineLidocaineToxicity: patient.species === 'feline' && fatalOverdoseTriggered,
-      bovineBloatRespiratoryRestriction: patient.species === 'bovine' && fatalOverdoseTriggered,
+      bovineBloatRespiratoryRestriction: patient.species === 'bovine' && speciesEval.ruminalBloatSeverity > 0.4,
+      cellularState,
     };
 
     return {
       vitals,
       updatedDoses,
       equipmentUpdates: {
-        sodaLimeExhaustionPct,
-        currentAirwayPressureCmH2O: currentPaw,
+        sodaLimeExhaustionPct: respiration.sodaLimeExhaustionPct,
+        currentAirwayPressureCmH2O: respiration.currentAirwayPressureCmH2O,
         totalFluidsInfusedMl: equipment.totalFluidsInfusedMl + (equipment.isFluidPumpRunning ? (equipment.fluidRateMlPerHour / 3600) * dtSeconds : 0),
       },
     };
   }
-}
-
-function drugDefIdArrestType(reason: string): VitalSigns['cardiacArrestType'] {
-  if (reason.includes('Fibrilação') || reason.includes('Taquiarritmia')) {
-    return 'ventricular_fibrillation';
-  }
-  if (reason.includes('TV') || reason.includes('Taquicardia Ventricular')) {
-    return 'pulseless_ventricular_tachycardia';
-  }
-  return 'asystole';
 }

@@ -25,6 +25,7 @@ import { CPCRResuscitationPanel } from './components/emergency/CPCRResuscitation
 import { AnesthesiaRecordSheet } from './components/records/AnesthesiaRecordSheet';
 import { ScenarioSelectorModal } from './components/scenarios/ScenarioSelectorModal';
 import { DeathReportModal } from './components/emergency/DeathReportModal';
+import { CellularPhysiologyModal } from './components/monitor/CellularPhysiologyModal';
 import {
   Activity,
   Syringe,
@@ -39,12 +40,14 @@ import {
   FolderHeart,
   Sparkles,
   Stethoscope,
+  Dna,
 } from 'lucide-react';
 
 export default function App() {
   // 1. ACTIVE PATIENT & SCENARIO
   const [patient, setPatient] = useState<PatientProfile>(PRESET_SCENARIOS[0]);
   const [isScenarioModalOpen, setIsScenarioModalOpen] = useState(false);
+  const [isCellularModalOpen, setIsCellularModalOpen] = useState(false);
 
   // 2. SIMULATION CLOCK & CONTROLS
   const [isSimPaused, setIsSimPaused] = useState(false);
@@ -492,6 +495,19 @@ export default function App() {
               <span className="font-bold text-[#f5f5f5]">{patient.name}</span>
               <span className="text-[#888888]">({patient.weightKg}kg · ASA {patient.asa})</span>
             </button>
+
+            {/* Cellular Biophysics & Receptors Button */}
+            <button
+              onClick={() => setIsCellularModalOpen(true)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-950/50 hover:bg-indigo-900/70 border border-indigo-500/40 text-xs font-mono-code transition text-indigo-200 shadow-md shadow-indigo-950/30 cursor-pointer"
+              title="Inspecionar Receptores Celulares, Segundos Mensageiros e Particularidades de Espécie"
+            >
+              <Dna className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+              <span className="font-bold">Biofísica Celular</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/30 text-indigo-300 font-mono font-bold">
+                {patient.species.toUpperCase()}
+              </span>
+            </button>
           </div>
 
           {/* Clock & Speed Multipliers */}
@@ -810,7 +826,15 @@ export default function App() {
         }}
       />
 
-      {/* 5. FOOTER */}
+      {/* 5. CELLULAR BIOPHYSICS & SPECIES MODAL */}
+      <CellularPhysiologyModal
+        isOpen={isCellularModalOpen}
+        onClose={() => setIsCellularModalOpen(false)}
+        patient={patient}
+        vitals={vitals}
+      />
+
+      {/* 6. FOOTER */}
       <footer className="border-t border-[#1a1a1a] bg-[#080808] px-4 py-2.5 text-center text-xs text-[#525252] font-mono-code">
         Open VetSim Simulator · Modelagem Farmacocinética Multicompartimental · Diretrizes RECOVER 2024
       </footer>

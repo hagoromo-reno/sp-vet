@@ -85,6 +85,67 @@ export interface FastBolusConsequences {
   warningDescription: string;
 }
 
+export interface TargetAffinity {
+  affinity: number; // 0 to 1 (binding affinity)
+  intrinsicEfficacy: number; // -1 (inverse agonist), 0 (neutral competitive antagonist), +1 (full agonist)
+}
+
+export interface DrugReceptorProfile {
+  // Adrenergic receptors
+  alpha1?: TargetAffinity;
+  alpha2?: TargetAffinity;
+  beta1?: TargetAffinity;
+  beta2?: TargetAffinity;
+  // Cholinergic receptors
+  m2?: TargetAffinity;
+  m3?: TargetAffinity;
+  nm?: TargetAffinity; // Neuromuscular nicotinic
+  // GABA-A Allosteric Complex
+  gabaA?: {
+    bzdAllosteric?: number; // 0 to 1
+    propofolBarbiturateDirect?: number; // 0 to 1
+    neurosteroidSite?: number; // 0 to 1 (alfaxalone)
+    directChlorideGating?: number; // 0 to 1
+  };
+  // Opioid receptors
+  muOpioid?: TargetAffinity;
+  kappaOpioid?: TargetAffinity;
+  // Glutamatergic receptors
+  nmdaPoreBlock?: number; // 0 to 1 (ketamine)
+  // Ion channels & Enzymes
+  naVChannelBlock?: number; // 0 to 1 (local anesthetics)
+  caVChannelBlock?: number; // 0 to 1
+  acheInhibition?: number; // 0 to 1 (neostigmine)
+}
+
+export interface SpeciesCellularParticularity {
+  id: string;
+  name: string;
+  species: SpeciesType;
+  severity: 'info' | 'warning' | 'danger' | 'lethal';
+  mechanism: string;
+  clinicalImpact: string;
+  isActive: boolean;
+  intensity: number; // 0 to 1
+}
+
+export interface CellularBiophysicsState {
+  cAMPMyocardial: number; // normalized baseline 1.0 (Gs vs Gi balance)
+  cAMPVascular: number; // normalized baseline 1.0
+  intracellularCalcium: number; // normalized baseline 1.0 (inotropic state)
+  chlorideConductanceGabaA: number; // baseline 0.1, surgical 1.0-2.5, coma > 3.5
+  nociceptiveInhibition: number; // 0 to 1 (analgesia index)
+  nmbaReceptorBlockade: number; // 0 to 1 (motor endplate blockade)
+  cardiacOutputLMin: number; // L/min (HR * SV / 1000)
+  strokeVolumeMl: number; // mL
+  systemicVascularResistanceDyne: number; // dynes*s/cm^5
+  inotropicStateEmax: number; // mmHg/mL
+  baroreceptorGain: number; // sensitivity (0 = suppressed by anesthesia, 1.0 = fully responsive)
+  baroreceptorVagalTone: number; // -1 to +1
+  pulmonaryShuntFractionPct: number; // Qs/Qt (%)
+  speciesParticularities: SpeciesCellularParticularity[];
+}
+
 export interface DrugDefinition {
   id: string;
   name: string;
@@ -111,6 +172,8 @@ export interface DrugDefinition {
   halfLifeAlpha: number; // distribution half-life (min)
   halfLifeBeta: number; // elimination half-life (min)
   fastBolusRisk?: FastBolusConsequences;
+  // Cellular & Receptor Profile (MoA)
+  receptorProfile?: DrugReceptorProfile;
   // Pharmacodynamics Vectors (-1 to +1 or scale factor)
   effectHR: number; // >0 tachy, <0 brady
   effectBP: number; // >0 hyper, <0 hypo (vasodilation/inotropy)
@@ -276,6 +339,7 @@ export interface VitalSigns {
   barotraumaCollapse: boolean;
   felineLidocaineToxicity: boolean;
   bovineBloatRespiratoryRestriction: boolean;
+  cellularState: CellularBiophysicsState;
 }
 
 export interface AnesthesiaEquipmentState {
