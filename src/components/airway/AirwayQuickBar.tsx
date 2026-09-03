@@ -19,6 +19,7 @@ interface AirwayQuickBarProps {
   onTriggerManualBreath: () => void;
   onQuickIntubate: () => void;
   onExtubate: () => void;
+  onApplyLidocaineSpray?: () => void;
 }
 
 export const AirwayQuickBar: React.FC<AirwayQuickBarProps> = ({
@@ -29,6 +30,7 @@ export const AirwayQuickBar: React.FC<AirwayQuickBarProps> = ({
   onTriggerManualBreath,
   onQuickIntubate,
   onExtubate,
+  onApplyLidocaineSpray,
 }) => {
   const isIntubated = equipment.intubationStatus === 'intubated_tracheal';
   const isEsophageal = equipment.intubationStatus === 'intubated_esophageal';
@@ -75,6 +77,11 @@ export const AirwayQuickBar: React.FC<AirwayQuickBarProps> = ({
                 : 'Não Intubado (Espontâneo)'}
             </span>
 
+            {equipment.isLarynxDesensitized && (
+              <span className="px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-500 text-emerald-300 text-[10px] font-bold">
+                Laringe Dessensibilizada (Lido 2%)
+              </span>
+            )}
             {isApneic && (
               <span className="px-1.5 py-0.5 rounded bg-amber-950 border border-amber-500 text-amber-300 text-[10px] font-bold animate-pulse">
                 APNEIA ATIVA
@@ -92,6 +99,21 @@ export const AirwayQuickBar: React.FC<AirwayQuickBarProps> = ({
 
       {/* Center/Right: Action Buttons (Intubar / Apertar Balão / Cadência) */}
       <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+        {/* Spray Lidocaine 2% shortcut if not intubated */}
+        {!isIntubated && onApplyLidocaineSpray && (
+          <button
+            onClick={onApplyLidocaineSpray}
+            className={`px-2.5 py-1.5 rounded-lg border font-bold transition flex items-center gap-1 text-xs ${
+              equipment.isLarynxDesensitized
+                ? 'bg-emerald-950 border-emerald-600 text-emerald-300'
+                : 'bg-[#181820] hover:bg-[#232330] border-[#303042] text-[#c0c0d0]'
+            }`}
+            title="Aplicar Spray de Lidocaína 2% na glote para prevenir laringoespasmo"
+          >
+            <span>{equipment.isLarynxDesensitized ? '✓ Lido 2% Ativa' : 'Spray Lido 2%'}</span>
+          </button>
+        )}
+
         {/* Quick Intubate / Extubate Button */}
         {!isIntubated ? (
           <button

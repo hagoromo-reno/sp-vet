@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/pharmacology.test.ts tests/physiology.test.ts",
+    "test": "tsx --test tests/pharmacology.test.ts tests/physiology.test.ts tests/multimodalProtocols.test.ts",
     "validate:pharmacology": "tsx scripts/validate-pharmacology.ts",
     "validate:pharmacology:full": "tsx scripts/validate-pharmacology.ts --verbose",
     "validate:interactions": "tsx scripts/validate-interactions.ts",

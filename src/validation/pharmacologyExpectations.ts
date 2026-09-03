@@ -374,6 +374,16 @@ export const PHARMACOLOGY_EXPECTATIONS: MedicationValidationSpec[] = [
     evidence: ['PMID:36058821'],
   },
   {
+    drugId: 'ephedrine',
+    clinicalClass: 'Simpatomimético de ação mista',
+    mechanism: 'Agonismo alfa-1, beta-1 e liberação vesicular de noradrenalina; eleva PAM e débito cardíaco com taquifilaxia em doses repetidas.',
+    expectedDoseResponse: dose('Restauração pressórica suave.', 'Aumento confiável de PAM e volume sistólico sob anestesia.', 'Maior resposta pressórica; doses sucessivas mostram taquifilaxia progressiva.'),
+    signals: [],
+    relativeTrends: [{ metric: 'map', direction: 'increase', minimumFraction: 0.10 }],
+    context: 'pathology',
+    evidence: ['PMID:24810785', 'PMID:28929342'],
+  },
+  {
     drugId: 'potassium_chloride',
     clinicalClass: 'Reposição eletrolítica concentrada',
     mechanism: 'Aumenta potássio extracelular; infusão controlada corrige déficit, enquanto bólus causa despolarização sustentada e parada.',

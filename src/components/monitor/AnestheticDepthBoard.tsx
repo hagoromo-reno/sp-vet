@@ -33,7 +33,7 @@ export const AnestheticDepthBoard: React.FC<AnestheticDepthBoardProps> = ({
   const consciousness = vitals.consciousnessScore ?? 100;
   const depthScore = vitals.anestheticDepthScore;
   const stage = vitals.guedelStage;
-  const tolerance = vitals.surgicalTolerancePct;
+  const tolerance = Math.round(vitals.surgicalTolerancePct);
   const nociceptionInhibition = Math.round((vitals.cellularState?.nociceptiveInhibition ?? 0) * 100);
 
   // Eye position label

@@ -150,6 +150,7 @@ export interface CellularBiophysicsState {
   localNeuralBlockade: number; // 0 to 1 regional/perineural NaV blockade
   systemicNaVBlockade: number; // 0 to 1 circulating NaV exposure
   electrolyteCardiotoxicity: number; // 0 to 1 net hyperkalemic membrane instability
+  antiarrhythmicIbProtection?: number; // 0 to 1 Class Ib antiarrhythmic protection (suppresses VPCs/VT)
   cardiacOutputLMin: number; // L/min (HR * SV / 1000)
   strokeVolumeMl: number; // mL
   systemicVascularResistanceDyne: number; // dynes*s/cm^5
@@ -180,6 +181,15 @@ export interface DrugDefinition {
     rabbit?: { min: number; max: number; typical: number };
     avian?: { min: number; max: number; typical: number };
   };
+  recommendedCriDose?: {
+    canine?: { min: number; max: number; typical: number };
+    feline?: { min: number; max: number; typical: number };
+    equine?: { min: number; max: number; typical: number };
+    bovine?: { min: number; max: number; typical: number };
+    rabbit?: { min: number; max: number; typical: number };
+    avian?: { min: number; max: number; typical: number };
+  };
+  criDoseUnit?: 'mcg/kg/min' | 'mg/kg/h' | 'mcg/kg/h' | 'mg/kg/min' | 'ml/kg/h';
   supportedRoutes: DrugRoute[];
   // PK/PD Parameters
   onsetMinutes: number; // Peak time
@@ -208,6 +218,8 @@ export interface DrugDefinition {
     isBenzoAntagonist?: boolean;
     isParasympatholytic?: boolean;
     isSympathomimetic?: boolean;
+    isMixedSympathomimetic?: boolean;
+    hasTachyphylaxisRisk?: boolean;
     isDissociative?: boolean;
     isAntiarrhythmicClass1b?: boolean;
     isNMBA?: boolean;
@@ -277,6 +289,7 @@ export interface PatientProfile {
     hctPct: number;
     potassiumMeqL: number;
     lactateMmolL: number;
+    glucoseMgDl?: number;
   };
   pathologyConditions: {
     hypovolemiaSeverity?: number; // 0 (none) to 1 (severe shock)
@@ -288,6 +301,42 @@ export interface PatientProfile {
     gastricDilatationVolvulus?: boolean;
     traumaHemorrhage?: boolean;
     fetalDepressionRisk?: boolean;
+  };
+}
+
+/**
+ * Slow physiological compartments that must survive between simulation ticks.
+ * They prevent time-dependent problems (fluid redistribution, recumbency injury,
+ * ruminal bloat and metabolic stress) from being inferred from the global clock.
+ */
+export interface BiologicalState {
+  species: {
+    recumbencySeconds: number;
+    lowMapExposureSeconds: number;
+    pulmonaryShuntPct: number;
+    ruminalBloatSeverity: number;
+    myopathyRisk: number;
+  };
+  fluids: {
+    lastObservedTotalInfusedMl: number;
+    crystalloidCentralMl: number;
+    hypertonicExpansionMl: number;
+    colloidCentralMl: number;
+    wholeBloodCentralMl: number;
+    effectiveCirculatingExpansionMl: number;
+    currentHematocritPct: number;
+  };
+  metabolic: {
+    bloodGlucoseMgDl: number;
+    insulinActivity: number;
+    counterRegulatoryDrive: number;
+  };
+  respiratory: {
+    highAirwayPressureSeconds: number;
+  };
+  resuscitation: {
+    roscReadinessSeconds: number;
+    processedShockCount: number;
   };
 }
 
@@ -314,6 +363,7 @@ export interface VitalSigns {
     lactate: number; // mmol/L
     potassium: number; // mEq/L
     hematocritPct: number; // %
+    glucoseMgDl: number; // mg/dL
   };
   // Neurological & Reflex Status
   consciousnessScore: number; // 0 (comatose/anesthetized) to 100 (fully awake/alert)
@@ -321,6 +371,7 @@ export interface VitalSigns {
   guedelStage:
     | 'Estágio I (Consciente / Alerta)'
     | 'Estágio I (Sedação Leve / Abatimento)'
+    | 'Estágio I (Sedação Profunda / Neuroleptanalgesia)'
     | 'Estágio II (Excitação/Delírio)'
     | 'Estágio III Plano 1 (Leve)'
     | 'Estágio III Plano 2 (Cirúrgico)'
@@ -333,6 +384,7 @@ export interface VitalSigns {
   jawTone: JawTone;
   pedalReflex: ReflexStrength;
   surgicalTolerancePct: number; // 0 to 100% (how well patient tolerates surgical stimulation)
+  nociceptiveStressLevel?: number; // 0 to 1: dynamic neurohumoral adrenergic stress (wash-in and wash-out)
   trainOfFourCount: number; // 0 to 4 (neuromuscular blockade)
   // Perfusion & Physical Exam
   mucousMembraneColor: MucousMembraneColor;
@@ -349,8 +401,10 @@ export interface VitalSigns {
   isNibpMeasuring?: boolean;
   // Critical / Lethal Organ Status
   isRespiratoryArrest: boolean;
+  isSpontaneousApnea: boolean;
   respiratoryArrestCause?: string;
   isCardiacArrest: boolean;
+  isChestCompressionPulse: boolean;
   cardiacArrestCause?: string;
   cardiacArrestType?: 'asystole' | 'ventricular_fibrillation' | 'pulseless_ventricular_tachycardia' | 'pea';
   isDead: boolean;
@@ -361,6 +415,10 @@ export interface VitalSigns {
     contributingFactors: string[];
     chronology: string[];
     autopsyFindings: string[];
+    wasResuscitationExemplary?: boolean;
+    inevitabilityStatement?: string;
+    preventabilityOpportunities?: string[];
+    reversalAggravationEvent?: string;
   };
   asystoleSecondsElapsed: number;
   cprSecondsElapsed: number;
@@ -381,7 +439,16 @@ export interface VitalSigns {
     severeTachycardiaSeconds: number;
     profoundHypotensionSeconds: number;
   };
+  impendingArrestWarning?: {
+    type: 'hypotension' | 'bradycardia' | 'tachycardia' | 'hypoxia' | 'ischemia';
+    headline: string;
+    details: string;
+    secondsRemainingEstimate: number;
+    recommendedAction: string;
+    urgency: 'warning' | 'critical';
+  };
   cellularState: CellularBiophysicsState;
+  biologicalState: BiologicalState;
 }
 
 export interface AnesthesiaEquipmentState {
@@ -400,6 +467,8 @@ export interface AnesthesiaEquipmentState {
   intubationStatus: IntubationStatus;
   tubeSizeMm: number;
   cuffPressureCmH2O: number;
+  isLarynxDesensitized?: boolean; // Topical lidocaine 2% applied to arytenoids/glottis
+  larynxDesensitizedUntilSimTime?: number;
   
   // Mechanical Ventilator
   ventilatorMode: VentilatorMode;
@@ -435,6 +504,14 @@ export interface ResuscitationState {
   compressionDepthQuality: number; // 0 to 1
   defibrillatorChargedJoules: number;
   isDefibrillatorArmed: boolean;
+  lastShockDeliveredJoules?: number;
+  lastShockSimTime?: number;
+  isCPRVentilationActive?: boolean; // RECOVER BLS ventilation (10 rpm with 100% O2)
+  cprExemplaryQualityCount?: number;
+  cprTotalSecondsAccumulated?: number;
+  epinephrineDosesGiven?: number;
+  lastEpinephrineSimTime?: number;
+  shocksDeliveredCount?: number;
 }
 
 export interface LogEntry {
@@ -458,6 +535,7 @@ export interface VitalRecordPoint {
   etco2: number;
   rr: number;
   tempC: number;
+  glucoseMgDl: number;
   vaporizerPct: number;
   depthScore: number;
 }

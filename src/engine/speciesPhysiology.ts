@@ -3,6 +3,10 @@ import { PatientProfile, SpeciesCellularParticularity, SpeciesType } from '../ty
 export interface SpeciesCellularConfig {
   species: SpeciesType;
   cardiacOutputMlKgMin: number; // resting cardiac index used to scale SV/SVR across body sizes
+  anatomicDeadSpaceMlKg: number;
+  dynamicComplianceMlKgCmH2O: number;
+  functionalResidualCapacityMlKg: number;
+  oxygenConsumptionMlKgMin: number;
   muOpioidSensitivityFactor: number;
   kappaOpioidSensitivityFactor: number;
   gabaSensitivityFactor: number;
@@ -30,6 +34,10 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   canine: {
     species: 'canine',
     cardiacOutputMlKgMin: 110,
+    anatomicDeadSpaceMlKg: 3.0,
+    dynamicComplianceMlKgCmH2O: 1.45,
+    functionalResidualCapacityMlKg: 45,
+    oxygenConsumptionMlKgMin: 5.0,
     muOpioidSensitivityFactor: 1.05,
     kappaOpioidSensitivityFactor: 1,
     gabaSensitivityFactor: 1,
@@ -55,6 +63,10 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   feline: {
     species: 'feline',
     cardiacOutputMlKgMin: 140,
+    anatomicDeadSpaceMlKg: 3.2,
+    dynamicComplianceMlKgCmH2O: 1.25,
+    functionalResidualCapacityMlKg: 38,
+    oxygenConsumptionMlKgMin: 6.5,
     muOpioidSensitivityFactor: 1,
     kappaOpioidSensitivityFactor: 0.95,
     gabaSensitivityFactor: 1.05,
@@ -80,6 +92,10 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   equine: {
     species: 'equine',
     cardiacOutputMlKgMin: 75,
+    anatomicDeadSpaceMlKg: 2.5,
+    dynamicComplianceMlKgCmH2O: 1.05,
+    functionalResidualCapacityMlKg: 38,
+    oxygenConsumptionMlKgMin: 3.0,
     muOpioidSensitivityFactor: 0.85,
     kappaOpioidSensitivityFactor: 1.1,
     gabaSensitivityFactor: 0.95,
@@ -105,6 +121,10 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   bovine: {
     species: 'bovine',
     cardiacOutputMlKgMin: 95,
+    anatomicDeadSpaceMlKg: 3.0,
+    dynamicComplianceMlKgCmH2O: 0.95,
+    functionalResidualCapacityMlKg: 35,
+    oxygenConsumptionMlKgMin: 3.2,
     muOpioidSensitivityFactor: 0.9,
     kappaOpioidSensitivityFactor: 1,
     gabaSensitivityFactor: 1,
@@ -133,6 +153,10 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   rabbit: {
     species: 'rabbit',
     cardiacOutputMlKgMin: 240,
+    anatomicDeadSpaceMlKg: 4.0,
+    dynamicComplianceMlKgCmH2O: 1.0,
+    functionalResidualCapacityMlKg: 32,
+    oxygenConsumptionMlKgMin: 8.0,
     muOpioidSensitivityFactor: 0.9,
     kappaOpioidSensitivityFactor: 1,
     gabaSensitivityFactor: 1.05,
@@ -158,6 +182,10 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   avian: {
     species: 'avian',
     cardiacOutputMlKgMin: 320,
+    anatomicDeadSpaceMlKg: 4.5,
+    dynamicComplianceMlKgCmH2O: 1.8,
+    functionalResidualCapacityMlKg: 90,
+    oxygenConsumptionMlKgMin: 12.0,
     muOpioidSensitivityFactor: 0.8,
     kappaOpioidSensitivityFactor: 1.15,
     gabaSensitivityFactor: 1,
@@ -188,14 +216,17 @@ export class SpeciesPhysiologyEngine {
    */
   public static evaluateParticularities(
     patient: PatientProfile,
-    simTimeSeconds: number,
+    _simTimeSeconds: number,
     currentMAP: number,
     currentCeAlpha2: number,
     currentCeOpioid: number,
     currentCeLidocaine: number,
     currentCeInhalant: number,
     isRecumbent: boolean,
-    isAtropineAdministered: boolean
+    isAtropineAdministered: boolean,
+    persistentShuntFractionPct = 5,
+    persistentMyopathyRisk = 0,
+    persistentRuminalBloatSeverity = 0
   ): {
     particularities: SpeciesCellularParticularity[];
     shuntFractionPct: number;
@@ -206,10 +237,10 @@ export class SpeciesPhysiologyEngine {
     const config = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
     const particularities: SpeciesCellularParticularity[] = [];
 
-    let shuntFractionPct = 5.0;
+    let shuntFractionPct = persistentShuntFractionPct;
     let effectiveAlpha2Drive = currentCeAlpha2;
-    let myopathyIschemiaRiskScore = 0;
-    let ruminalBloatSeverity = 0;
+    let myopathyIschemiaRiskScore = persistentMyopathyRisk;
+    let ruminalBloatSeverity = persistentRuminalBloatSeverity;
 
     // ----------------------------------------------------
     // 1. CANINE PARTICULARITIES
@@ -303,9 +334,7 @@ export class SpeciesPhysiologyEngine {
       });
 
       // Strict MAP >= 70 mmHg requirement
-      if (currentMAP < config.criticalMapThresholdMmHg) {
-        const mapDeficit = config.criticalMapThresholdMmHg - currentMAP;
-        myopathyIschemiaRiskScore = Math.min(1.0, (mapDeficit / 25) * (simTimeSeconds > 60 ? 1.0 : 0.4));
+      if (currentMAP < config.criticalMapThresholdMmHg || myopathyIschemiaRiskScore > 0.01) {
         particularities.push({
           id: 'equine_compartment_myopathy',
           name: 'RISCO CRÍTICO: Isquemia Muscular & Miopatia Pós-Anestésica (PAM < 70 mmHg)',
@@ -320,7 +349,7 @@ export class SpeciesPhysiologyEngine {
 
       // Massive V/Q Shunt due to visceral compression
       if (isRecumbent) {
-        shuntFractionPct = config.recumbencyPulmonaryShuntBasePct + (currentCeInhalant > 0.8 ? 6.0 : 0);
+        shuntFractionPct = Math.min(45, shuntFractionPct + (currentCeInhalant > 0.8 ? 3.0 : 0));
         particularities.push({
           id: 'equine_vq_shunt',
           name: 'Shunt Intrapulmonar Massivo por Compressão Visceral (Atelectasia V/Q)',
@@ -352,13 +381,7 @@ export class SpeciesPhysiologyEngine {
       });
 
       // Ruminal Bloat / Tympanism Dynamics
-      if (isRecumbent && simTimeSeconds > 20) {
-        // Continuous gas accumulation without eructation
-        const bloatTimeMin = simTimeSeconds / 60.0;
-        ruminalBloatSeverity = Math.min(1.0, bloatTimeMin * 0.045); // progressive accumulation
-        shuntFractionPct = config.recumbencyPulmonaryShuntBasePct + ruminalBloatSeverity * 14;
-
-        if (ruminalBloatSeverity > 0.25) {
+      if (isRecumbent && ruminalBloatSeverity > 0.25) {
           particularities.push({
             id: 'bovine_ruminal_tympanism',
             name: 'Timpanismo Ruminal Agudo & Restrição Diafragmática',
@@ -369,7 +392,6 @@ export class SpeciesPhysiologyEngine {
             isActive: true,
             intensity: ruminalBloatSeverity,
           });
-        }
       }
 
       // Profuse continuous salivation & Atropine Contraindication

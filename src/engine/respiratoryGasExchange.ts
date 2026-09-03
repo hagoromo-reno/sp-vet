@@ -27,6 +27,7 @@ export interface RespiratoryOutputs {
     hematocritPct: number; // %
   };
   isRespiratoryArrest: boolean;
+  isSpontaneousApnea: boolean;
   respiratoryArrestCause?: string;
   hypoxiaSecondsAccumulated: number;
   currentAirwayPressureCmH2O: number;
@@ -47,7 +48,7 @@ export class RespiratoryGasExchangeEngine {
     patient: PatientProfile,
     receptors: ReceptorStateSnapshot,
     equipment: AnesthesiaEquipmentState,
-    isSurgicalStimulationActive: boolean,
+    _isSurgicalStimulationActive: boolean,
     previousSpO2: number,
     previousPaO2: number,
     previousPaCO2: number,
@@ -56,12 +57,17 @@ export class RespiratoryGasExchangeEngine {
     pulmonaryShuntFractionPct: number,
     ruminalBloatSeverity: number = 0,
     cardiacOutputRatio: number = 1,
-    meanArterialPressure: number = 80
+    meanArterialPressure: number = 80,
+    previousRespiratoryRate?: number,
+    previousEtCO2?: number,
+    nociceptiveStressLevel: number = 0,
+    persistentHematocritPct?: number
   ): RespiratoryOutputs {
     const speciesInfo = SPECIES_DATABASE[patient.species] || SPECIES_DATABASE.canine;
     const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
     const baselineRR = patient.baselineVitals.rr;
-    const baselineVT = Math.round(patient.weightKg * 12); // ~12 ml/kg
+    const baselineVT = patient.weightKg
+      * ((speciesInfo.tidalVolumeMlKg[0] + speciesInfo.tidalVolumeMlKg[1]) / 2);
 
     const isIntubated = equipment.intubationStatus === 'intubated_tracheal';
     const isEsophageal = equipment.intubationStatus === 'intubated_esophageal';
@@ -85,7 +91,7 @@ export class RespiratoryGasExchangeEngine {
       spontaneousRR = 0;
       spontaneousVT = 0;
       isRespiratoryArrest = true;
-      arrestCause = 'Parada Respiratória por Bloqueio Neuromuscular Periférico (Atracúrio sem ventilação mecânica)';
+      arrestCause = 'Ausência de ventilação espontânea por Bloqueio Neuromuscular Periférico (suporte ventilatório obrigatório)';
     }
     // B. Post-Induction Apnea (Propofol / Alfaxalone / Thiopental Bolus or BZD synergy)
     else if (
@@ -127,10 +133,10 @@ export class RespiratoryGasExchangeEngine {
       spontaneousRR *= 1 + co2Stimulus * chemoreflexGain * 0.55;
       spontaneousVT *= 1 + co2Stimulus * chemoreflexGain * 0.22;
 
-      // Surgical stimulation tachypnea if light plane or inadequate analgesia
-      if (isSurgicalStimulationActive && receptors.nociceptiveInhibition < 0.65 && receptors.gabaAChlorideConductance < 1.4) {
-        spontaneousRR *= 1.45;
-        spontaneousVT *= 1.20;
+      // Nociceptive afferent tachypnea scaled strictly by dynamic neurohumoral stress
+      if (nociceptiveStressLevel > 0.02) {
+        spontaneousRR *= (1.0 + nociceptiveStressLevel * 0.42);
+        spontaneousVT *= (1.0 + nociceptiveStressLevel * 0.20);
       }
 
       // Ruminal Bloat diaphragmatic mechanical restriction (Bovine)
@@ -145,8 +151,8 @@ export class RespiratoryGasExchangeEngine {
       }
     }
 
-    spontaneousRR = Math.round(spontaneousRR);
-    spontaneousVT = Math.round(spontaneousVT);
+    spontaneousRR = isRespiratoryArrest ? 0 : spontaneousRR;
+    spontaneousVT = isRespiratoryArrest ? 0 : spontaneousVT;
 
     // ----------------------------------------------------
     // 2. MANUAL BAGGING & MECHANICAL VENTILATOR COUPLING
@@ -157,6 +163,7 @@ export class RespiratoryGasExchangeEngine {
 
     // A. Check for Manual Breath (Bag Squeeze) or Cadence
     const hasActiveTrachealTube = equipment.intubationStatus === 'intubated_tracheal';
+    const hasSealedAirway = hasActiveTrachealTube || equipment.intubationStatus === 'laryngeal_mask';
     const isSingleManualBreathActive = Boolean(
       equipment.isManualBreathTriggered || 
       (equipment.manualBreathLastTriggerTime && (simTimeSeconds - equipment.manualBreathLastTriggerTime) < 2.0)
@@ -165,26 +172,48 @@ export class RespiratoryGasExchangeEngine {
       equipment.manualVentilationCadenceSeconds && equipment.manualVentilationCadenceSeconds > 0
     );
 
-    if (equipment.isVentilatorActive && equipment.ventilatorMode !== 'spontaneous') {
+    const baseCompliance = Math.max(0.1, speciesConfig.dynamicComplianceMlKgCmH2O * patient.weightKg);
+    const restrictiveFactor = Math.max(0.38, 1 - ruminalBloatSeverity * 0.48 - Math.max(0, pulmonaryShuntFractionPct - 5) / 100);
+    const effectiveCompliance = baseCompliance * restrictiveFactor;
+
+    if (hasSealedAirway && equipment.isVentilatorActive && equipment.ventilatorMode !== 'spontaneous') {
       // Mechanical Ventilator Active
       finalRR = equipment.ventilatorSettings.rateBpm;
-      finalVT = equipment.ventilatorSettings.tidalVolumeMl;
-      currentPaw = equipment.ventilatorSettings.pipPressureLimitCmH2O;
-      isRespiratoryArrest = false;
+      const peep = equipment.ventilatorSettings.peepCmH2O;
+      const pressureLimit = Math.max(peep + 1, equipment.ventilatorSettings.pipPressureLimitCmH2O);
+      const expiratoryParts = Number(equipment.ventilatorSettings.ieRatio.split(':')[1]) || 2;
+      const inspiratoryTimeSeconds = (60 / Math.max(1, finalRR)) / (1 + expiratoryParts);
+      const pressureEquilibration = 1 - Math.exp(-inspiratoryTimeSeconds / 0.45);
+      if (equipment.ventilatorMode === 'pcv_pressure') {
+        const drivingPressure = Math.max(0, pressureLimit - peep);
+        finalVT = Math.min(patient.weightKg * 18, effectiveCompliance * drivingPressure * pressureEquilibration);
+        currentPaw = pressureLimit;
+      } else {
+        const requestedVT = Math.max(0, equipment.ventilatorSettings.tidalVolumeMl);
+        const inspiratoryFlowMlSec = requestedVT / Math.max(0.15, inspiratoryTimeSeconds);
+        const resistancePressure = inspiratoryFlowMlSec * 0.018 / Math.sqrt(Math.max(0.1, patient.weightKg));
+        const requiredPeakPressure = peep + requestedVT / effectiveCompliance + resistancePressure;
+        currentPaw = Math.min(pressureLimit, requiredPeakPressure);
+        finalVT = requiredPeakPressure > pressureLimit
+          ? Math.max(0, effectiveCompliance * Math.max(0, pressureLimit - peep))
+          : requestedVT;
+      }
     } else if (hasActiveTrachealTube && (isSingleManualBreathActive || hasManualCadence)) {
       // Manual Bag Ventilation (Apertar Balão / Cadência Manual)
       const cadenceRate = hasManualCadence ? Math.round(60 / (equipment.manualVentilationCadenceSeconds || 6)) : 10;
       finalRR = Math.max(spontaneousRR, cadenceRate);
-      const manualVT = Math.round(Math.max(patient.weightKg * 12, 160));
+      const manualVT = baselineVT;
       finalVT = Math.max(spontaneousVT, manualVT);
       currentPaw = 16; // Normal manual bag peak airway pressure ~16 cmH2O
-      isRespiratoryArrest = false; // Protected from asphyxia by manual ventilation!
     } else {
-      currentPaw = spontaneousRR > 0 ? (equipment.aplValveState === 'closed' ? 24 : 2) : 0;
+      const closedCircuitPressure = equipment.aplValveState === 'closed' && equipment.oxygenFlowLMin > 1.2
+        ? (equipment.isOxygenFlushActive ? 42 : 32)
+        : 2;
+      currentPaw = spontaneousRR > 0 ? closedCircuitPressure : 0;
     }
 
     const minuteVolumeL = Number(((finalRR * finalVT) / 1000.0).toFixed(2));
-    const deadSpaceMl = patient.weightKg * 4.0; // anatomical dead space ~ 4 ml/kg
+    const deadSpaceMl = patient.weightKg * speciesConfig.anatomicDeadSpaceMlKg;
     const alveolarVentilationLMin = Math.max(0, ((finalVT - deadSpaceMl) * finalRR) / 1000.0);
 
     // ----------------------------------------------------
@@ -201,49 +230,66 @@ export class RespiratoryGasExchangeEngine {
     }
 
     let capnogramType: CapnogramType = 'normal';
-    let etco2 = patient.baselineVitals.etco2;
+    let etco2 = 0;
     let paCO2Estimate = previousPaCO2 || patient.baselineVitals.etco2 + 4.5;
 
-    if (isEsophageal || (isUnintubated && finalRR === 0)) {
-      etco2 = 0;
-      capnogramType = 'cardiac_arrest_flat';
-    } else if (finalRR === 0) {
+    // Capnography strictly requires an active tracheal tube or laryngeal mask.
+    // In an unintubated animal or esophageal intubation, the machine sensor is open to room air (EtCO2 = 0, flatline).
+    const isAirwaySampled = equipment.intubationStatus === 'intubated_tracheal' || equipment.intubationStatus === 'laryngeal_mask';
+
+    // Alveolar metabolic production VCO2 and alveolar ventilation ratio
+    const baselineAlveolarV = ((baselineVT - deadSpaceMl) * baselineRR) / 1000.0;
+    const ventilationRatio = alveolarVentilationLMin / Math.max(0.1, baselineAlveolarV);
+
+    let targetSteadyEtCO2 = patient.baselineVitals.etco2;
+    if (finalRR === 0) {
+      targetSteadyEtCO2 = 0;
+    } else if (ventilationRatio < 0.80) {
+      capnogramType = 'hypoventilation';
+      const severity = Math.min(1.0, (0.80 - ventilationRatio) / 0.45);
+      const maxHypoventEt = patient.baselineVitals.etco2 / Math.max(0.35, ventilationRatio);
+      targetSteadyEtCO2 = patient.baselineVitals.etco2 + (maxHypoventEt - patient.baselineVitals.etco2) * severity;
+    } else if (ventilationRatio > 1.25) {
+      capnogramType = 'hyperventilation';
+      const severity = Math.min(1.0, (ventilationRatio - 1.25) / 0.75);
+      const minHyperventEt = patient.baselineVitals.etco2 / Math.min(2.5, ventilationRatio);
+      targetSteadyEtCO2 = patient.baselineVitals.etco2 - (patient.baselineVitals.etco2 - minHyperventEt) * severity;
+    } else {
+      capnogramType = 'normal';
+    }
+
+    if (fico2 > 0) {
+      targetSteadyEtCO2 += fico2;
+      capnogramType = 'rebreathing_elevated_baseline';
+    }
+
+    // In non-intubated patients (spontaneous breathing with nasal cannula / mask sidestream line),
+    // slight room air entrainment slightly dilutes the measured steady peak (~95% of alveolar plateau)
+    if (!isAirwaySampled && finalRR > 0) {
+      targetSteadyEtCO2 *= 0.95;
+    }
+
+    const targetPaCO2 = targetSteadyEtCO2 + 4.5;
+    const co2Equilibration = 1 - Math.exp(-dtSeconds / 14);
+    paCO2Estimate += (targetPaCO2 - paCO2Estimate) * co2Equilibration;
+
+    if (isEsophageal || finalRR === 0) {
       etco2 = 0;
       capnogramType = 'cardiac_arrest_flat';
     } else {
-      // Normal metabolic production VCO2
-      const baselineAlveolarV = ((baselineVT - deadSpaceMl) * baselineRR) / 1000.0;
-      const ventilationRatio = alveolarVentilationLMin / Math.max(0.1, baselineAlveolarV);
+      // Smooth physiological wash-in/wash-out due to Functional Residual Capacity (FRC)
+      // CO2 changes take time (~14 seconds time constant) to wash out or accumulate in lung volume
+      const etco2Tau = 14.0; // seconds
+      const washFraction = 1 - Math.exp(-dtSeconds / etco2Tau);
+      const prevEt = (previousEtCO2 !== undefined && previousEtCO2 > 0) ? previousEtCO2 : (targetSteadyEtCO2 * 0.96);
+      let rawEtco2 = prevEt + (targetSteadyEtCO2 - prevEt) * washFraction;
 
-      let targetPaCO2 = patient.baselineVitals.etco2 + 4.5;
-      if (ventilationRatio < 0.70) {
-        // Hypoventilation
-        etco2 = Math.min(88, Math.round(patient.baselineVitals.etco2 / Math.max(0.35, ventilationRatio)));
-        targetPaCO2 = etco2 + 4.5;
-        capnogramType = 'hypoventilation';
-      } else if (ventilationRatio > 1.45) {
-        // Hyperventilation
-        etco2 = Math.max(14, Math.round(patient.baselineVitals.etco2 / Math.min(2.5, ventilationRatio)));
-        targetPaCO2 = etco2 + 4.5;
-        capnogramType = 'hyperventilation';
-      } else {
-        etco2 = Math.round(patient.baselineVitals.etco2);
-        targetPaCO2 = etco2 + 4.5;
-        capnogramType = 'normal';
-      }
-
-      if (fico2 > 0) {
-        etco2 += fico2;
-        capnogramType = 'rebreathing_elevated_baseline';
-        targetPaCO2 += fico2;
-      }
-
-      const co2Equilibration = 1 - Math.exp(-dtSeconds / 12);
-      paCO2Estimate += (targetPaCO2 - paCO2Estimate) * co2Equilibration;
       // Low pulmonary blood flow lowers measured EtCO2 despite systemic CO2 retention.
-      if (cardiacOutputRatio < 0.65) {
-        etco2 = Math.max(0, Math.round(etco2 * Math.max(0.35, cardiacOutputRatio / 0.65)));
+      if (cardiacOutputRatio < 0.55) {
+        rawEtco2 = rawEtco2 * Math.max(0.35, cardiacOutputRatio / 0.55);
       }
+
+      etco2 = Number(rawEtco2.toFixed(1));
     }
 
     if (finalRR === 0 || isEsophageal) {
@@ -254,14 +300,18 @@ export class RespiratoryGasExchangeEngine {
     // 4. ARTERIAL OXYGENATION & SHUNT (PaO2 & SpO2)
     // ----------------------------------------------------
     // Inspired oxygen concentration
-    const fio2 = isIntubated && equipment.oxygenFlowLMin > 0.2 ? 0.98 : 0.21;
+    const fio2 = hasSealedAirway && equipment.oxygenFlowLMin > 0.2 ? 0.98 : 0.21;
     
     // Alveolar Gas Equation: PAO2 = FiO2 * (P_atm - 47) - (PaCO2 / 0.8)
     const pAO2 = Math.max(10, fio2 * 713 - (paCO2Estimate / 0.8));
 
     // Effect of Intrapulmonary Shunt (Qs/Qt):
     // Shunt directly mixes deoxygenated venous blood with arterial blood
-    const shuntFraction = Math.max(0.04, pulmonaryShuntFractionPct / 100.0);
+    const peepRecruitment = hasSealedAirway && equipment.isVentilatorActive
+      ? Math.min(0.32, Math.max(0, equipment.ventilatorSettings.peepCmH2O) * 0.025)
+      : 0;
+    const effectiveShuntPct = pulmonaryShuntFractionPct * (1 - peepRecruitment);
+    const shuntFraction = Math.max(0.04, effectiveShuntPct / 100.0);
     let targetPaO2 = pAO2 * (1.0 - shuntFraction * 1.8);
     targetPaO2 = Math.max(15, Math.min(480, targetPaO2));
 
@@ -271,8 +321,13 @@ export class RespiratoryGasExchangeEngine {
     let currentSpO2 = previousSpO2;
 
     if (!isAdequatelyVentilating) {
-      // Rapid desaturation rate
-      currentPaO2 = Math.max(12, currentPaO2 - dtSeconds * 8.5);
+      // Oxygen reserve and consumption vary strongly by species/body plan.
+      const desaturationRate = Math.min(24, Math.max(
+        3,
+        8.5 * (speciesConfig.oxygenConsumptionMlKgMin / 5)
+          * (45 / speciesConfig.functionalResidualCapacityMlKg)
+      ));
+      currentPaO2 = Math.max(12, currentPaO2 - dtSeconds * desaturationRate);
     } else {
       // Re-oxygenation towards target
       if (currentPaO2 < targetPaO2) {
@@ -335,12 +390,18 @@ export class RespiratoryGasExchangeEngine {
 
     const hematocrit = Math.max(
       8,
-      patient.baselineVitals.hctPct + receptors.oxygenCarryingSupport * 10
+      (persistentHematocritPct ?? patient.baselineVitals.hctPct) + receptors.oxygenCarryingSupport * 10
         - Math.max(0, receptors.volumeExpansion - receptors.oxygenCarryingSupport * 0.65) * 5
     );
     const potassium = Math.max(
       2,
       patient.baselineVitals.potassiumMeqL + receptors.potassiumLoad * 1.2 - receptors.alkalinization * 0.65
+    );
+
+    const hasAssistedVentilation = hasSealedAirway && (
+      (equipment.isVentilatorActive && equipment.ventilatorMode !== 'spontaneous')
+      || isSingleManualBreathActive
+      || hasManualCadence
     );
 
     return {
@@ -361,7 +422,8 @@ export class RespiratoryGasExchangeEngine {
         potassium: Number(potassium.toFixed(2)),
         hematocritPct: Number(hematocrit.toFixed(2)),
       },
-      isRespiratoryArrest,
+      isRespiratoryArrest: isRespiratoryArrest && !hasAssistedVentilation,
+      isSpontaneousApnea: isRespiratoryArrest,
       respiratoryArrestCause: arrestCause,
       hypoxiaSecondsAccumulated: Number(hypoxiaSecondsAccumulated.toFixed(3)),
       currentAirwayPressureCmH2O: currentPaw,

@@ -29,11 +29,12 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
 
   const hasDead = vitals.isDead;
   const hasPCR = !vitals.isDead && vitals.isCardiacArrest;
+  const hasImpendingDeath = !vitals.isDead && !vitals.isCardiacArrest && Boolean(vitals.impendingArrestWarning);
   const hasApnea = !vitals.isDead && !vitals.isCardiacArrest && vitals.isRespiratoryArrest;
   const hasInteractions = !vitals.isDead && vitals.activeDrugInteractions && vitals.activeDrugInteractions.length > 0;
-  const hasIschemia = !vitals.isDead && !vitals.isCardiacArrest && (vitals.hypoxiaExposureSeconds > 25 || vitals.myocardialIschemiaScore > 0.40);
+  const hasIschemia = !vitals.isDead && !vitals.isCardiacArrest && !hasImpendingDeath && (vitals.hypoxiaExposureSeconds > 25 || vitals.myocardialIschemiaScore > 0.40);
 
-  const totalAlertsCount = (hasDead ? 1 : 0) + (hasPCR ? 1 : 0) + (hasApnea ? 1 : 0) + (hasInteractions ? vitals.activeDrugInteractions.length : 0) + (hasIschemia ? 1 : 0);
+  const totalAlertsCount = (hasDead ? 1 : 0) + (hasPCR ? 1 : 0) + (hasImpendingDeath ? 1 : 0) + (hasApnea ? 1 : 0) + (hasInteractions ? vitals.activeDrugInteractions.length : 0) + (hasIschemia ? 1 : 0);
 
   if (totalAlertsCount === 0) return null;
 
@@ -55,6 +56,16 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
+          {hasImpendingDeath && onSwitchToEmergencyTab && (
+            <button
+              onClick={onSwitchToEmergencyTab}
+              className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-mono-code font-bold flex items-center space-x-1 shadow-md shadow-amber-950/80 transition animate-bounce"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>COLAPSO EM ~{vitals.impendingArrestWarning?.secondsRemainingEstimate}s · AGIR AGORA</span>
+            </button>
+          )}
+
           {hasPCR && onSwitchToEmergencyTab && (
             <button
               onClick={onSwitchToEmergencyTab}
@@ -110,6 +121,43 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
                   Abrir Laudo
                 </button>
               )}
+            </div>
+          )}
+
+          {/* 1B. IMPENDING ARREST / CRITICAL DETERIORATION ALERT */}
+          {hasImpendingDeath && vitals.impendingArrestWarning && (
+            <div className={`p-3 rounded-lg border text-xs font-mono-code flex items-start gap-3 shadow-lg ${
+              vitals.impendingArrestWarning.urgency === 'critical'
+                ? 'bg-red-950/95 border-red-500 text-red-100 animate-pulse shadow-red-950/70'
+                : 'bg-amber-950/90 border-amber-500 text-amber-100 shadow-amber-950/50'
+            }`}>
+              <AlertOctagon className={`w-5 h-5 shrink-0 mt-0.5 ${
+                vitals.impendingArrestWarning.urgency === 'critical' ? 'text-red-400' : 'text-amber-400'
+              }`} />
+              <div className="flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-extrabold text-xs uppercase tracking-wide flex items-center gap-1.5">
+                    <span>⚠️ {vitals.impendingArrestWarning.headline}</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-red-900 border border-red-500 text-white font-sans font-bold">
+                      TEMPO ESTIMADO: ~{vitals.impendingArrestWarning.secondsRemainingEstimate}s
+                    </span>
+                  </span>
+                  {onSwitchToEmergencyTab && (
+                    <button
+                      onClick={onSwitchToEmergencyTab}
+                      className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold shrink-0 transition"
+                    >
+                      Acessar CPCR
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] opacity-95 font-sans mt-0.5">
+                  {vitals.impendingArrestWarning.details}
+                </p>
+                <p className="text-[10px] text-amber-300 font-mono-code mt-1 font-semibold">
+                  ⚡ Conduta Imediata: {vitals.impendingArrestWarning.recommendedAction}
+                </p>
+              </div>
             </div>
           )}
 

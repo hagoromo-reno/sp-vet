@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { VitalSigns } from '../../types/simulator';
+import { VitalSigns, AnesthesiaEquipmentState } from '../../types/simulator';
 import { AudioSynthesizer } from '../../engine/audioSynthesizer';
 
 interface CanvasWaveformsProps {
   vitals: VitalSigns;
   isSimPaused: boolean;
+  equipment?: AnesthesiaEquipmentState;
 }
 
-export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimPaused }) => {
+export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimPaused, equipment }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -27,6 +28,8 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
   const lastPvcTimeRef = useRef<number>(0);
   const isPvcBeatRef = useRef<boolean>(false);
   const droppedBeatCountRef = useRef<number>(0);
+  const smoothedEtco2Ref = useRef<number>(38);
+  const smoothedRrRef = useRef<number>(15);
 
   // Store last Y values to ensure 100% continuous, non-broken connected lines
   const lastYRef = useRef<{
@@ -199,31 +202,40 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
 
     // 2. Ventricular Fibrillation (VF) - Chaotic undulating multi-frequency fibrillatory waves
     if (rhythm === 'ventricular_fibrillation') {
-      const w1 = Math.sin(simTimeSec * 2 * Math.PI * 5.2) * 0.42;
-      const w2 = Math.sin(simTimeSec * 2 * Math.PI * 7.8 + 1.2) * 0.32;
-      const w3 = Math.sin(simTimeSec * 2 * Math.PI * 3.1 + 2.4) * 0.22;
-      const noise = (Math.random() - 0.5) * 0.08;
-      return w1 + w2 + w3 + noise;
+      const w1 = Math.sin(simTimeSec * 2 * Math.PI * 4.8) * 0.44;
+      const w2 = Math.sin(simTimeSec * 2 * Math.PI * 6.9 + 0.8) * 0.32;
+      const w3 = Math.sin(simTimeSec * 2 * Math.PI * 2.3 + 1.7) * 0.22;
+      const w4 = Math.sin(simTimeSec * 2 * Math.PI * 9.1 + 2.5) * 0.14;
+      const noise = (Math.random() - 0.5) * 0.05;
+      return w1 + w2 + w3 + w4 + noise;
     }
 
-    // 3. Ventricular Tachycardia (VT) - Wide, bizarre monomorphic QRS complexes (160-220 bpm)
+    // 3. Ventricular Tachycardia (VT) - Wide, bizarre notched monomorphic QRS complexes
     if (rhythm === 'ventricular_tachycardia') {
-      // Wide notched tombstone complexes
-      const vt = Math.sin(p * Math.PI * 2 - Math.PI / 2) * 0.85 + Math.sin(p * Math.PI * 4) * 0.2;
-      return vt;
+      // Wide QRS duration (~50% of cardiac cycle), apical notch and discordant inverted T wave
+      if (p < 0.46) {
+        const qrsP = p / 0.46;
+        const mainR = Math.sin(qrsP * Math.PI);
+        const notch = 0.20 * Math.sin(qrsP * Math.PI * 3);
+        return (mainR + notch) * 1.15;
+      } else if (p < 0.80) {
+        const tP = (p - 0.46) / 0.34;
+        return -0.42 * Math.sin(tP * Math.PI);
+      } else {
+        return (Math.random() - 0.5) * 0.015;
+      }
     }
 
     // 4. Ventricular Premature Complex (VPC / PVC) beat
     if (isPvc) {
-      if (p >= 0.0 && p < 0.35) {
-        // Broad, notched negative/biphasic deep complex followed by huge inverted T wave
-        const pNorm = p / 0.35;
-        if (pNorm < 0.4) {
-          return -0.95 * Math.sin((pNorm / 0.4) * Math.PI);
-        } else if (pNorm < 0.6) {
-          return 0.35 * Math.sin(((pNorm - 0.4) / 0.2) * Math.PI);
+      if (p < 0.44) {
+        const pNorm = p / 0.44;
+        if (pNorm < 0.35) {
+          return -1.05 * Math.sin((pNorm / 0.35) * Math.PI);
+        } else if (pNorm < 0.55) {
+          return 0.38 * Math.sin(((pNorm - 0.35) / 0.20) * Math.PI);
         } else {
-          return 0.65 * Math.sin(((pNorm - 0.6) / 0.4) * Math.PI);
+          return 0.68 * Math.sin(((pNorm - 0.55) / 0.45) * Math.PI);
         }
       }
       return (Math.random() - 0.5) * 0.01;
@@ -296,7 +308,7 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
    */
   const calculatePleth = (p: number, vitals: VitalSigns): number => {
     // If Asystole or severe arrest, flatline
-    if (vitals.cardiacRhythm === 'asystole' || vitals.pulseOximetrySpO2 <= 0) {
+    if ((vitals.cardiacRhythm === 'asystole' && !vitals.isChestCompressionPulse) || vitals.pulseOximetrySpO2 <= 0) {
       return 0.02 * (Math.random() - 0.5);
     }
 
@@ -336,8 +348,8 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
    * Evaluates Capnography (EtCO2) waveform in mmHg at breath phase p in [0, 1).
    * Range: 0 mmHg to ~60 mmHg.
    */
-  const calculateCapnogram = (p: number, vitals: VitalSigns): number => {
-    const etCO2 = vitals.etCO2;
+  const calculateCapnogram = (p: number, vitals: VitalSigns, effectiveEtCO2?: number): number => {
+    const etCO2 = effectiveEtCO2 !== undefined ? effectiveEtCO2 : vitals.etCO2;
     const fiCO2 = vitals.fiCO2;
 
     // 1. Cardiac Arrest / Apnea / Flatline
@@ -366,20 +378,19 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
     }
 
     // 4. Standard 4-Phase Capnogram (Phase I -> II -> III -> Phase 0)
-    // Expiration occupies ~65% of cycle (I:E = 1:2)
+    // Smooth continuous alveolar transition (I:E = 1:2)
     if (p < 0.08) {
       // Phase I: Inspiratory Baseline (0 mmHg or FiCO2 in rebreathing)
       return fiCO2;
-    } else if (p < 0.22) {
+    } else if (p < 0.24) {
       // Phase II: Rapid Expiratory S-Curve Upstroke (Anatomic dead space gas emptying)
-      const tUp = (p - 0.08) / 0.14;
-      // Sigmoidal smooth transition (alpha angle ~ 105 degrees)
-      const sCurve = 1 / (1 + Math.exp(-12 * (tUp - 0.5)));
-      return fiCO2 + (etCO2 * 0.90 - fiCO2) * sCurve;
-    } else if (p < 0.64) {
+      const tUp = (p - 0.08) / 0.16;
+      const sCurve = 1 / (1 + Math.exp(-10 * (tUp - 0.5)));
+      return fiCO2 + (etCO2 * 0.92 - fiCO2) * sCurve;
+    } else if (p < 0.68) {
       // Phase III: Alveolar Plateau (Gently upsloping to peak EtCO2)
-      const tPlateau = (p - 0.22) / 0.42;
-      let plateauCo2 = etCO2 * (0.90 + 0.10 * tPlateau);
+      const tPlateau = (p - 0.24) / 0.44;
+      let plateauCo2 = etCO2 * (0.92 + 0.08 * tPlateau);
 
       // Curare Cleft pathology check (diaphragmatic notch during neuromuscular recovery)
       if (vitals.capnogramType === 'curare_cleft') {
@@ -392,13 +403,13 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
 
       // Cardiogenic Oscillations pathology check
       if (vitals.capnogramType === 'cardiogenic_oscillations') {
-        plateauCo2 += Math.sin(tPlateau * Math.PI * 12) * 2.2;
+        plateauCo2 += Math.sin(tPlateau * Math.PI * 12) * 2.0;
       }
 
       return Math.max(fiCO2, plateauCo2);
-    } else if (p < 0.72) {
-      // Phase 0: Rapid, crisp inspiratory downstroke back to baseline (beta angle ~ 90 degrees)
-      const tDown = (p - 0.64) / 0.08;
+    } else if (p < 0.78) {
+      // Phase 0: Rapid inspiratory downstroke back to baseline
+      const tDown = (p - 0.68) / 0.10;
       return Math.max(fiCO2, etCO2 * (1.0 - tDown));
     } else {
       // Rest of inspiration
@@ -412,7 +423,7 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
    */
   const calculateArterialLine = (p: number, vitals: VitalSigns): number => {
     // If Asystole / VFib, pressure collapses to static filling pressure (~10-15 mmHg)
-    if (vitals.cardiacRhythm === 'asystole' || vitals.cardiacRhythm === 'ventricular_fibrillation') {
+    if ((vitals.cardiacRhythm === 'asystole' || vitals.cardiacRhythm === 'ventricular_fibrillation') && !vitals.isChestCompressionPulse) {
       return 12 + (Math.random() - 0.5) * 1.5;
     }
 
@@ -509,7 +520,6 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
 
         if (timeSinceBeat >= beatIntervalSec) {
           lastBeatTimeRef.current = currentTime;
-          heartPhaseRef.current = 0;
 
           // Arrhythmia logic: VPC trigger probability
           if (vitals.cardiacRhythm === 'ventricular_premature_complexes') {
@@ -533,19 +543,18 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
           }
         }
 
-        const rr = Math.max(1, vitals.respiratoryRate);
-        const respIntervalSec = 60.0 / rr;
-        const timeSinceResp = (currentTime - lastRespTimeRef.current) / 1000;
-
-        if (timeSinceResp >= respIntervalSec) {
-          lastRespTimeRef.current = currentTime;
-          respPhaseRef.current = 0;
+        const targetRR = Math.max(1, vitals.respiratoryRate);
+        if (!smoothedRrRef.current || smoothedRrRef.current <= 0) {
+          smoothedRrRef.current = targetRR;
+        } else {
+          smoothedRrRef.current += (targetRR - smoothedRrRef.current) * Math.min(1.0, dt * 2.0);
         }
+        const respIntervalSec = 60.0 / smoothedRrRef.current;
 
         // ---------------------------------------------------------
         // MULTI-SAMPLE CONTINUOUS VECTOR DRAWING
         // Evaluates every single sub-pixel column between prevSweepX and nextSweepX
-        // Eliminates any dashes, gaps, dots or aliasing completely!
+        // Fine 1.0px strokes for high-resolution authentic veterinary monitor look
         // ---------------------------------------------------------
         if (!didWrap && nextSweepX > prevSweepX) {
           const stepCount = Math.max(1, Math.ceil(nextSweepX - prevSweepX));
@@ -559,13 +568,18 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
           const artBaseY = trackHeight * 3.88;
           const artMaxH = trackHeight * 0.74;
 
-          // Prepare subpixel paths for crisp anti-aliased strokes
+          // Collect subpixel points for single continuous path strokes
+          const ecgPoints: { x: number; y: number }[] = [];
+          const plethPoints: { x: number; y: number }[] = [];
+          const capnoPoints: { x: number; y: number }[] = [];
+          const artPoints: { x: number; y: number }[] = [];
+
           for (let step = 0; step < stepCount; step++) {
             const currentSubX = prevSweepX + (step + 1) * ((nextSweepX - prevSweepX) / stepCount);
             const subDt = (dt / stepCount);
             const subTimeSec = (currentTime - (stepCount - step - 1) * (dt / stepCount * 1000)) / 1000;
 
-            // Advance phases smoothly
+            // Advance phases purely smoothly without abrupt collisions
             heartPhaseRef.current = (heartPhaseRef.current + subDt / beatIntervalSec) % 1.0;
             respPhaseRef.current = (respPhaseRef.current + subDt / respIntervalSec) % 1.0;
 
@@ -580,8 +594,10 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
             const plethVal = calculatePleth(pHeart, vitals);
             const plethY = plethBaseY - plethVal * plethMaxH;
 
-            // 3. Capnogram Y coordinate (Calibrated 0-60 mmHg)
-            const capnoValMmHg = calculateCapnogram(pResp, vitals);
+            // 3. Capnogram Y coordinate (Calibrated 0-60 mmHg with continuous smooth transition)
+            const targetEt = (vitals.isDead || vitals.respiratoryRate === 0) ? 0 : vitals.etCO2;
+            smoothedEtco2Ref.current += (targetEt - smoothedEtco2Ref.current) * Math.min(1.0, subDt * 2.5);
+            const capnoValMmHg = calculateCapnogram(pResp, vitals, smoothedEtco2Ref.current);
             const normCapno = Math.min(1.0, Math.max(0, capnoValMmHg / 55.0));
             const capnoY = capnoBaseY - normCapno * capnoMaxH;
 
@@ -590,91 +606,90 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
             const normArt = Math.min(1.0, Math.max(0, artValMmHg / 180.0));
             const artY = artBaseY - normArt * artMaxH;
 
-            const x0 = step === 0 ? prevSweepX : prevSweepX + step * ((nextSweepX - prevSweepX) / stepCount);
-            const x1 = currentSubX;
+            ecgPoints.push({ x: currentSubX, y: ecgY });
+            plethPoints.push({ x: currentSubX, y: plethY });
+            capnoPoints.push({ x: currentSubX, y: capnoY });
+            artPoints.push({ x: currentSubX, y: artY });
+          }
 
-            // --- DRAW TRACK 1: ECG (GREEN #22c55e) ---
-            ctx.strokeStyle = '#22c55e';
-            ctx.lineWidth = 1.9;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
+          // Single continuous vector render per track with balanced medical monitor thickness
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+
+          // --- 1. ECG (GREEN #22c55e) ---
+          ctx.strokeStyle = '#22c55e';
+          ctx.lineWidth = 1.45;
+          ctx.beginPath();
+          ctx.moveTo(prevSweepX, lastYRef.current.ecg || (ecgPoints[0]?.y ?? ecgCenterY));
+          for (let i = 0; i < ecgPoints.length; i++) {
+            ctx.lineTo(ecgPoints[i].x, ecgPoints[i].y);
+          }
+          ctx.stroke();
+
+          // --- 2. PLETH (CYAN #06b6d4) ---
+          if (showShading && plethPoints.length > 0) {
+            ctx.fillStyle = 'rgba(6, 182, 212, 0.09)';
             ctx.beginPath();
-            ctx.moveTo(x0, lastYRef.current.ecg || ecgY);
-            ctx.lineTo(x1, ecgY);
-            ctx.stroke();
-
-            // --- DRAW TRACK 2: PLETH / SpO2 (CYAN #06b6d4) ---
-            if (showShading) {
-              ctx.fillStyle = 'rgba(6, 182, 212, 0.10)';
-              ctx.beginPath();
-              ctx.moveTo(x0, plethBaseY);
-              ctx.lineTo(x0, lastYRef.current.pleth || plethY);
-              ctx.lineTo(x1, plethY);
-              ctx.lineTo(x1, plethBaseY);
-              ctx.closePath();
-              ctx.fill();
+            ctx.moveTo(prevSweepX, plethBaseY);
+            ctx.lineTo(prevSweepX, lastYRef.current.pleth || plethPoints[0].y);
+            for (let i = 0; i < plethPoints.length; i++) {
+              ctx.lineTo(plethPoints[i].x, plethPoints[i].y);
             }
-            ctx.strokeStyle = '#06b6d4';
-            ctx.lineWidth = 1.9;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.beginPath();
-            ctx.moveTo(x0, lastYRef.current.pleth || plethY);
-            ctx.lineTo(x1, plethY);
-            ctx.stroke();
+            ctx.lineTo(nextSweepX, plethBaseY);
+            ctx.closePath();
+            ctx.fill();
+          }
+          ctx.strokeStyle = '#06b6d4';
+          ctx.lineWidth = 1.55;
+          ctx.beginPath();
+          ctx.moveTo(prevSweepX, lastYRef.current.pleth || (plethPoints[0]?.y ?? plethBaseY));
+          for (let i = 0; i < plethPoints.length; i++) {
+            ctx.lineTo(plethPoints[i].x, plethPoints[i].y);
+          }
+          ctx.stroke();
 
-            // --- DRAW TRACK 3: CAPNOGRAPHY / EtCO2 (YELLOW #eab308) ---
-            if (showShading && capnoValMmHg > 0) {
-              ctx.fillStyle = 'rgba(234, 179, 8, 0.12)';
-              ctx.beginPath();
-              ctx.moveTo(x0, capnoBaseY);
-              ctx.lineTo(x0, lastYRef.current.capno || capnoY);
-              ctx.lineTo(x1, capnoY);
-              ctx.lineTo(x1, capnoBaseY);
-              ctx.closePath();
-              ctx.fill();
+          // --- 3. CAPNOGRAPHY (YELLOW #eab308) ---
+          if (showShading && capnoPoints.length > 0) {
+            ctx.fillStyle = 'rgba(234, 179, 8, 0.11)';
+            ctx.beginPath();
+            ctx.moveTo(prevSweepX, capnoBaseY);
+            ctx.lineTo(prevSweepX, lastYRef.current.capno || capnoPoints[0].y);
+            for (let i = 0; i < capnoPoints.length; i++) {
+              ctx.lineTo(capnoPoints[i].x, capnoPoints[i].y);
             }
-            ctx.strokeStyle = '#eab308';
-            ctx.lineWidth = 2.1;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.beginPath();
-            ctx.moveTo(x0, lastYRef.current.capno || capnoY);
-            ctx.lineTo(x1, capnoY);
-            ctx.stroke();
+            ctx.lineTo(nextSweepX, capnoBaseY);
+            ctx.closePath();
+            ctx.fill();
+          }
+          ctx.strokeStyle = '#eab308';
+          ctx.lineWidth = 1.65;
+          ctx.beginPath();
+          ctx.moveTo(prevSweepX, lastYRef.current.capno || (capnoPoints[0]?.y ?? capnoBaseY));
+          for (let i = 0; i < capnoPoints.length; i++) {
+            ctx.lineTo(capnoPoints[i].x, capnoPoints[i].y);
+          }
+          ctx.stroke();
 
-            // --- DRAW TRACK 4: ARTERIAL LINE / PAI (RED #ef4444) ---
-            ctx.strokeStyle = '#ef4444';
-            ctx.lineWidth = 1.9;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.beginPath();
-            ctx.moveTo(x0, lastYRef.current.art || artY);
-            ctx.lineTo(x1, artY);
-            ctx.stroke();
+          // --- 4. ART (RED #ef4444) ---
+          ctx.strokeStyle = '#ef4444';
+          ctx.lineWidth = 1.45;
+          ctx.beginPath();
+          ctx.moveTo(prevSweepX, lastYRef.current.art || (artPoints[0]?.y ?? artBaseY));
+          for (let i = 0; i < artPoints.length; i++) {
+            ctx.lineTo(artPoints[i].x, artPoints[i].y);
+          }
+          ctx.stroke();
 
-            // Update last points
+          if (ecgPoints.length > 0) {
             lastYRef.current = {
-              ecg: ecgY,
-              pleth: plethY,
-              capno: capnoY,
-              art: artY,
+              ecg: ecgPoints[ecgPoints.length - 1].y,
+              pleth: plethPoints[plethPoints.length - 1].y,
+              capno: capnoPoints[capnoPoints.length - 1].y,
+              art: artPoints[artPoints.length - 1].y,
             };
           }
 
-          // Draw Glowing Sweep Leading Edge Cursor Dots (Mindray/Philips style)
-          const cursorX = nextSweepX;
-          const drawGlowCursor = (y: number, color: string) => {
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(cursorX, y, 2.5, 0, Math.PI * 2);
-            ctx.fill();
-          };
-
-          drawGlowCursor(lastYRef.current.ecg, '#4ade80');
-          drawGlowCursor(lastYRef.current.pleth, '#67e8f9');
-          drawGlowCursor(lastYRef.current.capno, '#fde047');
-          drawGlowCursor(lastYRef.current.art, '#f87171');
+          // Sweep vector complete
         } else {
           // Wrapped around, reset previous Y markers
           lastYRef.current = {
@@ -736,9 +751,21 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
         <span className="text-xs font-bold font-mono-code tracking-wider text-yellow-400">
           CO₂ · CAPNÓGRAFO (mmHg)
         </span>
-        <span className="text-[11px] px-1.5 py-0.2 rounded bg-yellow-950/60 border border-yellow-800/50 text-yellow-300 font-mono-code">
-          {vitals.capnogramType === 'normal' ? 'FASE I-IV ADEQUADA' : vitals.capnogramType.replace(/_/g, ' ').toUpperCase()}
-        </span>
+        {equipment?.intubationStatus === 'intubated_tracheal' ? (
+          <span className="text-[11px] px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-mono-code font-bold flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            SONDA TRAQUEAL #{equipment.tubeSizeMm}mm · {vitals.capnogramType === 'normal' ? 'EtCO₂ ATIVO' : vitals.capnogramType.replace(/_/g, ' ').toUpperCase()}
+          </span>
+        ) : equipment?.intubationStatus === 'intubated_esophageal' ? (
+          <span className="text-[11px] px-1.5 py-0.2 rounded bg-red-950/80 border border-red-700/60 text-red-300 font-mono-code font-bold animate-pulse">
+            ALERTA: SONDA NO ESÔFAGO (SEM CO₂ EXPIRADO)
+          </span>
+        ) : (
+          <span className="text-[11px] px-1.5 py-0.2 rounded bg-yellow-950/60 border border-yellow-800/50 text-yellow-300 font-mono-code flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
+            AMOSTRAGEM ESPONTÂNEA / NÃO INTUBADO · {vitals.capnogramType === 'normal' ? 'EtCO₂ ATIVO' : vitals.capnogramType.replace(/_/g, ' ').toUpperCase()}
+          </span>
+        )}
       </div>
       {/* Capnography scale tick markers (0, 20, 40 mmHg) */}
       <div className="absolute top-[52%] right-3 z-10 flex flex-col items-end text-[9px] text-[#888888] font-mono-code pointer-events-none space-y-2">

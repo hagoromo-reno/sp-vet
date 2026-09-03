@@ -9,6 +9,7 @@ interface VentilatorAirwayProps {
   onUpdateEquipment: (updates: Partial<AnesthesiaEquipmentState>) => void;
   onPerformIntubation: (isCorrectTracheal: boolean, tubeSizeMm: number) => void;
   onExtubate: () => void;
+  onApplyLidocaineSpray?: () => void;
 }
 
 export const VentilatorAirway: React.FC<VentilatorAirwayProps> = ({
@@ -17,6 +18,7 @@ export const VentilatorAirway: React.FC<VentilatorAirwayProps> = ({
   onUpdateEquipment,
   onPerformIntubation,
   onExtubate,
+  onApplyLidocaineSpray,
 }) => {
   const speciesInfo = SPECIES_DATABASE[patient.species] || SPECIES_DATABASE.canine;
   const isIntubated = equipment.intubationStatus === 'intubated_tracheal';
@@ -104,6 +106,19 @@ export const VentilatorAirway: React.FC<VentilatorAirwayProps> = ({
           <div className="flex space-x-2 pt-1">
             {!isIntubated && !isEsophageal ? (
               <>
+                {onApplyLidocaineSpray && (
+                  <button
+                    onClick={onApplyLidocaineSpray}
+                    className={`py-1.5 px-2.5 rounded border text-xs font-bold font-mono-code transition ${
+                      equipment.isLarynxDesensitized
+                        ? 'bg-emerald-950 border-emerald-500 text-emerald-300'
+                        : 'bg-[#1a1a24] hover:bg-[#252533] border-[#333346] text-[#c0c0d0]'
+                    }`}
+                    title="Dessensibilizar laringe com spray de lidocaína 2%"
+                  >
+                    {equipment.isLarynxDesensitized ? '✓ Lido 2% Ativa' : 'Spray Lido 2%'}
+                  </button>
+                )}
                 <button
                   onClick={() => onPerformIntubation(true, equipment.tubeSizeMm)}
                   className="flex-1 py-1.5 px-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-mono-code transition flex items-center justify-center space-x-1 shadow-md shadow-black/40"

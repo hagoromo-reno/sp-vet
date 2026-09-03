@@ -12,12 +12,20 @@ export interface DoseRange {
   max: number;
 }
 
-/** Returns only an explicitly curated range for the requested species. */
-export function getSpeciesDoseRange(drug: DrugDefinition, species: SpeciesType): DoseRange | undefined {
+/** Returns only an explicitly curated range for the requested species. Supports CRI ranges for dual-mode drugs. */
+export function getSpeciesDoseRange(
+  drug: DrugDefinition,
+  species: SpeciesType,
+  isCRI?: boolean
+): DoseRange | undefined {
+  if (isCRI && drug.recommendedCriDose?.[species]) {
+    return drug.recommendedCriDose[species];
+  }
   return drug.recommendedDose[species];
 }
 
-export function isTimeBasedDoseUnit(doseUnit: DrugDefinition['doseUnit']): boolean {
+export function isTimeBasedDoseUnit(doseUnit?: string): boolean {
+  if (!doseUnit) return false;
   return doseUnit.endsWith('/min') || doseUnit.endsWith('/h');
 }
 
@@ -40,19 +48,21 @@ export function validateAdministrationCommand(
   command: AdministrationCommand
 ): string[] {
   const errors: string[] = [];
-  const range = getSpeciesDoseRange(drug, patient.species);
-  const isRate = isTimeBasedDoseUnit(drug.doseUnit);
-  const isCriRoute = command.route === 'CRI';
+  const isCriRoute = command.route === 'CRI' || Boolean(command.isCRI);
+  const range = getSpeciesDoseRange(drug, patient.species, isCriRoute);
+  const isNativeRate = isTimeBasedDoseUnit(drug.doseUnit);
+  const hasCriRange = Boolean(drug.recommendedCriDose?.[patient.species]);
+  const isSupportedCRI = isNativeRate || hasCriRange;
 
-  if (!range) errors.push(`${drug.name} não possui regime validado para ${patient.species}.`);
+  if (!range) errors.push(`${drug.name} não possui regime ${isCriRoute ? 'CRI' : 'validado'} para ${patient.species}.`);
   if (!drug.supportedRoutes.includes(command.route)) errors.push(`Via ${command.route} não cadastrada para ${drug.name}.`);
   if (!Number.isFinite(command.dosePerKg) || command.dosePerKg <= 0) errors.push('A dose deve ser finita e maior que zero.');
   if (command.concentrationMgMl !== undefined && (!Number.isFinite(command.concentrationMgMl) || command.concentrationMgMl <= 0)) {
     errors.push('A concentração deve ser finita e maior que zero.');
   }
-  if (Boolean(command.isCRI) !== isCriRoute) errors.push('O modo CRI e a via CRI precisam coincidir.');
-  if (isCriRoute && !isRate) errors.push(`${drug.name} possui somente dose de ataque cadastrada; a taxa CRI ainda não foi validada.`);
-  if (!isCriRoute && isRate) errors.push(`${drug.name} possui somente regime contínuo cadastrado; não use a taxa como dose em bólus.`);
+  if (Boolean(command.isCRI) !== (command.route === 'CRI')) errors.push('O modo CRI e a via CRI precisam coincidir.');
+  if (isCriRoute && !isSupportedCRI) errors.push(`${drug.name} possui somente dose de ataque cadastrada; a taxa CRI ainda não foi validada.`);
+  if (!isCriRoute && isNativeRate) errors.push(`${drug.name} possui somente regime contínuo cadastrado; não use a taxa como dose em bólus.`);
   if (isCriRoute && command.administrationSpeed !== 'infusion_cri') errors.push('CRI exige modo de infusão contínua.');
   if (!isCriRoute && command.administrationSpeed === 'infusion_cri') errors.push('Infusão contínua exige via CRI.');
   if (command.administrationSpeed === 'bolus_rapid' && command.route !== 'IV') {
@@ -76,14 +86,18 @@ export function calculateAdministration(
   drug: DrugDefinition,
   dosePerKg: number,
   weightKg: number,
-  concentrationMgMl: number = drug.defaultConcentrationMgMl
+  concentrationMgMl: number = drug.defaultConcentrationMgMl,
+  isCRI?: boolean
 ): CalculatedAdministration {
+  const activeDoseUnit = (isCRI && drug.criDoseUnit) ? drug.criDoseUnit : drug.doseUnit;
   const doseAmount = Math.max(0, dosePerKg) * Math.max(0, weightKg);
   let volumePerPrescriptionIntervalMl: number;
 
-  if (drug.doseUnit.startsWith('ml/kg')) {
+  const isMcg = activeDoseUnit.startsWith('mcg') || (!activeDoseUnit.startsWith('mg') && drug.unit === 'mcg');
+
+  if (activeDoseUnit.startsWith('ml/kg')) {
     volumePerPrescriptionIntervalMl = doseAmount;
-  } else if (drug.unit === 'mcg') {
+  } else if (isMcg) {
     volumePerPrescriptionIntervalMl = doseAmount / Math.max(0.000001, concentrationMgMl * 1000);
   } else if (drug.unit === 'mEq') {
     const concentration = drug.concentrationInDoseUnitPerMl ?? 1;
@@ -93,9 +107,9 @@ export function calculateAdministration(
   }
 
   let pumpRateMlPerHour: number | undefined;
-  if (drug.doseUnit.endsWith('/min')) {
+  if (activeDoseUnit.endsWith('/min')) {
     pumpRateMlPerHour = volumePerPrescriptionIntervalMl * 60;
-  } else if (drug.doseUnit.endsWith('/h')) {
+  } else if (activeDoseUnit.endsWith('/h')) {
     pumpRateMlPerHour = volumePerPrescriptionIntervalMl;
   }
 

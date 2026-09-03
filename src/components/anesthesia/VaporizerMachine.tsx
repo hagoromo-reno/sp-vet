@@ -57,7 +57,7 @@ export const VaporizerMachine: React.FC<VaporizerMachineProps> = ({
               max="5.0"
               step="0.1"
               value={equipment.oxygenFlowLMin}
-              onChange={(e) => onUpdateEquipment({ oxygenFlowLMin: parseFloat(e.target.value) })}
+              onChange={(e) => onUpdateEquipment({ oxygenFlowLMin: parseFloat(parseFloat(e.target.value).toFixed(1)) })}
               className="w-full accent-emerald-500 cursor-pointer h-2 bg-[#222222] rounded-lg"
             />
             <div className="flex justify-between text-[10px] text-[#737373] font-mono-code mt-1">
@@ -151,13 +151,13 @@ export const VaporizerMachine: React.FC<VaporizerMachineProps> = ({
             step="0.1"
             disabled={!equipment.isVaporizerOn}
             value={equipment.vaporizerDialPct}
-            onChange={(e) => onUpdateEquipment({ vaporizerDialPct: parseFloat(e.target.value) })}
+            onChange={(e) => onUpdateEquipment({ vaporizerDialPct: parseFloat(parseFloat(e.target.value).toFixed(1)) })}
             className={`w-full cursor-pointer h-2 bg-[#222222] rounded-lg ${
               equipment.vaporizerType === 'isoflurane' ? 'accent-purple-500' : 'accent-yellow-500'
             }`}
           />
           <div className="text-[10px] text-[#737373] font-mono-code flex justify-between">
-            <span>CAM Espécie ({speciesInfo.namePt.split(' ')[0]}): {currentMac}%</span>
+            <span>CAM Espécie ({speciesInfo.namePt.split(' ')[0]}): {currentMac.toFixed(2)}%</span>
             <span>{equipment.isVaporizerOn ? 'Ativo' : 'Desligado'}</span>
           </div>
         </div>

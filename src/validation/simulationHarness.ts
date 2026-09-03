@@ -211,18 +211,18 @@ export function createActiveDose(
 ): ActiveDrugDose {
   const drug = VETERINARY_DRUG_DATABASE.find((item) => item.id === drugId);
   if (!drug) throw new Error(`Fármaco não encontrado: ${drugId}`);
-  const range = getSpeciesDoseRange(drug, patient.species);
-  if (!range) throw new Error(`${drug.name} não possui faixa cadastrada para ${patient.species}`);
-
-  const dosePerKg = options.dosePerKg ?? range[doseLevel];
   const route = options.route || preferredRoute(drug.id, drug.supportedRoutes, drug.doseUnit);
   if (!drug.supportedRoutes.includes(route)) {
     throw new Error(`Via ${route} não suportada para ${drug.name}`);
   }
 
   const isCRI = route === 'CRI';
+  const range = getSpeciesDoseRange(drug, patient.species, isCRI);
+  if (!range) throw new Error(`${drug.name} não possui faixa cadastrada para ${patient.species}`);
+
+  const dosePerKg = options.dosePerKg ?? range[doseLevel];
   const speed = options.speed || (isCRI ? 'infusion_cri' : route === 'IV_slow' ? 'bolus_slow' : 'bolus_slow');
-  const administration = calculateAdministration(drug, dosePerKg, patient.weightKg);
+  const administration = calculateAdministration(drug, dosePerKg, patient.weightKg, drug.defaultConcentrationMgMl, isCRI);
   const routePK = getRoutePharmacokinetics(drug, route);
   const time = options.administeredAtSimTime || 0;
   const deliveryDurationSec = isCRI
@@ -232,6 +232,10 @@ export function createActiveDose(
       : route === 'IM' || route === 'SC' || route === 'Local' || route === 'Epidural'
         ? 1
         : 60;
+
+  const ratePerMin = isCRI
+    ? (drug.criDoseUnit?.endsWith('/h') || drug.doseUnit.endsWith('/h') ? dosePerKg / 60 : dosePerKg)
+    : undefined;
 
   return {
     id: `${drugId}-${route}-${doseLevel}-${time}`,
@@ -252,7 +256,7 @@ export function createActiveDose(
     isFastBolusShockTriggered: false,
     isCRI,
     isInfusionRunning: isCRI,
-    criRatePerKgMin: isCRI ? dosePerKg : undefined,
+    criRatePerKgMin: ratePerMin,
     criRateMlPerHour: isCRI ? administration.pumpRateMlPerHour : undefined,
     bolusShockMagnitude: 0,
     bolusShockRemainingSec: 0,

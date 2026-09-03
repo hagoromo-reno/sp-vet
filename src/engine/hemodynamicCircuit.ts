@@ -30,6 +30,7 @@ export interface HemodynamicOutputs {
   arrestType?: 'asystole' | 'ventricular_fibrillation' | 'pulseless_ventricular_tachycardia' | 'pea';
   arrestCause?: string;
   pulseQuality: 'Forte e Cheio' | 'Normal' | 'Fraco / Filiforme' | 'Célere / Saltão' | 'Ausente';
+  nociceptiveStressLevel: number; // 0 to 1: dynamic neurohumoral adrenergic stress
 }
 
 export class HemodynamicCircuitEngine {
@@ -45,20 +46,22 @@ export class HemodynamicCircuitEngine {
     simTimeSeconds: number,
     patient: PatientProfile,
     receptors: ReceptorStateSnapshot,
-    equipment: AnesthesiaEquipmentState,
+    _equipment: AnesthesiaEquipmentState,
     resuscitation: ResuscitationState,
     isSurgicalStimulationActive: boolean,
     previousMAP: number,
     previousHR: number,
     previousIschemiaScore: number,
     ruminalBloatSeverity: number = 0,
+    effectiveFluidExpansionMl: number = 0,
     previousCriticalTimers: HemodynamicOutputs['criticalEventTimers'] = {
       severeBradycardiaSeconds: 0,
       severeTachycardiaSeconds: 0,
       profoundHypotensionSeconds: 0,
     },
     previousSpO2: number = 98,
-    previousLactate: number = 1
+    previousLactate: number = 1,
+    previousNociceptiveStress: number = 0
   ): HemodynamicOutputs {
     const speciesInfo = SPECIES_DATABASE[patient.species] || SPECIES_DATABASE.canine;
     const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
@@ -80,7 +83,7 @@ export class HemodynamicCircuitEngine {
     const alpha1Constriction = Math.max(0, receptors.alpha1Drive) * 0.65;
     const alpha2Constriction = Math.max(0, receptors.alpha2Drive) * 0.40;
     const alpha1Blockade = receptors.alpha1Drive < 0 ? Math.min(1, Math.abs(receptors.alpha1Drive)) * 0.16 : 0;
-    const volatileVasodilation = Math.max(0, receptors.volatileSiteOccupancy) * 0.18;
+    const volatileVasodilation = Math.min(0.68, Math.max(0, receptors.volatileMacExposure) * 0.18);
     const beta2Dilation = Math.max(0, receptors.beta2Drive) * 0.25;
     const calibratedPressureDilation = Math.max(0, -receptors.directBloodPressureEffect) * 0.10;
     const calibratedPressureSupport = Math.max(0, receptors.directBloodPressureEffect) * 0.16;
@@ -89,9 +92,41 @@ export class HemodynamicCircuitEngine {
     // Sepsis pathology vasodilation
     const sepsisDilation = patient.pathologyConditions.sepsisVasodilation ? 0.45 : 0;
 
+    // ----------------------------------------------------
+    // NOCICEPTIVE BREAKTHROUGH & DYNAMIC ADRENERGIC STRESS
+    // ----------------------------------------------------
+    // Autonomic response (tachycardia + vasoconstriction) to surgical pain
+    // depends on the balance between noxious stimulus and 4 protective axes:
+    // 1. Analgesia (Opioids, Local anesthetics, Alpha-2 spinal analgesia, Ketamine NMDA block)
+    // 2. Hypnosis / Anesthetic Depth (GABA-A cortical/subcortical depression, volatile MAC)
+    // 3. Central Sedation & Alpha-2 Sympatholysis (Inhibition of locus coeruleus & RVLM sympathetic outflow)
+    // 4. Dissociative sensory uncoupling (Ketamine)
+    const analgesiaProt = receptors.nociceptiveInhibition;
+    const hypnoticProt = Math.max(receptors.hypnoticEffect, receptors.volatileSiteOccupancy * 0.90);
+    const sedativeProt = Math.min(1.0, receptors.centralSedation * 0.85 + Math.max(0, receptors.alpha2Drive) * 0.90);
+    const dissociativeProt = receptors.dissociativeEffect;
+
+    const targetBreakthrough = isSurgicalStimulationActive
+      ? Math.max(0, Math.min(1.0, (1 - analgesiaProt) * (1 - Math.min(0.92, hypnoticProt * 0.88)) * (1 - Math.min(0.92, sedativeProt * 0.82)) * (1 - Math.min(0.85, dissociativeProt * 0.70))))
+      : 0;
+
+    // Physiological neuro-endocrine wash-in and wash-out kinetics:
+    // Acute pain triggers catecholamine secretion with realistic onset latency (tau = 4.5s)
+    // Relief of pain is followed by slower physiological clearance / reuptake (tau = 18.0s)
+    let currentStress = previousNociceptiveStress;
+    if (targetBreakthrough > currentStress) {
+      const riseAlpha = 1.0 - Math.exp(-dtSeconds / 4.5);
+      currentStress = currentStress + (targetBreakthrough - currentStress) * riseAlpha;
+    } else {
+      const decayAlpha = 1.0 - Math.exp(-dtSeconds / 18.0);
+      currentStress = currentStress + (targetBreakthrough - currentStress) * decayAlpha;
+    }
+    const nociceptiveStressLevel = Number(Math.max(0, Math.min(1.0, currentStress)).toFixed(4));
+    const surgicalVasoconstriction = nociceptiveStressLevel * 0.28;
+
     const netVascularResistanceFactor = Math.max(
       0.35,
-      1.0 + alpha1Constriction + alpha2Constriction + calibratedPressureSupport
+      1.0 + alpha1Constriction + alpha2Constriction + calibratedPressureSupport + surgicalVasoconstriction
         - alpha1Blockade - volatileVasodilation - beta2Dilation - calibratedPressureDilation
         - acuteVasodilation
     );
@@ -103,25 +138,23 @@ export class HemodynamicCircuitEngine {
     // SV is derived from a species-scaled resting cardiac index. Using a fixed
     // mL/kg stroke volume made pressure/CO impossible for horses, cattle and birds.
     const baselineSV = (baselineCOApprox * 1000) / Math.max(1, baseHR);
-    let bloodVolumeRatio = 1.0;
-
-    if (patient.pathologyConditions.hypovolemiaSeverity) {
-      bloodVolumeRatio -= patient.pathologyConditions.hypovolemiaSeverity * 0.45;
-    }
-    if (patient.pathologyConditions.traumaHemorrhage) {
-      bloodVolumeRatio -= 0.30;
-    }
+    const expectedBloodVolumeMl = Math.max(1, patient.weightKg * speciesInfo.bloodVolumeMlPerKg);
+    const observedDeficit = Math.max(0, 1 - patient.baselineVitals.bloodVolumeMl / expectedBloodVolumeMl);
+    const declaredDeficit = Math.max(
+      observedDeficit,
+      (patient.pathologyConditions.hypovolemiaSeverity || 0) * 0.45,
+      patient.pathologyConditions.traumaHemorrhage ? 0.30 : 0
+    );
+    let bloodVolumeRatio = 1.0 - declaredDeficit;
 
     // Splenic auto-transfusion (Canine/Equine under adrenergic stress)
     if (receptors.alpha1Drive > 0.3 || receptors.beta1Drive > 0.4) {
       bloodVolumeRatio += speciesConfig.splenicContractionReserve * 0.5;
     }
 
-    // Fluids infusion contribution
-    if (equipment.totalFluidsInfusedMl > 0) {
-      const infusedRatio = equipment.totalFluidsInfusedMl / (patient.weightKg * 40);
-      bloodVolumeRatio = Math.min(1.35, bloodVolumeRatio + infusedRatio * 0.25);
-    }
+    // Persistent central-volume compartments account for distribution and loss
+    // of effect; cumulative pump volume must not expand the circulation forever.
+    bloodVolumeRatio = Math.min(1.45, bloodVolumeRatio + effectiveFluidExpansionMl / expectedBloodVolumeMl);
 
     // Ruminal Bloat / Tympanism venous cava compression (Bovine)
     if (ruminalBloatSeverity > 0.15) {
@@ -153,9 +186,26 @@ export class HemodynamicCircuitEngine {
       inotropyFactor *= 0.45;
     }
 
-    // Volatile anesthetic direct negative inotropy at > 1.2 MAC
-    if (receptors.volatileSiteOccupancy > 1.1) {
-      inotropyFactor = Math.max(0.2, inotropyFactor - (receptors.volatileSiteOccupancy - 1.1) * 0.35);
+    // ASA Physical Status Modifiers on Cardiovascular Reserve
+    let asaReserveFactor = 1.0;
+    let asaBaroreflexFactor = 1.0;
+    if (patient.asa === 'II') {
+      asaReserveFactor = 0.92;
+      asaBaroreflexFactor = 0.90;
+    } else if (patient.asa === 'III') {
+      asaReserveFactor = 0.75;
+      asaBaroreflexFactor = 0.65;
+    } else if (patient.asa === 'IV' || patient.asa === 'V' || patient.asa === 'E') {
+      asaReserveFactor = 0.52;
+      asaBaroreflexFactor = 0.40;
+    }
+
+    inotropyFactor *= asaReserveFactor;
+
+    // Volatile myocardial depression is driven by MAC multiples, not by the
+    // saturable receptor occupancy (which can never exceed 1).
+    if (receptors.volatileMacExposure > 0.8) {
+      inotropyFactor = Math.max(0.2, inotropyFactor - (receptors.volatileMacExposure - 0.8) * 0.18);
     }
 
     // Feline local anesthetic toxicity
@@ -178,11 +228,11 @@ export class HemodynamicCircuitEngine {
     // ----------------------------------------------------
     // 5. BARORECEPTOR REFLEX CONTROL LOOP (PHYSIOLOGICALLY DAMPED)
     // ----------------------------------------------------
-    // Sensitivity / Gain of the Baroreceptor reflex (attenuated by depth/volatile agents)
-    const volatileSuppression = Math.max(0, receptors.volatileSiteOccupancy) * 0.38;
+    // Sensitivity / Gain of the Baroreceptor reflex (attenuated by depth/volatile agents and ASA status)
+    const volatileSuppression = Math.min(0.85, Math.max(0, receptors.volatileMacExposure) * 0.27);
     const propofolSuppression = receptors.propofolSiteOccupancy * 0.30;
     const sedativeSuppression = receptors.centralSedation * 0.18 + Math.max(0, receptors.alpha2Drive) * 0.18;
-    const baroreceptorGain = Math.max(0.08, 1.0 - volatileSuppression - propofolSuppression - sedativeSuppression);
+    const baroreceptorGain = Math.max(0.08, (1.0 - volatileSuppression - propofolSuppression - sedativeSuppression) * asaBaroreflexFactor);
 
     // Sigmoidal normalized MAP deviation from baseline (prevents algebraic loop resonance)
     const rawMapError = (previousMAP > 0 ? previousMAP : baseMAP) - baseMAP;
@@ -204,22 +254,33 @@ export class HemodynamicCircuitEngine {
     autonomicHRMultiplier += receptors.beta1Drive * 0.55;
     autonomicHRMultiplier -= receptors.m2Drive * 0.50;
     autonomicHRMultiplier -= receptors.alpha2Drive * 0.40;
-    autonomicHRMultiplier += receptors.directHeartRateEffect * 0.18;
+    autonomicHRMultiplier += receptors.directHeartRateEffect * 0.32;
     autonomicHRMultiplier -= receptors.acuteBolusBradycardia * 0.28;
     autonomicHRMultiplier -= receptors.hyperkalemicCardiotoxicity * 0.30;
 
     // Baroreceptor feedback contribution (smoothly bounded)
     autonomicHRMultiplier += baroreceptorEffector;
 
-    // Surgical stimulation tachycardia if nociception or depth is insufficient
-    if (isSurgicalStimulationActive) {
-      const nociceptiveDeficit = Math.max(0, 1.0 - receptors.nociceptiveInhibition);
-      const effectiveUnconsciousness = Math.max(receptors.hypnoticEffect, receptors.dissociativeEffect);
-      const depthDeficit = Math.max(0, 1.0 - effectiveUnconsciousness);
-      autonomicHRMultiplier += (nociceptiveDeficit * 0.30 + depthDeficit * 0.15);
+    // Surgical stimulation tachycardia scaled strictly by dynamic nociceptive stress
+    // Alpha-2 agonists and M2 vagal tone hyperpolarize the sinoatrial node via Gi/GIRK,
+    // attenuating chronotropic breakthrough during painful stimuli
+    if (nociceptiveStressLevel > 0.01) {
+      const nodalSympatholyticBraking = Math.max(0.35, 1.0 - Math.max(0, receptors.alpha2Drive) * 0.75);
+      autonomicHRMultiplier += nociceptiveStressLevel * 0.36 * nodalSympatholyticBraking;
     }
 
     let targetHR = baseHR * autonomicHRMultiplier;
+
+    // Respiratory sinus arrhythmia is a real beat-to-breath vagal modulation in
+    // resting dogs, not merely a rhythm label. It fades with deep respiratory
+    // depression and strong sympathetic activation.
+    if (speciesConfig.normalPhysiologicalSinusArrhythmia && receptors.respiratoryDepression < 0.65) {
+      const respiratoryPhase = 2 * Math.PI * simTimeSeconds * patient.baselineVitals.rr / 60;
+      const vagalAmplitude = baseHR * 0.055
+        * Math.max(0.2, 1 - Math.max(0, receptors.beta1Drive) * 0.7)
+        * Math.max(0.2, 1 - nociceptiveStressLevel * 0.8);
+      targetHR += Math.sin(respiratoryPhase) * vagalAmplitude;
+    }
 
     // Pediatric patients depend strictly on heart rate for cardiac output
     const ageTotalYears = patient.ageYears + (patient.ageMonths || 0) / 12;
@@ -316,14 +377,15 @@ export class HemodynamicCircuitEngine {
     let arrestCause: string | undefined;
 
     // A. Lethal Ischemia / Malignant Ventricular Arrhythmias
+    const hasAntiarrhythmicProtection = receptors.antiarrhythmicIbProtection > 0.30;
     if (myocardialIschemiaScore > 0.75) {
       isArrestTriggered = true;
       arrestType = 'ventricular_fibrillation';
       arrestCause = 'Parada Cardíaca por Fibrilação Ventricular (Isquemia Miocárdica Transmural Crítica por Descasamento MVO2 / Coronariano)';
       rhythm = 'ventricular_fibrillation';
-    } else if (myocardialIschemiaScore > 0.40) {
+    } else if (myocardialIschemiaScore > 0.40 && !hasAntiarrhythmicProtection) {
       rhythm = 'ventricular_tachycardia';
-    } else if (myocardialIschemiaScore > 0.20 || receptors.acuteBolusArrhythmia > 0.55 || patient.pathologyConditions.gastricDilatationVolvulus) {
+    } else if ((myocardialIschemiaScore > 0.20 || receptors.acuteBolusArrhythmia > 0.55 || patient.pathologyConditions.gastricDilatationVolvulus) && !hasAntiarrhythmicProtection) {
       rhythm = 'ventricular_premature_complexes';
     } else if (receptors.hyperkalemicCardiotoxicity > 0.72) {
       rhythm = 'av_block_3rd_degree';
@@ -418,6 +480,7 @@ export class HemodynamicCircuitEngine {
       arrestType,
       arrestCause,
       pulseQuality,
+      nociceptiveStressLevel,
     };
   }
 }

@@ -98,6 +98,11 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
             <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-950 border border-red-500 text-red-300 font-mono-code font-bold animate-pulse">
               PCR ATIVA
             </span>
+          ) : vitals.impendingArrestWarning ? (
+            <span className="text-[10px] px-2 py-0.5 rounded bg-red-900 border border-red-500 text-white font-mono-code font-bold animate-pulse flex items-center gap-1">
+              <AlertOctagon className="w-3 h-3 text-red-300" />
+              <span>COLAPSO EM ~{vitals.impendingArrestWarning.secondsRemainingEstimate}s</span>
+            </span>
           ) : vitals.isRespiratoryArrest ? (
             <span className="text-[10px] px-1.5 py-0.2 rounded bg-orange-950 border border-orange-500 text-orange-300 font-mono-code font-bold animate-pulse">
               APNEIA
@@ -135,6 +140,26 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
         </div>
       </div>
 
+      {/* Impending Arrest Warning Banner */}
+      {vitals.impendingArrestWarning && !vitals.isDead && !vitals.isCardiacArrest && (
+        <div className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-red-950/95 via-red-900/80 to-red-950/95 border border-red-500 text-red-100 text-xs font-mono-code flex items-center justify-between animate-pulse shadow-xl shrink-0">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 animate-bounce" />
+            <div>
+              <span className="font-extrabold text-red-200 uppercase tracking-wide">
+                ⚠️ {vitals.impendingArrestWarning.headline}
+              </span>
+              <span className="text-[11px] text-red-300 ml-2 font-sans hidden sm:inline">
+                {vitals.impendingArrestWarning.details}
+              </span>
+            </div>
+          </div>
+          <span className="text-[10px] font-mono-code font-extrabold px-2 py-0.5 rounded bg-red-800 border border-red-400 text-white shrink-0 ml-2">
+            PARADA EM ~{vitals.impendingArrestWarning.secondsRemainingEstimate}s
+          </span>
+        </div>
+      )}
+
       {/* Grid of Main Vital Parameter Tiles (Guaranteed 2x3 Grid Proportion) */}
       <div className="grid grid-cols-2 gap-2 flex-1 min-h-[320px]">
         {/* 1. HEART RATE (GREEN) */}
@@ -167,7 +192,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
           </div>
 
           <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
-            <span>Pulso: <strong className="text-[#f5f5f5]">{vitals.pulseQuality}</strong></span>
+            <span>Pulso: <strong className="text-[#f5f5f5]">{vitals.pulseQuality}</strong> · TPC: <strong className={vitals.capillaryRefillTime === 'prolonged_3s' || vitals.capillaryRefillTime === 'absent' ? 'text-red-400 font-bold' : 'text-[#e5e5e5]'}>{vitals.capillaryRefillTime}</strong></span>
             <span className="text-[9px] text-[#666666]">ECG DII</span>
           </div>
         </div>
@@ -200,7 +225,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
           </div>
 
           <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
-            <span>PaO₂ est.: <strong className="text-cyan-200">{Math.round(vitals.arterialBloodGases.paO2)} mmHg</strong></span>
+            <span>PaO₂: <strong className="text-cyan-200">{Math.round(vitals.arterialBloodGases.paO2)}</strong> · Mucosas: <strong className={vitals.mucousMembraneColor === 'cyanotic' || vitals.mucousMembraneColor === 'pale' || vitals.mucousMembraneColor === 'white_ashen' ? 'text-red-400 font-bold' : 'text-cyan-200'}>{vitals.mucousMembraneColor}</strong></span>
             <span className="text-[9px] text-[#666666]">Oximetria</span>
           </div>
         </div>
@@ -340,7 +365,25 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
 
           <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
             <span>FR: <strong className="text-yellow-200 font-bold">{vitals.isDead ? '0' : Math.round(vitals.respiratoryRate)} rpm</strong></span>
-            <span className="text-[9px] text-[#666666]">Capnografia</span>
+            {equipment?.intubationStatus === 'intubated_tracheal' && (
+              <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${
+                vitals.isSpontaneousApnea
+                  ? 'bg-amber-950/80 border-amber-700/60 text-amber-300'
+                  : 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300'
+              }`}>
+                {vitals.isSpontaneousApnea ? 'APNEIA · VENTILADO' : `TRAQUEIA #${equipment.tubeSizeMm}mm`}
+              </span>
+            )}
+            {equipment?.intubationStatus === 'intubated_esophageal' && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-950/80 border border-red-700/60 text-red-300 font-bold animate-pulse">
+                ESÔFAGO!
+              </span>
+            )}
+            {(!equipment || equipment.intubationStatus === 'unintubated' || equipment.intubationStatus === 'extubated') && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-950/50 border border-yellow-800/40 text-yellow-300/90 font-mono-code">
+                Espontâneo (Nasal)
+              </span>
+            )}
           </div>
         </div>
 
@@ -375,6 +418,9 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
             Estado: <span className={vitals.bodyTemperatureC < 37.0 ? 'text-amber-300 font-bold' : 'text-[#f5f5f5]'}>
               {vitals.bodyTemperatureC < 36.5 ? 'Hipotermia Moderada' : vitals.bodyTemperatureC < 37.5 ? 'Hipotermia Leve' : 'Normotermia'}
             </span>
+          </div>
+          <div className="text-[10px] text-[#888888] font-mono-code">
+            Glicemia: <span className="text-[#f5f5f5] font-bold">{vitals.arterialBloodGases.glucoseMgDl.toFixed(0)} mg/dL</span>
           </div>
         </div>
 
@@ -424,7 +470,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
 
           <div className="text-[10px] text-[#888888] font-mono-code flex justify-between">
             <span>Mandíbula: <strong className="text-purple-200">{vitals.jawTone === 'relaxed_surgical' ? 'Relaxada (Intubável)' : vitals.jawTone === 'moderate' ? 'Moderada' : vitals.jawTone === 'rigid' ? 'Rígida' : 'Flácida'}</strong></span>
-            <span>Tol: <strong className="text-purple-200">{vitals.surgicalTolerancePct}%</strong></span>
+            <span>Tol: <strong className="text-purple-200">{Math.round(vitals.surgicalTolerancePct)}%</strong></span>
           </div>
         </div>
       </div>

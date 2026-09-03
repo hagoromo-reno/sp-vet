@@ -26,6 +26,7 @@ export interface ReceptorStateSnapshot {
   propofolSiteOccupancy: number;
   neurosteroidSiteOccupancy: number;
   volatileSiteOccupancy: number;
+  volatileMacExposure: number;
   centralSedation: number;
   hypnoticEffect: number;
   dissociativeEffect: number;
@@ -59,6 +60,7 @@ export interface ReceptorStateSnapshot {
   calciumMembraneStabilization: number;
   alkalinization: number;
   hyperkalemicCardiotoxicity: number;
+  antiarrhythmicIbProtection: number;
 
   // Intracellular second messengers
   cAMPMyocardial: number;
@@ -207,15 +209,25 @@ export class CellularReceptorsEngine {
       const { drugDef } = exposure;
       const profile = drugDef.receptorProfile;
       const applyCatalogPhenotype = !TARGET_DEPENDENT_REVERSAL_IDS.has(drugDef.id);
+      let systemicExposure = exposure.systemicCe;
+      let centralExposure = exposure.centralCe;
+
+      if (drugDef.specialTraits?.isAlpha2Agonist) {
+        centralExposure /= alpha2SchildFactor;
+        systemicExposure /= alpha2SchildFactor;
+      }
+      if (drugDef.specialTraits?.isOpioid) {
+        centralExposure /= muSchildFactor;
+        systemicExposure /= muSchildFactor;
+      }
+      if (drugDef.specialTraits?.isBenzodiazepine) {
+        centralExposure /= bzdSchildFactor;
+        systemicExposure /= bzdSchildFactor;
+      }
       const speciesResponseFactor = drugDef.id === 'atropine'
         ? speciesConfig.atropineResponseFactor
         : 1;
-      const systemicResponse = hillResponse(exposure.systemicCe) * speciesResponseFactor;
-      let centralExposure = exposure.centralCe;
-
-      if (drugDef.specialTraits?.isAlpha2Agonist) centralExposure /= alpha2SchildFactor;
-      if (drugDef.specialTraits?.isOpioid) centralExposure /= muSchildFactor;
-      if (drugDef.specialTraits?.isBenzodiazepine) centralExposure /= bzdSchildFactor;
+      const systemicResponse = hillResponse(systemicExposure) * speciesResponseFactor;
       const centralResponse = hillResponse(centralExposure);
 
       if (profile?.alpha1) {
@@ -289,7 +301,10 @@ export class CellularReceptorsEngine {
       }
 
       if (applyCatalogPhenotype) {
-        if (drugDef.effectAnalgesia > 0) analgesicEffects.push(drugDef.effectAnalgesia * centralResponse);
+        const effectiveAnalgesicExposure = (drugDef.category === 'local_anesthetic' || drugDef.supportedRoutes.includes('Local') || drugDef.supportedRoutes.includes('Epidural'))
+          ? Math.max(centralResponse, hillResponse(exposure.localCe, 0.25, 1.2))
+          : centralResponse;
+        if (drugDef.effectAnalgesia > 0) analgesicEffects.push(drugDef.effectAnalgesia * effectiveAnalgesicExposure);
         if (drugDef.macReductionPct > 0) macSparingEffects.push(drugDef.macReductionPct * centralResponse);
         if (drugDef.muscleRelaxation > 0) relaxationEffects.push(drugDef.muscleRelaxation * centralResponse);
         if (drugDef.muscleRelaxation < 0) rigidityDrive += Math.abs(drugDef.muscleRelaxation) * centralResponse;
@@ -332,7 +347,22 @@ export class CellularReceptorsEngine {
     ensureTarget('dobutamine', Boolean(exposures.get('dobutamine')?.drugDef.receptorProfile?.beta1), (r) => {
       rawBeta1 += r; rawBeta2 += r * 0.3;
     });
+    ensureTarget('ephedrine', Boolean(exposures.get('ephedrine')?.drugDef.receptorProfile?.beta1), (r) => {
+      // Direct alpha-1, beta-1, beta-2 plus indirect endogenous noradrenaline release
+      const ephedrineDoses = activeDoses.filter((d) => d.drugId === 'ephedrine');
+      const cumulativeDose = ephedrineDoses.reduce((acc, d) => acc + d.dosePerKg, 0);
+      const typicalDose = getSpeciesDoseRange(exposures.get('ephedrine')!.drugDef, patient.species)?.typical || 0.1;
+      const tachyphylaxisRatio = Math.max(0.25, 1.0 - Math.min(0.75, Math.max(0, (cumulativeDose / typicalDose - 1.2) * 0.45)));
+      rawAlpha1 += r * 0.45 + (r * 0.40 * tachyphylaxisRatio);
+      rawBeta1 += r * 0.50 + (r * 0.35 * tachyphylaxisRatio);
+      rawBeta2 += r * 0.35;
+    });
     ensureTarget('guaifenesin', false, () => undefined);
+    ensureTarget('ketamine', false, (r) => {
+      // Sympathetic tone stimulation via central stimulation and catecholamine reuptake inhibition
+      rawBeta1 += r * 0.40;
+      rawAlpha1 += r * 0.30;
+    });
 
     // Neostigmine reverses atracurium. Sugammadex is deliberately not applied to
     // atracurium (it only encapsulates aminosteroidal blockers).
@@ -388,10 +418,11 @@ export class CellularReceptorsEngine {
       1.05 * Math.max(0, rawKappa) +
       1.1 * Math.max(0, rawAlpha2) +
       1.0 * Math.max(0, rawNMDA) +
-      2.2 * Math.max(0, rawLocalNaV);
+      3.2 * Math.max(0, rawLocalNaV);
     const mechanisticAnalgesia = hillResponse(mechanisticAnalgesicSignal, 1.0, 1.7);
+    const localNeuralBlockAfferent = hillResponse(rawLocalNaV, 0.28, 2.0);
     const phenotypicAnalgesia = combineEffects(analgesicEffects);
-    const nociceptiveInhibition = clamp(Math.max(mechanisticAnalgesia, phenotypicAnalgesia));
+    const nociceptiveInhibition = clamp(Math.max(mechanisticAnalgesia, phenotypicAnalgesia, localNeuralBlockAfferent));
 
     // Acute bolus envelope. It persists across ticks instead of being calculated
     // and discarded on the single arrival frame.
@@ -404,6 +435,10 @@ export class CellularReceptorsEngine {
       if ((dose.bolusShockRemainingSec || 0) <= 0 || (dose.bolusShockMagnitude || 0) <= 0) continue;
       const def = VETERINARY_DRUG_DATABASE.find((item) => item.id === dose.drugId);
       if (!def?.fastBolusRisk) continue;
+      // If competitive antagonist is present, abrogate acute bolus bradycardia/arrhythmia
+      if (def.specialTraits?.isAlpha2Agonist && atipamezoleCe > 0.05) continue;
+      if (def.specialTraits?.isOpioid && naloxoneCe > 0.05) continue;
+      if (def.specialTraits?.isBenzodiazepine && flumazenilCe > 0.05) continue;
       const fade = clamp((dose.bolusShockRemainingSec || 0) / 25);
       const magnitude = clamp((dose.bolusShockMagnitude || 0) * fade, 0, 1.5);
       acuteBolusHypotension = Math.max(acuteBolusHypotension, def.fastBolusRisk.hypotensionSeverity * magnitude);
@@ -413,8 +448,23 @@ export class CellularReceptorsEngine {
       if (def.fastBolusRisk.histamineRelease) histamineRelease = Math.max(histamineRelease, magnitude);
     }
 
+    // Central vagotonic activation from mu-opioids (fentanyl, methadone, morphine)
+    // Produces dose-dependent physiological vagal bradycardia, reversible by atropine (negative M2) or naloxone
+    const opioidVagalDrive = rawMu > 0.05 ? rawMu * 0.35 * speciesConfig.muOpioidSensitivityFactor : 0;
+    const effectiveM2 = rawM2 + opioidVagalDrive;
+
+    // Class Ib antiarrhythmic protection: therapeutic systemic NaV exposure
+    // (e.g. Lidocaine 2 mg/kg IV bolus / CRI) stabilizes Purkinje membrane and suppresses VPCs/VT
+    let antiarrhythmicIbProtection = 0;
+    for (const exposure of exposures.values()) {
+      if (exposure.drugDef.specialTraits?.isAntiarrhythmicClass1b) {
+        const therapeuticLevel = hillResponse(exposure.systemicCe, 0.40, 1.8);
+        antiarrhythmicIbProtection = Math.max(antiarrhythmicIbProtection, therapeuticLevel);
+      }
+    }
+
     const netMyocardialGs = Math.max(0, rawBeta1);
-    const netMyocardialGi = Math.max(0, rawM2 * 0.72 + rawAlpha2 * 0.35 + rawMu * 0.18);
+    const netMyocardialGi = Math.max(0, effectiveM2 * 0.72 + rawAlpha2 * 0.35 + rawMu * 0.18);
     const cAMPMyocardial = clamp(1 + 0.78 * netMyocardialGs - 0.68 * netMyocardialGi, 0.15, 3.5);
     const vasodilationDrive = 0.6 * Math.max(0, rawBeta2) + Math.abs(Math.min(0, rawAlpha1)) * 0.8;
     const vasoconstrictionDrive = Math.max(0, rawAlpha1) * 1.2 + Math.max(0, rawAlpha2) * 0.5;
@@ -437,7 +487,7 @@ export class CellularReceptorsEngine {
       alpha2Drive: rawAlpha2,
       beta1Drive: rawBeta1,
       beta2Drive: rawBeta2,
-      m2Drive: rawM2,
+      m2Drive: effectiveM2,
       m3Drive: rawM3,
       dopamineD2Drive: rawD2,
       histamineH1Drive: rawH1,
@@ -448,6 +498,7 @@ export class CellularReceptorsEngine {
       propofolSiteOccupancy: clamp(propofolSite),
       neurosteroidSiteOccupancy: clamp(neurosteroidSite),
       volatileSiteOccupancy: volatileSite,
+      volatileMacExposure: Math.max(0, inhalantCe),
       centralSedation,
       hypnoticEffect,
       dissociativeEffect,
@@ -475,6 +526,7 @@ export class CellularReceptorsEngine {
       calciumMembraneStabilization: clamp(calciumMembraneStabilization),
       alkalinization: clamp(alkalinization),
       hyperkalemicCardiotoxicity,
+      antiarrhythmicIbProtection: clamp(antiarrhythmicIbProtection),
       cAMPMyocardial,
       cAMPVascular,
       intracellularCalcium,

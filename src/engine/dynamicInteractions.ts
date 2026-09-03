@@ -147,6 +147,28 @@ export class DynamicInteractionsEngine {
       });
     }
 
+    // 14. Ephedrine Hemodynamic Restoration in Inhalant-Induced Hypotension
+    if (activeIds.has('ephedrine') && receptors.volatileSiteOccupancy > 0.25) {
+      interactions.push({
+        title: 'Resgate Hemodinâmico por Efedrina na Hipotensão por Inalatório',
+        severity: 'info',
+        description: 'Ação mista alfa-1 e beta-1 restaura volume sistólico e PAM deprimidos pelo anestésico volátil sem provocar vasoconstrição periférica excessiva ou bradicardia reflexa.',
+        pharmacologyMechanism: 'Agonismo beta-1 miocárdico e alfa-1 vascular combinado à liberação de noradrenalina endógena compensa a depressão miocárdica e a venodilatação induzidas pelo isoflurano/sevoflurano.',
+      });
+    }
+
+    // 15. Ephedrine Adrenergic Tachyphylaxis
+    const ephedrineDoses = activeDoses.filter((d) => d.drugId === 'ephedrine');
+    const totalEphedrineMgKg = ephedrineDoses.reduce((sum, d) => sum + d.dosePerKg, 0);
+    if (activeIds.has('ephedrine') && totalEphedrineMgKg > 0.22) {
+      interactions.push({
+        title: 'Taquifilaxia Adrenérgica por Efedrina (Depleção Vesicular)',
+        severity: 'warning',
+        description: 'Doses repetidas de efedrina esgotaram as reservas pré-sinápticas de noradrenalina. A resposta vasopressora está diminuída; considerar agonista direto (Norepinefrina ou Dobutamina).',
+        pharmacologyMechanism: 'A ação indireta da efedrina esvazia as vesículas de armazenamento de catecolaminas pré-sinápticas, reduzindo progressivamente a exocitose de noradrenalina a cada novo bólus.',
+      });
+    }
+
     return interactions;
   }
 }

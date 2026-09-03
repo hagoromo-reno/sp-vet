@@ -14,7 +14,7 @@ import { SpeciesType } from '../src/types/simulator';
 const SPECIES: SpeciesType[] = ['canine', 'feline', 'equine', 'bovine', 'rabbit', 'avian'];
 
 test('catálogo e contratos clínicos têm paridade completa e IDs únicos', () => {
-  assert.equal(VETERINARY_DRUG_DATABASE.length, 37);
+  assert.equal(VETERINARY_DRUG_DATABASE.length, 38);
   const catalogIds = VETERINARY_DRUG_DATABASE.map((drug) => drug.id);
   const contractIds = PHARMACOLOGY_EXPECTATIONS.map((item) => item.drugId);
   assert.equal(new Set(catalogIds).size, catalogIds.length);

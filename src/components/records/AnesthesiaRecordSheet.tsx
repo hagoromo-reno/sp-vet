@@ -1,6 +1,7 @@
 import React from 'react';
 import { LogEntry, PatientProfile, VitalRecordPoint } from '../../types/simulator';
-import { FileText, Printer, Download, Clock, CheckCircle2 } from 'lucide-react';
+import { FileText, Printer, Clock, CheckCircle2 } from 'lucide-react';
+import { formatDecimal, formatPressure, formatRate } from '../../utils/formatters';
 
 interface AnesthesiaRecordSheetProps {
   patient: PatientProfile;
@@ -92,6 +93,7 @@ export const AnesthesiaRecordSheet: React.FC<AnesthesiaRecordSheetProps> = ({
                   <th className="p-2 text-yellow-400">EtCO₂</th>
                   <th className="p-2 text-yellow-300">FR (rpm)</th>
                   <th className="p-2 text-orange-400">Temp (°C)</th>
+                  <th className="p-2 text-pink-300">Glicemia</th>
                   <th className="p-2 text-purple-400">Inalatório %</th>
                 </tr>
               </thead>
@@ -99,14 +101,15 @@ export const AnesthesiaRecordSheet: React.FC<AnesthesiaRecordSheetProps> = ({
                 {vitalLogs.slice(-10).map((log, idx) => (
                   <tr key={idx} className="hover:bg-[#181818]">
                     <td className="p-2 font-bold text-[#e5e5e5]">{log.timeLabel}</td>
-                    <td className="p-2 text-emerald-300 font-bold">{log.hr}</td>
-                    <td className="p-2 text-red-300">{log.sysBP}/{log.diaBP}</td>
-                    <td className="p-2 text-red-400 font-bold">({log.map})</td>
-                    <td className="p-2 text-cyan-300">{log.spo2}%</td>
-                    <td className="p-2 text-yellow-300">{log.etco2}</td>
-                    <td className="p-2 text-yellow-200">{log.rr}</td>
-                    <td className="p-2 text-orange-300">{log.tempC}°C</td>
-                    <td className="p-2 text-purple-300">{log.vaporizerPct.toFixed(1)}%</td>
+                    <td className="p-2 text-emerald-300 font-bold">{formatRate(log.hr)}</td>
+                    <td className="p-2 text-red-300">{formatPressure(log.sysBP)}/{formatPressure(log.diaBP)}</td>
+                    <td className="p-2 text-red-400 font-bold">({formatPressure(log.map)})</td>
+                    <td className="p-2 text-cyan-300">{formatRate(log.spo2)}%</td>
+                    <td className="p-2 text-yellow-300">{formatPressure(log.etco2)}</td>
+                    <td className="p-2 text-yellow-200">{formatRate(log.rr)}</td>
+                    <td className="p-2 text-orange-300">{formatDecimal(log.tempC, 1)}°C</td>
+                    <td className="p-2 text-pink-200">{formatRate(log.glucoseMgDl)} mg/dL</td>
+                    <td className="p-2 text-purple-300">{formatDecimal(log.vaporizerPct, 1)}%</td>
                   </tr>
                 ))}
               </tbody>

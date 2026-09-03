@@ -38,6 +38,7 @@ import { AirwayQuickBar } from './components/airway/AirwayQuickBar';
 import { AnestheticDepthBoard } from './components/monitor/AnestheticDepthBoard';
 import { GeneralEventLogModal } from './components/records/GeneralEventLogModal';
 import { EmergencyFeedbackToast, EmergencyFeedbackItem } from './components/emergency/EmergencyFeedbackToast';
+import { LaryngealReflexModal } from './components/airway/LaryngealReflexModal';
 import {
   Activity,
   Syringe,
@@ -103,6 +104,8 @@ export default function App() {
       isFluidPumpRunning: false,
       warmingBlanketActive: false,
       warmingBlanketTempC: 38.5,
+      isLarynxDesensitized: false,
+      larynxDesensitizedUntilSimTime: 0,
     };
   });
 
@@ -168,6 +171,8 @@ export default function App() {
   const [isDeathModalOpen, setIsDeathModalOpen] = useState(false);
   const [isDepthBoardOpen, setIsDepthBoardOpen] = useState(false);
   const [isGeneralLogOpen, setIsGeneralLogOpen] = useState(false);
+  const [isLaryngealReflexModalOpen, setIsLaryngealReflexModalOpen] = useState(false);
+  const [pendingIntubationTubeSize, setPendingIntubationTubeSize] = useState<number>(8.5);
   const [feedbackToast, setFeedbackToast] = useState<EmergencyFeedbackItem | null>(null);
 
   // 10. NIBP / IBP STATE
@@ -186,6 +191,8 @@ export default function App() {
   const lastNibpAutoTriggerRef = useRef<number>(0);
   const nibpMeasureStartRef = useRef<number>(0);
   const lastLogSimTimeRef = useRef<number>(0);
+  const surgicalStimulusEndSimTimeRef = useRef<number>(0);
+  const oxygenFlushEndSimTimeRef = useRef<number>(0);
 
   // Auto-open death report on transition to dead
   useEffect(() => {
@@ -229,6 +236,14 @@ export default function App() {
 
       // Check Manual Ventilation Cadence (e.g. squeeze every 6s)
       let cadenceUpdates: Partial<AnesthesiaEquipmentState> = {};
+      if (isSurgicalStimulationActive && newSimTime >= surgicalStimulusEndSimTimeRef.current) {
+        setIsSurgicalStimulationActive(false);
+      }
+      const activeSurgicalStimulus = isSurgicalStimulationActive
+        && newSimTime < surgicalStimulusEndSimTimeRef.current;
+      if (equipment.isOxygenFlushActive && newSimTime >= oxygenFlushEndSimTimeRef.current) {
+        cadenceUpdates.isOxygenFlushActive = false;
+      }
       if (
         equipment.manualVentilationCadenceSeconds &&
         equipment.manualVentilationCadenceSeconds > 0 &&
@@ -236,6 +251,7 @@ export default function App() {
         newSimTime - (equipment.manualBreathLastTriggerTime || 0) >= equipment.manualVentilationCadenceSeconds
       ) {
         cadenceUpdates = {
+          ...cadenceUpdates,
           isManualBreathTriggered: true,
           manualBreathLastTriggerTime: newSimTime,
         };
@@ -251,7 +267,7 @@ export default function App() {
         activeDoses,
         activeEquipment,
         resuscitation,
-        isSurgicalStimulationActive,
+        activeSurgicalStimulus,
         vitals
       );
 
@@ -306,6 +322,7 @@ export default function App() {
             etco2: Math.round(newVitals.etCO2),
             rr: Math.round(newVitals.respiratoryRate),
             tempC: Number(newVitals.bodyTemperatureC.toFixed(1)),
+            glucoseMgDl: Math.round(newVitals.arterialBloodGases.glucoseMgDl),
             vaporizerPct: equipment.vaporizerDialPct,
             depthScore: newVitals.anestheticDepthScore,
           },
@@ -363,6 +380,8 @@ export default function App() {
       isFluidPumpRunning: false,
       warmingBlanketActive: false,
       warmingBlanketTempC: 38.5,
+      isLarynxDesensitized: false,
+      larynxDesensitizedUntilSimTime: 0,
     };
 
     const freshResuscitation: ResuscitationState = {
@@ -400,6 +419,9 @@ export default function App() {
     lastNibpAutoTriggerRef.current = 0;
     prevDeadStateRef.current = false;
     prevArrestStateRef.current = false;
+    surgicalStimulusEndSimTimeRef.current = 0;
+    oxygenFlushEndSimTimeRef.current = 0;
+    setIsSurgicalStimulationActive(false);
 
     setFeedbackToast({
       id: `reset_${Date.now()}`,
@@ -463,19 +485,100 @@ export default function App() {
 
   // QUICK INTUBATE
   const handleQuickIntubate = () => {
-    const isRelaxed = vitals.jawTone === 'relaxed_surgical' || vitals.jawTone === 'flaccid' || vitals.anestheticDepthScore > 35;
+    const isRelaxed = vitals.jawTone === 'relaxed_surgical' || vitals.jawTone === 'flaccid' || vitals.anestheticDepthScore > 40;
     const recommendedTube = SPECIES_DATABASE[patient.species].recommendedEtTubeRange.min + 0.5;
 
-    if (!isRelaxed && patient.species === 'feline') {
-      setFeedbackToast({
-        id: `intub_spasm_${Date.now()}`,
-        title: 'Laringoespasmo por Reflexo Ativo!',
-        message: 'Tentativa de intubação com mandíbula rígida em felino causou fechamento reflexo da glote.',
-        type: 'danger',
-      });
+    // Check if laryngeal reflex is active and larynx is NOT desensitized
+    if (!isRelaxed && !equipment.isLarynxDesensitized) {
+      setPendingIntubationTubeSize(recommendedTube);
+      setIsLaryngealReflexModalOpen(true);
+      return;
     }
 
-    handlePerformIntubation(isRelaxed, recommendedTube);
+    handlePerformIntubation(true, recommendedTube);
+  };
+
+  // TOPICAL LIDOCAINE 2% SPRAY
+  const handleApplyLidocaineSpray = () => {
+    setEquipment((prev) => ({
+      ...prev,
+      isLarynxDesensitized: true,
+      larynxDesensitizedUntilSimTime: simTimeSeconds + 480,
+    }));
+    setFeedbackToast({
+      id: `lido_spray_${Date.now()}`,
+      title: 'Spray de Lidocaína 2% Aplicado',
+      message: 'Instilado 0,1 mL de Lidocaína 2% tópica na fenda glótica. Dessensibilização ativa por 8 minutos.',
+      type: 'success',
+    });
+    setEventLogs((prev) => [
+      ...prev,
+      {
+        id: `lido_topical_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'drug',
+        message: 'Instilação de Lidocaína 2% tópica na glote/aritenoides para dessensibilização laringotraqueal.',
+        severity: 'success',
+      },
+    ]);
+  };
+
+  const handleLidocaineSprayAndIntubate = () => {
+    handleApplyLidocaineSpray();
+    setIsLaryngealReflexModalOpen(false);
+    setEquipment((prev) => ({
+      ...prev,
+      isLarynxDesensitized: true,
+      larynxDesensitizedUntilSimTime: simTimeSeconds + 480,
+      intubationStatus: 'intubated_tracheal',
+      tubeSizeMm: pendingIntubationTubeSize,
+      cuffPressureCmH2O: 20,
+    }));
+    setEventLogs((prev) => [
+      ...prev,
+      {
+        id: `intub_lido_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'equipment',
+        message: `Intubação orotraqueal suave realizada após dessensibilização com Lidocaína 2% (Sonda #${pendingIntubationTubeSize} mm)`,
+        severity: 'success',
+      },
+    ]);
+    setFeedbackToast({
+      id: `intub_success_${Date.now()}`,
+      title: 'Intubação Concluída com Sucesso!',
+      message: `Tubo #${pendingIntubationTubeSize} mm posicionado na traqueia sem espasmo ou resistência glótica.`,
+      type: 'success',
+    });
+  };
+
+  const handleForceIntubationWithSpasm = () => {
+    setIsLaryngealReflexModalOpen(false);
+    setEquipment((prev) => ({
+      ...prev,
+      intubationStatus: 'intubated_tracheal',
+      tubeSizeMm: pendingIntubationTubeSize,
+      cuffPressureCmH2O: 20,
+    }));
+    setFeedbackToast({
+      id: `laryngospasm_${Date.now()}`,
+      title: 'Laringoespasmo & Tosse Intensa!',
+      message: 'Intubação forçada com reflexo ativo desencadeou espasmo laríngeo, tosse e bradicardia reflexa.',
+      type: 'danger',
+    });
+    setEventLogs((prev) => [
+      ...prev,
+      {
+        id: `intub_forced_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'emergency',
+        message: 'Intubação forçada sem bloqueio: tosse vigorosa, laringoespasmo e reflexo vagal ativado.',
+        severity: 'warning',
+      },
+    ]);
   };
 
   // TRIGGER NIBP MEASUREMENT
@@ -589,6 +692,15 @@ export default function App() {
 
   // INTUBATION
   const handlePerformIntubation = (isCorrectTracheal: boolean, tubeSizeMm: number) => {
+    const isRelaxed = vitals.jawTone === 'relaxed_surgical' || vitals.jawTone === 'flaccid' || vitals.anestheticDepthScore > 40;
+
+    // Check if laryngeal reflex is active and larynx is NOT desensitized
+    if (!isRelaxed && !equipment.isLarynxDesensitized && isCorrectTracheal) {
+      setPendingIntubationTubeSize(tubeSizeMm);
+      setIsLaryngealReflexModalOpen(true);
+      return;
+    }
+
     setEquipment((prev) => ({
       ...prev,
       intubationStatus: isCorrectTracheal ? 'intubated_tracheal' : 'intubated_esophageal',
@@ -635,6 +747,7 @@ export default function App() {
 
   // SURGICAL STIMULATION TRIGGER
   const handleStimulateSurgical = () => {
+    surgicalStimulusEndSimTimeRef.current = simTimeSeconds + 4;
     setIsSurgicalStimulationActive(true);
     setEventLogs((prev) => [
       ...prev,
@@ -648,15 +761,13 @@ export default function App() {
       },
     ]);
 
-    setTimeout(() => {
-      setIsSurgicalStimulationActive(false);
-    }, 4000);
   };
 
   // FLUID BOLUS
   const handleGiveFluidBolus = (bolusMl: number, fluidName: string) => {
     setEquipment((prev) => ({
       ...prev,
+      activeFluidType: fluidName,
       totalFluidsInfusedMl: prev.totalFluidsInfusedMl + bolusMl,
     }));
 
@@ -880,13 +991,14 @@ export default function App() {
           onTriggerManualBreath={handleTriggerManualBreath}
           onQuickIntubate={handleQuickIntubate}
           onExtubate={handleExtubate}
+          onApplyLidocaineSpray={handleApplyLidocaineSpray}
         />
 
         {/* Top Half: Real-Time Waveform Monitor & Numeric LED Tiles */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[380px]">
           {/* Waveform Sweeping Canvas (7 cols) */}
           <div className="lg:col-span-7 h-[380px]">
-            <CanvasWaveforms vitals={vitals} isSimPaused={isSimPaused} />
+            <CanvasWaveforms vitals={vitals} isSimPaused={isSimPaused} equipment={equipment} />
           </div>
 
           {/* Numeric Vital Readouts (5 cols) */}
@@ -1012,6 +1124,7 @@ export default function App() {
                   species={patient.species}
                   onUpdateEquipment={(updates) => setEquipment((prev) => ({ ...prev, ...updates }))}
                   onOxygenFlush={() => {
+                    oxygenFlushEndSimTimeRef.current = simTimeSeconds + 1.5;
                     setEquipment((prev) => ({ ...prev, isOxygenFlushActive: true }));
                     setEventLogs((prev) => [
                       ...prev,
@@ -1024,23 +1137,8 @@ export default function App() {
                         severity: 'normal',
                       },
                     ]);
-                    setTimeout(() => {
-                      setEquipment((prev) => ({ ...prev, isOxygenFlushActive: false }));
-                    }, 1500);
                   }}
-                  onManualBagSqueeze={() => {
-                    setEventLogs((prev) => [
-                      ...prev,
-                      {
-                        id: `bag_${Date.now()}`,
-                        simTimeSeconds,
-                        realTimestamp: new Date().toLocaleTimeString(),
-                        type: 'equipment',
-                        message: 'Ventilação manual / Compressão do balão reservatório.',
-                        severity: 'normal',
-                      },
-                    ]);
-                  }}
+                  onManualBagSqueeze={handleTriggerManualBreath}
                 />
 
                 <VentilatorAirway
@@ -1049,6 +1147,7 @@ export default function App() {
                   onUpdateEquipment={(updates) => setEquipment((prev) => ({ ...prev, ...updates }))}
                   onPerformIntubation={handlePerformIntubation}
                   onExtubate={handleExtubate}
+                  onApplyLidocaineSpray={handleApplyLidocaineSpray}
                 />
               </div>
             )}
@@ -1109,7 +1208,7 @@ export default function App() {
         vitals={vitals}
         isOpen={isDeathModalOpen}
         onClose={() => setIsDeathModalOpen(false)}
-        onRestartScenario={handleResetSimulation}
+        onRestartScenario={() => resetSimulationForPatient(patient)}
         onAttemptHeroicCPR={() => {
           setIsDeathModalOpen(false);
           setIsSimPaused(false);
@@ -1131,7 +1230,7 @@ export default function App() {
         vitals={vitals}
       />
 
-      {/* 6. ANESTHETIC DEPTH & CONSCIOUSNESS BOARD MODAL */}
+      {/* 6. ANESTHETIC DEPTH & CONSCIOUSBOARD MODAL */}
       <AnestheticDepthBoard
         isOpen={isDepthBoardOpen}
         onClose={() => setIsDepthBoardOpen(false)}
@@ -1148,13 +1247,28 @@ export default function App() {
         totalSimTimeSeconds={simTimeSeconds}
       />
 
-      {/* 8. EMERGENCY & RESUSCITATION REAL-TIME FEEDBACK TOAST */}
+      {/* 8. LARYNGEAL REFLEX & TOPICAL LIDOCAINE MODAL */}
+      <LaryngealReflexModal
+        isOpen={isLaryngealReflexModalOpen}
+        patient={patient}
+        vitals={vitals}
+        tubeSizeMm={pendingIntubationTubeSize}
+        onClose={() => setIsLaryngealReflexModalOpen(false)}
+        onApplyLidocaineSpray={handleLidocaineSprayAndIntubate}
+        onForceIntubation={handleForceIntubationWithSpasm}
+        onOpenDrugAdministration={() => {
+          setIsLaryngealReflexModalOpen(false);
+          setActiveTab('drugs');
+        }}
+      />
+
+      {/* 9. EMERGENCY & RESUSCITATION REAL-TIME FEEDBACK TOAST */}
       <EmergencyFeedbackToast
         item={feedbackToast}
         onDismiss={() => setFeedbackToast(null)}
       />
 
-      {/* 9. FOOTER */}
+      {/* 11. FOOTER */}
       <footer className="border-t border-[#1a1a1a] bg-[#080808] px-4 py-2.5 text-center text-xs text-[#525252] font-mono-code">
         Open VetSim Simulator · Modelagem Farmacocinética Multicompartimental · Diretrizes RECOVER 2024
       </footer>

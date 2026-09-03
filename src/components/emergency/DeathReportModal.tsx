@@ -99,6 +99,52 @@ export const DeathReportModal: React.FC<DeathReportModalProps> = ({
             </p>
           </div>
 
+          {/* Clinical Resuscitation Audit & Inevitability Assessment */}
+          {summary?.wasResuscitationExemplary ? (
+            <div className="p-4 rounded-xl bg-gradient-to-r from-[#0d2316] to-[#091b11] border-2 border-emerald-500/80 shadow-lg shadow-emerald-950/40">
+              <div className="flex items-center space-x-2 text-emerald-300 font-extrabold text-xs uppercase mb-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Auditoria de Conduta: Ressuscitação Correta & Oportuna (RECOVER)</span>
+              </div>
+              <p className="text-xs text-emerald-100 font-sans leading-relaxed">
+                {summary.inevitabilityStatement}
+              </p>
+              <div className="mt-2 pt-2 border-t border-emerald-800/40 text-[11px] text-emerald-400/90 font-mono">
+                ✓ Compressões adequadas (100-120/min) · ✓ Ventilação 100% O₂ (10 rpm) · ✓ Eletroterapia/Suporte inotrópico no tempo hábil
+              </div>
+            </div>
+          ) : summary?.preventabilityOpportunities && summary.preventabilityOpportunities.length > 0 ? (
+            <div className="p-4 rounded-xl bg-[#1f1308] border-2 border-amber-600/80 shadow-lg shadow-amber-950/40 space-y-2">
+              <div className="flex items-center space-x-2 text-amber-300 font-extrabold text-xs uppercase">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Oportunidades de Intervenção & Conduta Preventiva (RECOVER)</span>
+              </div>
+              <p className="text-[11px] text-amber-200/90 font-sans">
+                A análise cronológica indica que o desfecho poderia ter sido atenuado ou revertido com as seguintes condutas precoces:
+              </p>
+              <ul className="space-y-1.5 pl-1">
+                {summary.preventabilityOpportunities.map((opp, idx) => (
+                  <li key={idx} className="flex items-start gap-2 text-[11px] text-amber-100">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 mt-1.5" />
+                    <span>{opp}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* Reversal Aggravation Alert (If Applicable) */}
+          {summary?.reversalAggravationEvent && (
+            <div className="p-3.5 rounded-xl bg-[#290d11] border border-red-700/80 text-xs">
+              <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block mb-1">
+                ⚠️ Fator Farmacológico Descompensador:
+              </span>
+              <p className="text-[11px] text-red-200 leading-relaxed font-sans">
+                {summary.reversalAggravationEvent}
+              </p>
+            </div>
+          )}
+
           {/* Active Lethal Drug Interactions */}
           {vitals.activeDrugInteractions.length > 0 && (
             <div className="space-y-2">
