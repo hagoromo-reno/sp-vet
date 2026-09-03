@@ -251,10 +251,11 @@ export class CellularReceptorsEngine {
     // Dynamic Chloride Conductance (gCl-):
     // Baseline resting neuronal conductance = 0.08
     const baseChloride = 0.08;
+    const directBzdTonicGabaGCl = 0.12 * Math.min(1.5, bzdSiteOccupancy); // tonic GABA channel opening frequency increase
     const chlorideConductanceGabaA = 
       baseChloride + 
       (directGatingSum * allostericBZDMultiplier * allostericVolatileSynergy) +
-      0.25 * Math.min(1.0, bzdSiteOccupancy); // mild standalone sedation
+      directBzdTonicGabaGCl;
 
     // ----------------------------------------------------
     // 5. SECOND MESSENGER TRANSDUCTION (cAMP & Ca2+)

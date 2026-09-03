@@ -26,6 +26,10 @@ import { AnesthesiaRecordSheet } from './components/records/AnesthesiaRecordShee
 import { ScenarioSelectorModal } from './components/scenarios/ScenarioSelectorModal';
 import { DeathReportModal } from './components/emergency/DeathReportModal';
 import { CellularPhysiologyModal } from './components/monitor/CellularPhysiologyModal';
+import { AirwayQuickBar } from './components/airway/AirwayQuickBar';
+import { AnestheticDepthBoard } from './components/monitor/AnestheticDepthBoard';
+import { GeneralEventLogModal } from './components/records/GeneralEventLogModal';
+import { EmergencyFeedbackToast, EmergencyFeedbackItem } from './components/emergency/EmergencyFeedbackToast';
 import {
   Activity,
   Syringe,
@@ -41,6 +45,9 @@ import {
   Sparkles,
   Stethoscope,
   Dna,
+  Brain,
+  ListRestart,
+  ScrollText,
 } from 'lucide-react';
 
 export default function App() {
@@ -146,12 +153,31 @@ export default function App() {
     isAudioMuted: false,
   });
 
-  // 9. ACTIVE WORKSTATION TAB
+  // 9. ACTIVE WORKSTATION TAB & MODALS
   const [activeTab, setActiveTab] = useState<
     'drugs' | 'machine_airway' | 'physical_exam' | 'fluids_thermal' | 'emergency_cpr' | 'records'
   >('drugs');
   const [isDeathModalOpen, setIsDeathModalOpen] = useState(false);
+  const [isDepthBoardOpen, setIsDepthBoardOpen] = useState(false);
+  const [isGeneralLogOpen, setIsGeneralLogOpen] = useState(false);
+  const [feedbackToast, setFeedbackToast] = useState<EmergencyFeedbackItem | null>(null);
+
+  // 10. NIBP / IBP STATE
+  const [isNibpMeasuring, setIsNibpMeasuring] = useState(false);
+  const [lastNibpMeasurement, setLastNibpMeasurement] = useState<{
+    sys: number;
+    dia: number;
+    map: number;
+    timestampSimSec: number;
+  } | null>(null);
+  const [nibpAutoIntervalMin, setNibpAutoIntervalMin] = useState<number>(3);
+  const [isContinuousIbpActive, setIsContinuousIbpActive] = useState<boolean>(false);
+
   const prevDeadStateRef = useRef<boolean>(false);
+  const prevArrestStateRef = useRef<boolean>(false);
+  const lastNibpAutoTriggerRef = useRef<number>(0);
+  const nibpMeasureStartRef = useRef<number>(0);
+  const lastLogSimTimeRef = useRef<number>(0);
 
   // Auto-open death report on transition to dead
   useEffect(() => {
@@ -160,9 +186,6 @@ export default function App() {
     }
     prevDeadStateRef.current = vitals.isDead;
   }, [vitals.isDead]);
-
-  // Periodic Vital Log recording (every simulated 30 seconds)
-  const lastLogSimTimeRef = useRef<number>(0);
 
   // SIMULATION TICK LOOP (Interval at 10 Hz)
   useEffect(() => {
@@ -173,23 +196,86 @@ export default function App() {
       const newSimTime = simTimeSeconds + dt;
       setSimTimeSeconds(newSimTime);
 
+      // Check NIBP auto-cycle
+      if (
+        nibpAutoIntervalMin > 0 &&
+        !isNibpMeasuring &&
+        !vitals.isDead &&
+        newSimTime - lastNibpAutoTriggerRef.current >= nibpAutoIntervalMin * 60
+      ) {
+        lastNibpAutoTriggerRef.current = newSimTime;
+        nibpMeasureStartRef.current = newSimTime;
+        setIsNibpMeasuring(true);
+      }
+
+      // Check NIBP inflation completion (3.0 simulated seconds)
+      if (isNibpMeasuring && newSimTime - nibpMeasureStartRef.current >= 3.0) {
+        setIsNibpMeasuring(false);
+        setLastNibpMeasurement({
+          sys: vitals.systolicBP,
+          dia: vitals.diastolicBP,
+          map: vitals.meanArterialPressure,
+          timestampSimSec: newSimTime,
+        });
+      }
+
+      // Check Manual Ventilation Cadence (e.g. squeeze every 6s)
+      let cadenceUpdates: Partial<AnesthesiaEquipmentState> = {};
+      if (
+        equipment.manualVentilationCadenceSeconds &&
+        equipment.manualVentilationCadenceSeconds > 0 &&
+        equipment.intubationStatus === 'intubated_tracheal' &&
+        newSimTime - (equipment.manualBreathLastTriggerTime || 0) >= equipment.manualVentilationCadenceSeconds
+      ) {
+        cadenceUpdates = {
+          isManualBreathTriggered: true,
+          manualBreathLastTriggerTime: newSimTime,
+        };
+      }
+
+      const activeEquipment = Object.keys(cadenceUpdates).length > 0 ? { ...equipment, ...cadenceUpdates } : equipment;
+
       // Run PK/PD integration
       const { vitals: newVitals, updatedDoses, equipmentUpdates } = PKPDEngine.stepSimulation(
         dt,
         newSimTime,
         patient,
         activeDoses,
-        equipment,
+        activeEquipment,
         resuscitation,
         isSurgicalStimulationActive,
         vitals
       );
 
+      // Check ROSC transition (Return of Spontaneous Circulation)
+      if (prevArrestStateRef.current && !newVitals.isCardiacArrest && !newVitals.isDead) {
+        setFeedbackToast({
+          id: `rosc_${Date.now()}`,
+          title: 'RETORNO DA CIRCULAÇÃO ESPONTÂNEA (ROSC)!',
+          message: `Ritmo sinusal restabelecido! Pico de EtCO2 detectado (${newVitals.etCO2} mmHg).`,
+          type: 'rosc',
+        });
+        setEventLogs((prev) => [
+          ...prev,
+          {
+            id: `rosc_${Date.now()}`,
+            simTimeSeconds: newSimTime,
+            realTimestamp: new Date().toLocaleTimeString(),
+            type: 'emergency',
+            message: 'ROSC ALCANÇADO COM SUCESSO! Ritmo sinusal restabelecido.',
+            details: `FC: ${newVitals.heartRate} bpm · PAM: ${newVitals.meanArterialPressure} mmHg · EtCO2: ${newVitals.etCO2} mmHg`,
+            severity: 'success',
+          },
+        ]);
+      }
+      prevArrestStateRef.current = newVitals.isCardiacArrest;
+
       setVitals(newVitals);
       setActiveDoses(updatedDoses);
 
-      if (Object.keys(equipmentUpdates).length > 0) {
-        setEquipment((prev) => ({ ...prev, ...equipmentUpdates }));
+      const mergedEquipmentUpdates = { ...cadenceUpdates, ...equipmentUpdates };
+      if (Object.keys(mergedEquipmentUpdates).length > 0) {
+        setEquipment((prev) => ({ ...prev, ...mergedEquipmentUpdates }));
       }
 
       // Check for automatic 30-sec vital record
@@ -229,15 +315,15 @@ export default function App() {
     equipment,
     resuscitation,
     isSurgicalStimulationActive,
+    isNibpMeasuring,
+    nibpAutoIntervalMin,
+    vitals,
   ]);
 
   // RESET SIMULATION
   const handleResetSimulation = () => {
     const defaultSpeciesInfo = SPECIES_DATABASE[patient.species];
-    setSimTimeSeconds(0);
-    setActiveDoses([]);
-    setVitalLogs([]);
-    setEquipment({
+    const freshEquipment: AnesthesiaEquipmentState = {
       oxygenFlowLMin: 1.5,
       nitrousOxideFlowLMin: 0.0,
       vaporizerType: 'isoflurane',
@@ -249,7 +335,7 @@ export default function App() {
       reservoirBagVolumeMl: 1000,
       isOxygenFlushActive: false,
       intubationStatus: 'unintubated',
-      tubeSizeMm: defaultSpeciesInfo.recommendedEtTubeRange.min + 1.0,
+      tubeSizeMm: defaultSpeciesInfo.recommendedEtTubeRange.min + 0.5,
       cuffPressureCmH2O: 0,
       ventilatorMode: 'spontaneous',
       isVentilatorActive: false,
@@ -262,31 +348,138 @@ export default function App() {
         inspiratoryPausePct: 10,
       },
       currentAirwayPressureCmH2O: 0,
+      manualVentilationCadenceSeconds: 0,
       activeFluidType: 'Ringer com Lactato (LRS)',
       fluidRateMlPerHour: 0,
       totalFluidsInfusedMl: 0,
       isFluidPumpRunning: false,
       warmingBlanketActive: false,
       warmingBlanketTempC: 38.5,
-    });
-    setResuscitation({
+    };
+
+    const freshResuscitation: ResuscitationState = {
       isCPRActive: false,
       compressionsPerMin: 110,
       lastCompressionSimTime: 0,
       compressionDepthQuality: 0.8,
       defibrillatorChargedJoules: 0,
       isDefibrillatorArmed: false,
+    };
+
+    // Calculate fresh vitals with undefined previousVitals to clear all death/arrest accumulators
+    const { vitals: freshVitals } = PKPDEngine.stepSimulation(
+      0.1,
+      0,
+      patient,
+      [],
+      freshEquipment,
+      freshResuscitation,
+      false,
+      undefined
+    );
+
+    setVitals(freshVitals);
+    setEquipment(freshEquipment);
+    setResuscitation(freshResuscitation);
+    setActiveDoses([]);
+    setVitalLogs([]);
+    setSimTimeSeconds(0);
+    setIsSimPaused(false);
+    setIsDeathModalOpen(false);
+    setIsNibpMeasuring(false);
+    setLastNibpMeasurement(null);
+    lastLogSimTimeRef.current = 0;
+    lastNibpAutoTriggerRef.current = 0;
+    prevDeadStateRef.current = false;
+    prevArrestStateRef.current = false;
+
+    setFeedbackToast({
+      id: `reset_${Date.now()}`,
+      title: 'Caso Reiniciado do Início',
+      message: `Simulação para ${patient.name} (${patient.species.toUpperCase()}) retornou ao estado basal (00:00).`,
+      type: 'airway',
     });
+
     setEventLogs([
       {
         id: `reset_${Date.now()}`,
         simTimeSeconds: 0,
         realTimestamp: new Date().toLocaleTimeString(),
         type: 'system',
-        message: 'Simulação reiniciada.',
+        message: `Simulação reiniciada para ${patient.name} (${patient.species.toUpperCase()})`,
         severity: 'normal',
       },
     ]);
+  };
+
+  // QUICK MANUAL BREATH TRIGGER (Apertar Balão)
+  const handleTriggerManualBreath = () => {
+    if (equipment.intubationStatus !== 'intubated_tracheal') {
+      setFeedbackToast({
+        id: `manual_fail_${Date.now()}`,
+        title: 'Intubação Necessária',
+        message: 'Para ventilar manualmente com o balão do circuito, o paciente deve estar intubado.',
+        type: 'danger',
+      });
+      return;
+    }
+
+    setEquipment((prev) => ({
+      ...prev,
+      isManualBreathTriggered: true,
+      manualBreathLastTriggerTime: simTimeSeconds,
+    }));
+
+    setFeedbackToast({
+      id: `manual_breath_${Date.now()}`,
+      title: 'Incursão Respiratória Fornecida',
+      message: `Volume corrente de ${Math.round(patient.weightKg * 12)} mL administrado via balão. Paw ~16 cmH2O.`,
+      type: 'airway',
+    });
+
+    setEventLogs((prev) => [
+      ...prev,
+      {
+        id: `breath_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'equipment',
+        message: 'Ventilação manual fornecida (Apertar balão)',
+        details: `Vol: ${Math.round(patient.weightKg * 12)} mL · Expansão torácica visualizada`,
+        severity: 'normal',
+      },
+    ]);
+  };
+
+  // QUICK INTUBATE
+  const handleQuickIntubate = () => {
+    const isRelaxed = vitals.jawTone === 'relaxed_surgical' || vitals.jawTone === 'flaccid' || vitals.anestheticDepthScore > 35;
+    const recommendedTube = SPECIES_DATABASE[patient.species].recommendedEtTubeRange.min + 0.5;
+
+    if (!isRelaxed && patient.species === 'feline') {
+      setFeedbackToast({
+        id: `intub_spasm_${Date.now()}`,
+        title: 'Laringoespasmo por Reflexo Ativo!',
+        message: 'Tentativa de intubação com mandíbula rígida em felino causou fechamento reflexo da glote.',
+        type: 'danger',
+      });
+    }
+
+    handlePerformIntubation(isRelaxed, recommendedTube);
+  };
+
+  // TRIGGER NIBP MEASUREMENT
+  const handleTriggerNibp = () => {
+    if (vitals.isDead || isNibpMeasuring) return;
+    setIsNibpMeasuring(true);
+    nibpMeasureStartRef.current = simTimeSeconds;
+
+    setFeedbackToast({
+      id: `nibp_toast_${Date.now()}`,
+      title: 'Aferindo PNI (NIBP STAT)',
+      message: 'Manguito insuflando... Aguarde desinsuflação oscilométrica.',
+      type: 'cpr',
+    });
   };
 
   // CHANGE PATIENT / SCENARIO
@@ -503,18 +696,44 @@ export default function App() {
               title="Inspecionar Receptores Celulares, Segundos Mensageiros e Particularidades de Espécie"
             >
               <Dna className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
-              <span className="font-bold">Biofísica Celular</span>
+              <span className="font-bold hidden sm:inline">Biofísica</span>
               <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/30 text-indigo-300 font-mono font-bold">
                 {patient.species.toUpperCase()}
+              </span>
+            </button>
+
+            {/* Depth & Consciousness Board Button */}
+            <button
+              onClick={() => setIsDepthBoardOpen(true)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-950/50 hover:bg-purple-900/70 border border-purple-500/40 text-xs font-mono-code transition text-purple-200 shadow-md shadow-purple-950/30 cursor-pointer"
+              title="Visualizar Nível de Consciência, Plano de Guedel e Reflexos"
+            >
+              <Brain className="w-3.5 h-3.5 text-purple-400" />
+              <span className="font-bold hidden sm:inline">Consciência</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-500/30 text-purple-200 font-mono font-bold">
+                {vitals.consciousnessScore ?? 100}%
+              </span>
+            </button>
+
+            {/* General Log Button */}
+            <button
+              onClick={() => setIsGeneralLogOpen(true)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cyan-950/50 hover:bg-cyan-900/70 border border-cyan-500/40 text-xs font-mono-code transition text-cyan-200 shadow-md shadow-cyan-950/30 cursor-pointer"
+              title="Abrir Log Geral de Acontecimentos e Respostas Fisiológicas"
+            >
+              <ScrollText className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="font-bold hidden sm:inline">Log Geral</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/30 text-cyan-200 font-mono font-bold">
+                {eventLogs.length}
               </span>
             </button>
           </div>
 
           {/* Clock & Speed Multipliers */}
-          <div className="flex items-center space-x-3 font-mono-code text-xs">
+          <div className="flex items-center space-x-2 font-mono-code text-xs">
             {/* Simulation Timer */}
             <div className="flex items-center space-x-2 px-3 py-1 bg-[#101010] border border-[#222222] rounded-lg">
-              <span className="text-[#737373] text-[10px]">TEMPO DE ANESTESIA:</span>
+              <span className="text-[#737373] text-[10px]">TEMPO:</span>
               <strong className="text-sm font-digital text-emerald-400 font-extrabold tracking-wider">
                 {formatSimTime(simTimeSeconds)}
               </strong>
@@ -563,10 +782,11 @@ export default function App() {
 
               <button
                 onClick={handleResetSimulation}
-                className="p-1.5 text-[#737373] hover:text-red-400 rounded transition"
-                title="Reiniciar Simulação"
+                className="flex items-center space-x-1 px-2 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/60 text-red-300 hover:text-white rounded text-[10px] font-bold transition ml-1"
+                title="Reiniciar Caso do Início (00:00)"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
+                <RotateCcw className="w-3 h-3" />
+                <span>Reiniciar</span>
               </button>
             </div>
           </div>
@@ -580,6 +800,17 @@ export default function App() {
           vitals={vitals}
           onOpenDeathReport={() => setIsDeathModalOpen(true)}
           onSwitchToEmergencyTab={() => setActiveTab('emergency_cpr')}
+        />
+
+        {/* Airway Quick Actions Bar (Intubation / Manual Bag Squeeze / Cadence) */}
+        <AirwayQuickBar
+          equipment={equipment}
+          patient={patient}
+          vitals={vitals}
+          onUpdateEquipment={(updates) => setEquipment((prev) => ({ ...prev, ...updates }))}
+          onTriggerManualBreath={handleTriggerManualBreath}
+          onQuickIntubate={handleQuickIntubate}
+          onExtubate={handleExtubate}
         />
 
         {/* Top Half: Real-Time Waveform Monitor & Numeric LED Tiles */}
@@ -600,20 +831,16 @@ export default function App() {
                 setAlarmLimits((prev) => ({ ...prev, isAudioMuted: nextMuted }));
                 AudioSynthesizer.setMuted(nextMuted);
               }}
-              onTriggerNibpMeasurement={() => {
-                setEventLogs((prev) => [
-                  ...prev,
-                  {
-                    id: `nibp_${Date.now()}`,
-                    simTimeSeconds,
-                    realTimestamp: new Date().toLocaleTimeString(),
-                    type: 'vital',
-                    message: `Medição NIBP manual: ${vitals.systolicBP}/${vitals.diastolicBP} (PAM ${vitals.meanArterialPressure} mmHg)`,
-                    severity: 'normal',
-                  },
-                ]);
-              }}
+              onTriggerNibpMeasurement={handleTriggerNibp}
+              isNibpMeasuring={isNibpMeasuring}
+              lastNibpMeasurement={lastNibpMeasurement}
+              nibpAutoIntervalMin={nibpAutoIntervalMin}
+              onChangeNibpAutoInterval={(min) => setNibpAutoIntervalMin(min)}
+              isContinuousIbpActive={isContinuousIbpActive}
+              onToggleContinuousIbp={() => setIsContinuousIbpActive(!isContinuousIbpActive)}
+              simTimeSeconds={simTimeSeconds}
               onOpenDeathReport={() => setIsDeathModalOpen(true)}
+              onOpenDepthBoard={() => setIsDepthBoardOpen(true)}
             />
           </div>
         </div>
@@ -834,7 +1061,30 @@ export default function App() {
         vitals={vitals}
       />
 
-      {/* 6. FOOTER */}
+      {/* 6. ANESTHETIC DEPTH & CONSCIOUSNESS BOARD MODAL */}
+      <AnestheticDepthBoard
+        isOpen={isDepthBoardOpen}
+        onClose={() => setIsDepthBoardOpen(false)}
+        vitals={vitals}
+        patient={patient}
+      />
+
+      {/* 7. GENERAL EVENT LOG MODAL */}
+      <GeneralEventLogModal
+        isOpen={isGeneralLogOpen}
+        onClose={() => setIsGeneralLogOpen(false)}
+        eventLogs={eventLogs}
+        patient={patient}
+        totalSimTimeSeconds={simTimeSeconds}
+      />
+
+      {/* 8. EMERGENCY & RESUSCITATION REAL-TIME FEEDBACK TOAST */}
+      <EmergencyFeedbackToast
+        item={feedbackToast}
+        onDismiss={() => setFeedbackToast(null)}
+      />
+
+      {/* 9. FOOTER */}
       <footer className="border-t border-[#1a1a1a] bg-[#080808] px-4 py-2.5 text-center text-xs text-[#525252] font-mono-code">
         Open VetSim Simulator · Modelagem Farmacocinética Multicompartimental · Diretrizes RECOVER 2024
       </footer>

@@ -321,23 +321,24 @@ export class PKPDEngine {
     );
 
     // ----------------------------------------------------
-    // 8. CARDIAC ARREST & BIOLOGICAL DEATH STATE MACHINE
+    // 8. CARDIAC ARREST & ROSC RESUSCITATION STATE MACHINE (RECOVER 2024)
     // ----------------------------------------------------
     let triggeredArrestNow = false;
+    let achievedROSCNow = false;
 
-    if (hemodynamics.isArrestTriggered && !isAlreadyArrested) {
+    if (hemodynamics.isArrestTriggered && !isAlreadyArrested && !isAlreadyDead) {
       triggeredArrestNow = true;
       arrestType = hemodynamics.arrestType || 'ventricular_fibrillation';
       arrestCause = hemodynamics.arrestCause;
     }
 
-    if (fatalOverdoseTriggered && !isAlreadyArrested) {
+    if (fatalOverdoseTriggered && !isAlreadyArrested && !isAlreadyDead) {
       triggeredArrestNow = true;
       arrestType = fatalToxicityReason.includes('Fibrilação') ? 'ventricular_fibrillation' : 'asystole';
       arrestCause = fatalToxicityReason;
     }
 
-    if (hypoxiaSeconds > (isPediatric ? 45 : 90) && !isAlreadyArrested) {
+    if (hypoxiaSeconds > (isPediatric ? 55 : 110) && !isAlreadyArrested && !isAlreadyDead) {
       triggeredArrestNow = true;
       arrestType = 'asystole';
       arrestCause = `Parada Cardiorrespiratória por Anóxia Miocárdica Aguda (${Math.round(hypoxiaSeconds)}s em hipóxia crítica)`;
@@ -347,30 +348,86 @@ export class PKPDEngine {
       isAlreadyArrested = true;
     }
 
-    if (isAlreadyArrested) {
-      if (resuscitation.isCPRActive) {
-        cprSeconds += dtSeconds;
-      } else {
-        asystoleSeconds += dtSeconds;
-      }
+    // ROSC & Arrest Progression Logic
+    if (isAlreadyArrested && !isAlreadyDead) {
+      // 1. Check CPR & Resuscitation Quality
+      const hasEffectiveCompressions =
+        resuscitation.isCPRActive &&
+        resuscitation.compressionsPerMin >= 80 &&
+        (resuscitation.compressionDepthQuality || 0.8) >= 0.45;
 
-      const deathThresholdSec = isPediatric ? 95 : 155;
-      if ((asystoleSeconds > deathThresholdSec || (cprSeconds > 360 && asystoleSeconds > 60)) && !isAlreadyDead) {
-        isAlreadyDead = true;
-        deathTime = simTimeSeconds;
-        deathCause = arrestCause || 'Morte Biológica Irreversível por Parada Cardiorrespiratória Refratária';
+      const hasAirwayVentilation =
+        equipment.intubationStatus === 'intubated_tracheal' &&
+        equipment.oxygenFlowLMin > 0.1 &&
+        (equipment.isVentilatorActive ||
+          Boolean(equipment.manualVentilationCadenceSeconds && equipment.manualVentilationCadenceSeconds > 0) ||
+          Boolean(equipment.isManualBreathTriggered) ||
+          (simTimeSeconds - (equipment.manualBreathLastTriggerTime || 0)) < 4.0);
+
+      // 2. Check Pharmacological Support & Reversible Causes
+      const hasInotropicVasoSupport =
+        (activeDrugEffects['epinephrine']?.Ce || 0) > 0.03 ||
+        (activeDrugEffects['dobutamine']?.Ce || 0) > 0.08;
+
+      const isHypoxiaCorrected =
+        respiration.pulseOximetrySpO2 >= 85 ||
+        respiration.arterialBloodGases.paO2 >= 60 ||
+        (hasAirwayVentilation && hasEffectiveCompressions);
+
+      const isLethalOverdoseReversed =
+        !fatalOverdoseTriggered ||
+        (activeDrugEffects['naloxone']?.Ce || 0) > 0.08 ||
+        (activeDrugEffects['atipamezole']?.Ce || 0) > 0.08 ||
+        (activeDrugEffects['flumazenil']?.Ce || 0) > 0.08 ||
+        (activeDrugEffects['lipid_emulsion_20']?.Ce || 0) > 0.08;
+
+      const isDefibrillatedVF =
+        (arrestType === 'ventricular_fibrillation' || arrestType === 'pulseless_ventricular_tachycardia') &&
+        resuscitation.defibrillatorChargedJoules > 0 &&
+        !resuscitation.isDefibrillatorArmed;
+
+      // 3. RECOVER ROSC Criteria:
+      // Adequate CPR + Ventilation + (Inotrope OR Reversal OR Corrected Hypoxia OR Defibrillation)
+      const canAchieveROSC =
+        hasEffectiveCompressions &&
+        hasAirwayVentilation &&
+        (hasInotropicVasoSupport || isHypoxiaCorrected || isDefibrillatedVF) &&
+        isLethalOverdoseReversed;
+
+      if (canAchieveROSC && (cprSeconds >= 10 || hasInotropicVasoSupport || isDefibrillatedVF)) {
+        // SUCCESSFUL ROSC!
+        achievedROSCNow = true;
+        isAlreadyArrested = false;
+        arrestCause = undefined;
+        arrestType = undefined;
+        asystoleSeconds = 0;
+        cprSeconds = 0;
+        hypoxiaSeconds = 0;
+      } else {
+        if (resuscitation.isCPRActive) {
+          cprSeconds += dtSeconds;
+        } else {
+          asystoleSeconds += dtSeconds;
+        }
+
+        const deathThresholdSec = isPediatric ? 120 : 210;
+        if ((asystoleSeconds > deathThresholdSec || (cprSeconds > 480 && asystoleSeconds > 90)) && !isAlreadyDead) {
+          isAlreadyDead = true;
+          deathTime = simTimeSeconds;
+          deathCause = arrestCause || 'Morte Biológica Irreversível por Parada Cardiorrespiratória Refratária';
+        }
       }
     }
 
     // ----------------------------------------------------
-    // 9. GUEDEL STAGE & CLINICAL REFLEX ENGINE
+    // 9. GUEDEL STAGE & CONSCIOUSNESS ENGINE
     // ----------------------------------------------------
-    // Pure continuous mapping from GABA-A chloride conductance (gCl-) and nociception
     const gCl = receptors.gabaAChlorideConductance;
     let anestheticDepthScore = Math.min(100, Math.round((gCl / 3.0) * 85));
     if (gCl >= 3.0) anestheticDepthScore = Math.min(100, 85 + Math.round(((gCl - 3.0) / 1.5) * 15));
 
-    let guedelStage: VitalSigns['guedelStage'] = 'Estágio I (Voluntário)';
+    let consciousnessScore = 100;
+    let guedelStage: VitalSigns['guedelStage'] = 'Estágio I (Consciente / Alerta)';
     let eyePosition: EyePosition = 'central_light';
     let palpebralReflex: ReflexStrength = 'brisk';
     let cornealReflex: ReflexStrength = 'brisk';
@@ -381,6 +438,7 @@ export class PKPDEngine {
     const analgesiaPct = Math.round(receptors.nociceptiveInhibition * 100);
 
     if (isAlreadyDead || isAlreadyArrested) {
+      consciousnessScore = 0;
       guedelStage = 'Estágio IV (Depressão Bulbar / Parada)';
       eyePosition = 'central_deep_dilated';
       palpebralReflex = 'absent';
@@ -388,27 +446,41 @@ export class PKPDEngine {
       jawTone = 'flaccid';
       pedalReflex = 'absent';
       surgicalTolerancePct = 100;
-    } else if (gCl < 0.35) {
-      // Estágio I (Consciente / Sedação Leve)
-      guedelStage = 'Estágio I (Voluntário)';
+    } else if (gCl < 0.10 && receptors.bzdAllostericOccupancy < 0.08) {
+      // Estágio I (Consciente / Alerta)
+      consciousnessScore = 100;
+      guedelStage = 'Estágio I (Consciente / Alerta)';
       eyePosition = 'central_light';
       palpebralReflex = 'brisk';
       cornealReflex = 'brisk';
-      jawTone = receptors.bzdAllostericOccupancy > 0.4 ? 'moderate' : 'rigid';
+      jawTone = 'rigid';
       pedalReflex = 'brisk';
-      surgicalTolerancePct = Math.min(25, analgesiaPct * 0.25);
+      surgicalTolerancePct = Math.min(20, analgesiaPct * 0.20);
+    } else if (gCl < 0.35 || receptors.bzdAllostericOccupancy >= 0.08) {
+      // Estágio I (Sedação Leve / Abatimento):
+      // Animal calmo, abatido, responsivo a estímulos táteis/verbais.
+      consciousnessScore = Math.max(50, Math.min(78, Math.round(74 - (gCl - 0.08) * 75)));
+      guedelStage = 'Estágio I (Sedação Leve / Abatimento)';
+      eyePosition = 'central_light';
+      palpebralReflex = 'brisk';
+      cornealReflex = 'brisk';
+      jawTone = receptors.bzdAllostericOccupancy > 0.20 ? 'moderate' : 'rigid';
+      pedalReflex = 'brisk';
+      surgicalTolerancePct = Math.min(35, 10 + analgesiaPct * 0.30);
     } else if (gCl < 0.90) {
-      // Estágio II (Excitação / Delírio / Sedação Profunda)
+      // Estágio II (Excitação / Delírio)
+      consciousnessScore = Math.round(45 - (gCl - 0.35) * 45);
       guedelStage = 'Estágio II (Excitação/Delírio)';
       eyePosition = 'central_light';
       palpebralReflex = 'moderate';
       cornealReflex = 'brisk';
-      jawTone = receptors.bzdAllostericOccupancy > 0.5 || receptors.alpha2Drive > 0.4 ? 'moderate' : 'rigid';
+      jawTone = 'moderate';
       pedalReflex = analgesiaPct > 60 ? 'moderate' : 'brisk';
-      surgicalTolerancePct = Math.round(25 + analgesiaPct * 0.25);
+      surgicalTolerancePct = Math.round(30 + analgesiaPct * 0.25);
     } else if (gCl < 1.70) {
       // Estágio III Plano 1 (Anestesia Leve / Indução Recém-Instalada):
-      // Relaxamento mandibular perfeito para intubação orotraqueal!
+      // Relaxamento mandibular cirúrgico para intubação orotraqueal!
+      consciousnessScore = 10;
       guedelStage = 'Estágio III Plano 1 (Leve)';
       eyePosition = 'ventromedial_surgical';
       palpebralReflex = 'sluggish';
@@ -417,7 +489,8 @@ export class PKPDEngine {
       pedalReflex = analgesiaPct > 70 ? 'absent' : 'sluggish';
       surgicalTolerancePct = Math.round(65 + analgesiaPct * 0.20);
     } else if (gCl < 2.70) {
-      // Estágio III Plano 2 (Plano Cirúrgico Ideal):
+      // Estágio III Plano 2 (Plano Cirúrgico Ideal)
+      consciousnessScore = 0;
       guedelStage = 'Estágio III Plano 2 (Cirúrgico)';
       eyePosition = 'ventromedial_surgical';
       palpebralReflex = 'absent';
@@ -426,7 +499,8 @@ export class PKPDEngine {
       pedalReflex = 'absent';
       surgicalTolerancePct = Math.round(92 + (analgesiaPct / 100) * 8);
     } else if (gCl < 3.50) {
-      // Estágio III Plano 3 (Anestesia Profunda):
+      // Estágio III Plano 3 (Anestesia Profunda)
+      consciousnessScore = 0;
       guedelStage = 'Estágio III Plano 3 (Profundo)';
       eyePosition = 'central_deep_dilated';
       palpebralReflex = 'absent';
@@ -436,6 +510,7 @@ export class PKPDEngine {
       surgicalTolerancePct = 100;
     } else {
       // Estágio IV (Depressão Bulbar)
+      consciousnessScore = 0;
       guedelStage = 'Estágio IV (Depressão Bulbar / Parada)';
       eyePosition = 'central_deep_dilated';
       palpebralReflex = 'absent';
@@ -529,6 +604,16 @@ export class PKPDEngine {
       finalRhythm = 'asystole';
       pulseQuality = 'Ausente';
       capnogramType = 'cardiac_arrest_flat';
+    } else if (achievedROSCNow) {
+      // Return of Spontaneous Circulation (ROSC)
+      finalHR = Math.round(speciesInfo.normalVitals.hrTypical * 1.15);
+      finalMAP = Math.round(speciesInfo.normalVitals.mapTypical * 0.95);
+      finalSysBP = finalMAP + 25;
+      finalDiaBP = Math.max(20, finalMAP - 15);
+      finalRhythm = 'sinus_tachycardia';
+      pulseQuality = 'Forte e Cheio';
+      finalEtCO2 = Math.min(52, Math.max(38, respiration.etCO2 + 16)); // Hallmark ROSC hypercapnic washout spike!
+      capnogramType = 'normal';
     } else if (isAlreadyArrested) {
       if (resuscitation.isCPRActive) {
         finalHR = resuscitation.compressionsPerMin || 110;
@@ -593,6 +678,7 @@ export class PKPDEngine {
       capnogramType,
       bodyTemperatureC: Number(tempC.toFixed(1)),
       arterialBloodGases: respiration.arterialBloodGases,
+      consciousnessScore,
       anestheticDepthScore,
       guedelStage,
       eyePosition,
@@ -636,6 +722,8 @@ export class PKPDEngine {
         sodaLimeExhaustionPct: respiration.sodaLimeExhaustionPct,
         currentAirwayPressureCmH2O: respiration.currentAirwayPressureCmH2O,
         totalFluidsInfusedMl: equipment.totalFluidsInfusedMl + (equipment.isFluidPumpRunning ? (equipment.fluidRateMlPerHour / 3600) * dtSeconds : 0),
+        isManualBreathTriggered: false,
+        manualBreathLastTriggerTime: equipment.isManualBreathTriggered ? simTimeSeconds : equipment.manualBreathLastTriggerTime,
       },
     };
   }

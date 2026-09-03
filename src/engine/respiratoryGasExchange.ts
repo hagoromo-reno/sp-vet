@@ -84,15 +84,21 @@ export class RespiratoryGasExchangeEngine {
       isRespiratoryArrest = true;
       arrestCause = 'Parada Respiratória por Bloqueio Neuromuscular Periférico (Atracúrio sem ventilação mecânica)';
     }
-    // B. Profound Bulbar Depression (GABA-A / Deep Anesthesia)
-    else if (receptors.gabaAChlorideConductance > 3.0) {
+    // B. Post-Induction Apnea (Propofol / Alfaxalone / Thiopental Bolus or BZD synergy)
+    else if (
+      receptors.propofolSiteOccupancy > 0.65 ||
+      (receptors.propofolSiteOccupancy > 0.35 && receptors.bzdAllostericOccupancy > 0.15) ||
+      receptors.gabaAChlorideConductance > 1.80
+    ) {
       spontaneousRR = 0;
       spontaneousVT = 0;
       isRespiratoryArrest = true;
-      arrestCause = 'Parada Respiratória por Depressão Bulbar Profunda (Plano Anestésico Excessivo / Estágio IV)';
+      arrestCause = receptors.gabaAChlorideConductance > 3.0
+        ? 'Parada Respiratória por Depressão Bulbar Profunda (Plano Anestésico Excessivo / Estágio IV)'
+        : 'Apneia Pós-Indução por Bólus de Agente Indutor (Propofol/GABA-A)';
     }
     // C. Opioid-Induced Central Apnea
-    else if (receptors.muOpioidDrive > 0.85 && receptors.gabaAChlorideConductance > 1.2) {
+    else if (receptors.muOpioidDrive > 0.85 && receptors.gabaAChlorideConductance > 1.0) {
       spontaneousRR = 0;
       spontaneousVT = 0;
       isRespiratoryArrest = true;
@@ -125,17 +131,36 @@ export class RespiratoryGasExchangeEngine {
     spontaneousVT = Math.round(spontaneousVT);
 
     // ----------------------------------------------------
-    // 2. VENTILATOR COUPLING & AIRWAY PRESSURES
+    // 2. MANUAL BAGGING & MECHANICAL VENTILATOR COUPLING
     // ----------------------------------------------------
     let finalRR = spontaneousRR;
     let finalVT = spontaneousVT;
     let currentPaw = 0;
 
+    // A. Check for Manual Breath (Bag Squeeze) or Cadence
+    const hasActiveTrachealTube = equipment.intubationStatus === 'intubated_tracheal';
+    const isSingleManualBreathActive = Boolean(
+      equipment.isManualBreathTriggered || 
+      (equipment.manualBreathLastTriggerTime && (simTimeSeconds - equipment.manualBreathLastTriggerTime) < 2.0)
+    );
+    const hasManualCadence = Boolean(
+      equipment.manualVentilationCadenceSeconds && equipment.manualVentilationCadenceSeconds > 0
+    );
+
     if (equipment.isVentilatorActive && equipment.ventilatorMode !== 'spontaneous') {
+      // Mechanical Ventilator Active
       finalRR = equipment.ventilatorSettings.rateBpm;
       finalVT = equipment.ventilatorSettings.tidalVolumeMl;
       currentPaw = equipment.ventilatorSettings.pipPressureLimitCmH2O;
       isRespiratoryArrest = false;
+    } else if (hasActiveTrachealTube && (isSingleManualBreathActive || hasManualCadence)) {
+      // Manual Bag Ventilation (Apertar Balão / Cadência Manual)
+      const cadenceRate = hasManualCadence ? Math.round(60 / (equipment.manualVentilationCadenceSeconds || 6)) : 10;
+      finalRR = Math.max(spontaneousRR, cadenceRate);
+      const manualVT = Math.round(Math.max(patient.weightKg * 12, 160));
+      finalVT = Math.max(spontaneousVT, manualVT);
+      currentPaw = 16; // Normal manual bag peak airway pressure ~16 cmH2O
+      isRespiratoryArrest = false; // Protected from asphyxia by manual ventilation!
     } else {
       currentPaw = spontaneousRR > 0 ? (equipment.aplValveState === 'closed' ? 24 : 2) : 0;
     }

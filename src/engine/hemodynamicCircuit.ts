@@ -147,37 +147,37 @@ export class HemodynamicCircuitEngine {
     const strokeVolumeMl = Number(computedSV.toFixed(1));
 
     // ----------------------------------------------------
-    // 5. BARORECEPTOR REFLEX CONTROL LOOP
+    // ----------------------------------------------------
+    // 5. BARORECEPTOR REFLEX CONTROL LOOP (PHYSIOLOGICALLY DAMPED)
     // ----------------------------------------------------
     // Sensitivity / Gain of the Baroreceptor reflex (attenuated by depth/volatile agents)
     const volatileSuppression = Math.max(0, receptors.volatileSiteOccupancy) * 0.55;
     const propofolSuppression = receptors.propofolSiteOccupancy * 0.40;
     const baroreceptorGain = Math.max(0.08, 1.0 - volatileSuppression - propofolSuppression);
 
-    // MAP deviation from baseline
-    const mapError = previousMAP - baseMAP;
+    // Sigmoidal normalized MAP deviation from baseline (prevents algebraic loop resonance)
+    const rawMapError = (previousMAP > 0 ? previousMAP : baseMAP) - baseMAP;
+    const normalizedMapError = Math.max(-1.0, Math.min(1.0, rawMapError / 45.0));
 
-    // Vagal efferent firing on SA node if MAP is elevated (Reflex Bradycardia)
-    // Sympathetic disinhibition if MAP is depressed (Compensatory Tachycardia)
-    let baroreceptorEffector = -(mapError / 45.0) * baroreceptorGain;
-    baroreceptorEffector = Math.max(-1.0, Math.min(1.0, baroreceptorEffector));
+    // Damped baroreceptor effector (max 20% chronotropic shift to prevent overshooting oscillation)
+    const baroreceptorEffector = -normalizedMapError * baroreceptorGain * 0.20;
 
     // ----------------------------------------------------
-    // 6. HEART RATE DYNAMICS (INTEGRATING MOA + REFLEX)
+    // 6. HEART RATE DYNAMICS (INTEGRATING MOA + REFLEX + INERTIA)
     // ----------------------------------------------------
     // Primary receptor drives:
     // Beta-1 (+ chronotropy via cAMP)
     // M2 (- chronotropy via hyperpolarization)
-    // Alpha-2 (central sympatholysis + reflex bradycardia from peripheral SVR spike)
+    // Alpha-2 (central sympatholysis + reflex bradycardia)
     let autonomicHRMultiplier = 1.0;
 
     // Direct receptor effect on SA node
-    autonomicHRMultiplier += receptors.beta1Drive * 0.60;
-    autonomicHRMultiplier -= receptors.m2Drive * 0.55;
-    autonomicHRMultiplier -= receptors.alpha2Drive * 0.45;
+    autonomicHRMultiplier += receptors.beta1Drive * 0.55;
+    autonomicHRMultiplier -= receptors.m2Drive * 0.50;
+    autonomicHRMultiplier -= receptors.alpha2Drive * 0.40;
 
-    // Baroreceptor feedback contribution
-    autonomicHRMultiplier += baroreceptorEffector * 0.35;
+    // Baroreceptor feedback contribution (smoothly bounded)
+    autonomicHRMultiplier += baroreceptorEffector;
 
     // Anticholinergic unmasking (Atropine / Glycopyrrolate blocks M2 vagal tone)
     if (receptors.m2Drive < -0.3) {
@@ -188,7 +188,7 @@ export class HemodynamicCircuitEngine {
     if (isSurgicalStimulationActive) {
       const nociceptiveDeficit = Math.max(0, 1.0 - receptors.nociceptiveInhibition);
       const depthDeficit = receptors.gabaAChlorideConductance < 1.0 ? 1.0 - receptors.gabaAChlorideConductance : 0;
-      autonomicHRMultiplier += (nociceptiveDeficit * 0.35 + depthDeficit * 0.20);
+      autonomicHRMultiplier += (nociceptiveDeficit * 0.30 + depthDeficit * 0.15);
     }
 
     let targetHR = baseHR * autonomicHRMultiplier;
@@ -199,23 +199,34 @@ export class HemodynamicCircuitEngine {
       targetHR = Math.max(baseHR * 0.7, targetHR);
     }
 
-    targetHR = Math.max(0, Math.min(380, targetHR));
+    targetHR = Math.max(0, Math.min(350, targetHR));
+
+    // SA Node Physiological Inertia (1st-order low-pass filter: tau = 1.8s)
+    // Eliminates 100ms numerical limit-cycle flickering
+    const hrSmoothingAlpha = 1.0 - Math.exp(-dtSeconds / 1.8);
+    const effectiveHR = previousHR > 0 ? (previousHR + (targetHR - previousHR) * hrSmoothingAlpha) : targetHR;
+    const finalHR = Math.round(effectiveHR);
 
     // ----------------------------------------------------
     // 7. CARDIAC OUTPUT & ARTERIAL PRESSURE
     // ----------------------------------------------------
-    let cardiacOutputLMin = (targetHR * strokeVolumeMl) / 1000.0;
+    let cardiacOutputLMin = (effectiveHR * strokeVolumeMl) / 1000.0;
     cardiacOutputLMin = Number(cardiacOutputLMin.toFixed(2));
 
     // Mean Arterial Pressure: MAP = CVP + (CO * SVR / 80)
     const cvp = 4.0;
-    let targetMAP = cvp + (cardiacOutputLMin * SVR) / 80.0;
+    const rawMAP = cvp + (cardiacOutputLMin * SVR) / 80.0;
+
+    // Low-pass filter MAP to eliminate high-frequency flickering
+    const mapSmoothingAlpha = 1.0 - Math.exp(-dtSeconds / 1.4);
+    const smoothedMAP = previousMAP > 0 ? (previousMAP + (rawMAP - previousMAP) * mapSmoothingAlpha) : rawMAP;
+    const finalMAP = Math.round(smoothedMAP);
+    const targetMAP = finalMAP;
 
     // Pulse pressure based on stroke volume and arterial compliance
-    // Larger SV = wider pulse pressure
-    const pulsePressure = Math.max(15, Math.round(strokeVolumeMl * 0.9 * (SVR / baselineSVR)));
-    let sysBP = Math.round(targetMAP + pulsePressure * 0.55);
-    let diaBP = Math.round(Math.max(10, targetMAP - pulsePressure * 0.45));
+    const pulsePressure = Math.max(16, Math.round(strokeVolumeMl * 0.85 * (SVR / baselineSVR)));
+    let sysBP = Math.round(smoothedMAP + pulsePressure * 0.55);
+    let diaBP = Math.round(Math.max(10, smoothedMAP - pulsePressure * 0.45));
 
     // ----------------------------------------------------
     // 8. MYOCARDIAL OXYGEN SUPPLY/DEMAND (MVO2 & ISCHEMIA)
@@ -317,7 +328,7 @@ export class HemodynamicCircuitEngine {
     }
 
     return {
-      heartRate: Math.round(targetHR),
+      heartRate: finalHR,
       cardiacRhythm: rhythm,
       systolicBP: Math.round(sysBP),
       diastolicBP: Math.round(diaBP),

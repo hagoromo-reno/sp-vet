@@ -21,7 +21,15 @@ interface VitalNumbersProps {
   alarmLimits: MonitorAlarmLimits;
   onToggleAudioMute: () => void;
   onTriggerNibpMeasurement: () => void;
+  isNibpMeasuring?: boolean;
+  lastNibpMeasurement?: { sys: number; dia: number; map: number; timestampSimSec: number } | null;
+  nibpAutoIntervalMin?: number;
+  onChangeNibpAutoInterval?: (intervalMin: number) => void;
+  isContinuousIbpActive?: boolean;
+  onToggleContinuousIbp?: () => void;
+  simTimeSeconds?: number;
   onOpenDeathReport?: () => void;
+  onOpenDepthBoard?: () => void;
 }
 
 export const VitalNumbers: React.FC<VitalNumbersProps> = ({
@@ -30,7 +38,15 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
   alarmLimits,
   onToggleAudioMute,
   onTriggerNibpMeasurement,
+  isNibpMeasuring = false,
+  lastNibpMeasurement = null,
+  nibpAutoIntervalMin = 3,
+  onChangeNibpAutoInterval,
+  isContinuousIbpActive = false,
+  onToggleContinuousIbp,
+  simTimeSeconds = 0,
   onOpenDeathReport,
+  onOpenDepthBoard,
 }) => {
   // Check Alarm Conditions
   const isHrAlarm = vitals.heartRate < alarmLimits.hrLow || vitals.heartRate > alarmLimits.hrHigh;
@@ -200,35 +216,94 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold font-mono-code text-red-400 flex items-center gap-1">
               <Gauge className="w-3.5 h-3.5 text-red-400" />
-              PA (mmHg)
+              {isContinuousIbpActive ? 'PA Invasiva (IBP)' : 'PNI (NIBP)'}
             </span>
-            <button
-              onClick={onTriggerNibpMeasurement}
-              disabled={vitals.isDead}
-              className="text-[9px] px-1.5 py-0.5 rounded bg-[#260c0f] hover:bg-[#381216] text-red-300 border border-red-800/60 font-mono-code transition disabled:opacity-40"
-            >
-              NIBP STAT
-            </button>
+
+            <div className="flex items-center space-x-1">
+              <button
+                onClick={onTriggerNibpMeasurement}
+                disabled={vitals.isDead || isNibpMeasuring}
+                className="text-[9px] px-1.5 py-0.5 rounded bg-[#260c0f] hover:bg-[#381216] text-red-300 border border-red-800/60 font-mono-code transition disabled:opacity-40 font-bold"
+                title="Aferir Pressão Arterial Não-Invasiva Imediatamente"
+              >
+                {isNibpMeasuring ? 'MEDINDO...' : 'PNI STAT'}
+              </button>
+
+              {onChangeNibpAutoInterval && (
+                <select
+                  value={nibpAutoIntervalMin}
+                  onChange={(e) => onChangeNibpAutoInterval(Number(e.target.value))}
+                  className="bg-[#1e0a0d] text-red-300 text-[9px] font-mono rounded px-1 py-0.5 border border-red-900/60 focus:outline-none"
+                  title="Ciclo Automático de PNI"
+                >
+                  <option value="0">Auto: Off</option>
+                  <option value="1">1 min</option>
+                  <option value="2.5">2.5 min</option>
+                  <option value="3">3 min</option>
+                  <option value="5">5 min</option>
+                </select>
+              )}
+            </div>
           </div>
 
           <div className="my-0.5 flex items-baseline justify-between">
-            <div>
-              <span className="text-xl lg:text-2xl font-bold font-digital text-red-400">
-                {vitals.isDead ? '0/0' : `${vitals.systolicBP}/${vitals.diastolicBP}`}
-              </span>
-            </div>
-            <div className="text-right">
-              <span className="text-[10px] text-[#888888] font-mono-code mr-1">PAM</span>
-              <span className="text-2xl lg:text-3xl font-extrabold font-digital text-red-400">
-                ({vitals.isDead ? '0' : vitals.meanArterialPressure})
-              </span>
-            </div>
+            {isNibpMeasuring ? (
+              <div className="w-full py-1 text-center font-mono-code text-xs text-red-300 animate-pulse flex items-center justify-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                <span>Insuflador NIBP (140... 110... 80)</span>
+              </div>
+            ) : isContinuousIbpActive ? (
+              <>
+                <div>
+                  <span className="text-xl lg:text-2xl font-bold font-digital text-red-400">
+                    {vitals.isDead ? '0/0' : `${vitals.systolicBP}/${vitals.diastolicBP}`}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-[#888888] font-mono-code mr-1">PAM</span>
+                  <span className="text-2xl lg:text-3xl font-extrabold font-digital text-red-400">
+                    ({vitals.isDead ? '0' : vitals.meanArterialPressure})
+                  </span>
+                </div>
+              </>
+            ) : lastNibpMeasurement ? (
+              <>
+                <div>
+                  <span className="text-xl lg:text-2xl font-bold font-digital text-red-400">
+                    {vitals.isDead ? '0/0' : `${lastNibpMeasurement.sys}/${lastNibpMeasurement.dia}`}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-[#888888] font-mono-code mr-1">PAM</span>
+                  <span className="text-2xl lg:text-3xl font-extrabold font-digital text-red-400">
+                    ({vitals.isDead ? '0' : lastNibpMeasurement.map})
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="w-full py-1 text-center font-mono-code text-xs text-red-400/60">
+                -- / -- (--) · Pressione PNI STAT
+              </div>
+            )}
           </div>
 
-          <div className="text-[10px] text-[#888888] font-mono-code truncate">
-            Status: <span className={vitals.isDead ? 'text-red-500 font-bold' : vitals.meanArterialPressure < 60 ? 'text-red-400 font-bold' : 'text-[#f5f5f5]'}>
-              {vitals.isDead ? 'COLAPSO' : vitals.meanArterialPressure < 60 ? 'HIPOTENSÃO CRÍTICA' : 'Adequada'}
+          <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
+            <span>
+              {isContinuousIbpActive
+                ? 'Contínuo (Artéria)'
+                : lastNibpMeasurement
+                ? `Aferido há ${Math.floor((simTimeSeconds - lastNibpMeasurement.timestampSimSec) / 60)}m ${Math.floor((simTimeSeconds - lastNibpMeasurement.timestampSimSec) % 60)}s`
+                : 'Aguardando 1ª Aferição'}
             </span>
+
+            {onToggleContinuousIbp && (
+              <button
+                onClick={onToggleContinuousIbp}
+                className="text-[9px] underline text-red-400/80 hover:text-red-300"
+              >
+                {isContinuousIbpActive ? 'Usar PNI' : 'Usar IBP'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -308,18 +383,24 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
               <Eye className="w-3.5 h-3.5 text-purple-400" />
               PLANO ANESTÉSICO
             </span>
-            <span className="text-[10px] font-mono-code text-purple-300 font-bold">
-              Score: {vitals.anestheticDepthScore}/100
-            </span>
+            {onOpenDepthBoard && (
+              <button
+                onClick={onOpenDepthBoard}
+                className="text-[9px] px-1.5 py-0.5 rounded bg-[#2a1339] hover:bg-[#3d1a53] text-purple-300 border border-purple-700/60 font-mono-code transition font-bold"
+                title="Abrir Quadro Detalhado de Consciência e Guedel"
+              >
+                VER QUADRO
+              </button>
+            )}
           </div>
 
           <div className="my-0.5">
             <div className="flex items-baseline justify-between">
               <span className="text-xs font-extrabold font-mono-code text-purple-200">
-                {guedel.stage}
+                {vitals.guedelStage}
               </span>
-              <span className="text-[10px] text-purple-400/90 font-mono-code truncate max-w-[95px]">
-                {guedel.sub}
+              <span className="text-[10px] text-purple-300 font-mono-code font-bold">
+                Consciência: {vitals.consciousnessScore ?? 100}%
               </span>
             </div>
 
@@ -340,8 +421,8 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
           </div>
 
           <div className="text-[10px] text-[#888888] font-mono-code flex justify-between">
-            <span>Tolerância: <strong className="text-purple-200">{vitals.surgicalTolerancePct}%</strong></span>
-            <span>TOF: <strong className="text-purple-200">{vitals.trainOfFourCount}/4</strong></span>
+            <span>Mandíbula: <strong className="text-purple-200">{vitals.jawTone === 'relaxed_surgical' ? 'Relaxada (Intubável)' : vitals.jawTone === 'moderate' ? 'Moderada' : vitals.jawTone === 'rigid' ? 'Rígida' : 'Flácida'}</strong></span>
+            <span>Tol: <strong className="text-purple-200">{vitals.surgicalTolerancePct}%</strong></span>
           </div>
         </div>
       </div>

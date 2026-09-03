@@ -296,8 +296,16 @@ export interface VitalSigns {
     hematocritPct: number; // %
   };
   // Neurological & Reflex Status
+  consciousnessScore: number; // 0 (comatose/anesthetized) to 100 (fully awake/alert)
   anestheticDepthScore: number; // 0 (awake) to 100 (lethal/too deep)
-  guedelStage: 'Estágio I (Voluntário)' | 'Estágio II (Excitação/Delírio)' | 'Estágio III Plano 1 (Leve)' | 'Estágio III Plano 2 (Cirúrgico)' | 'Estágio III Plano 3 (Profundo)' | 'Estágio IV (Depressão Bulbar / Parada)';
+  guedelStage:
+    | 'Estágio I (Consciente / Alerta)'
+    | 'Estágio I (Sedação Leve / Abatimento)'
+    | 'Estágio II (Excitação/Delírio)'
+    | 'Estágio III Plano 1 (Leve)'
+    | 'Estágio III Plano 2 (Cirúrgico)'
+    | 'Estágio III Plano 3 (Profundo)'
+    | 'Estágio IV (Depressão Bulbar / Parada)';
   eyePosition: EyePosition;
   palpebralReflex: ReflexStrength;
   cornealReflex: ReflexStrength;
@@ -310,6 +318,14 @@ export interface VitalSigns {
   capillaryRefillTime: CapillaryRefillTime;
   pulseQuality: 'Forte e Cheio' | 'Normal' | 'Fraco / Filiforme' | 'Célere / Saltão' | 'Ausente';
   perfusionIndex: number;
+  // Non-Invasive Blood Pressure (NIBP) Realism
+  lastNibpMeasurement?: {
+    sys: number;
+    dia: number;
+    map: number;
+    timestampSimSec: number;
+  };
+  isNibpMeasuring?: boolean;
   // Critical / Lethal Organ Status
   isRespiratoryArrest: boolean;
   respiratoryArrestCause?: string;
@@ -371,6 +387,11 @@ export interface AnesthesiaEquipmentState {
     inspiratoryPausePct: number;
   };
   currentAirwayPressureCmH2O: number;
+  
+  // Manual Ventilation (Bag Squeeze) & Automatic Cadence
+  isManualBreathTriggered?: boolean;
+  manualBreathLastTriggerTime?: number;
+  manualVentilationCadenceSeconds?: number; // 0 = off, 5 = 12 rpm, 6 = 10 rpm, 8 = 7.5 rpm, 10 = 6 rpm
   
   // Fluid Therapy & Thermal
   activeFluidType: string;
