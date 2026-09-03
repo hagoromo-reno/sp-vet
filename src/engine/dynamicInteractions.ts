@@ -1,4 +1,4 @@
-import { PatientProfile, VitalSigns } from '../types/simulator';
+import { ActiveDrugDose, PatientProfile, VitalSigns } from '../types/simulator';
 import { ReceptorStateSnapshot } from './cellularReceptors';
 
 export class DynamicInteractionsEngine {
@@ -10,9 +10,12 @@ export class DynamicInteractionsEngine {
     patient: PatientProfile,
     receptors: ReceptorStateSnapshot,
     isVentilatorActive: boolean,
-    isIntubated: boolean
+    isIntubated: boolean,
+    activeDoses: ActiveDrugDose[] = []
   ): VitalSigns['activeDrugInteractions'] {
     const interactions: VitalSigns['activeDrugInteractions'] = [];
+    const activeIds = new Set(activeDoses.filter((dose) => dose.currentCe > 0.01).map((dose) => dose.drugId));
+    const hasAny = (ids: string[]): boolean => ids.some((id) => activeIds.has(id));
 
     // 1. Allosteric GABA-A Cooperativity Synergy (BZD + Propofol / Inhalation / Neurosteroid)
     if (receptors.bzdAllostericOccupancy > 0.20 && (receptors.propofolSiteOccupancy > 0.20 || receptors.volatileSiteOccupancy > 0.40 || receptors.neurosteroidSiteOccupancy > 0.20)) {
@@ -45,7 +48,7 @@ export class DynamicInteractionsEngine {
     }
 
     // 4. Competitive Alpha-2 Displacement (Atipamezole)
-    if (receptors.reversalCe.atipamezole > 0.08) {
+    if (receptors.reversalCe.atipamezole > 0.08 && hasAny(['dexmedetomidine', 'xylazine', 'detomidine'])) {
       interactions.push({
         title: 'Reversão Competitiva Alfa-2 por Atipamezol',
         severity: 'info',
@@ -55,7 +58,7 @@ export class DynamicInteractionsEngine {
     }
 
     // 5. Competitive Opioid Reversal (Naloxone)
-    if (receptors.reversalCe.naloxone > 0.08) {
+    if (receptors.reversalCe.naloxone > 0.08 && hasAny(['morphine', 'methadone', 'fentanyl', 'butorphanol', 'buprenorphine'])) {
       interactions.push({
         title: 'Reversão Competitiva de Receptores Mu-Opioides por Naloxona',
         severity: 'info',
@@ -65,7 +68,7 @@ export class DynamicInteractionsEngine {
     }
 
     // 6. Competitive Benzodiazepine Reversal (Flumazenil)
-    if (receptors.reversalCe.flumazenil > 0.08) {
+    if (receptors.reversalCe.flumazenil > 0.08 && hasAny(['midazolam', 'diazepam'])) {
       interactions.push({
         title: 'Neutralização Alostérica GABA-A por Flumazenil',
         severity: 'info',
@@ -75,7 +78,7 @@ export class DynamicInteractionsEngine {
     }
 
     // 7. NMBA Paralysis without Mechanical Ventilation Support
-    if (receptors.nmOccupancy > 0.25 && !isVentilatorActive && !isIntubated) {
+    if (receptors.nmOccupancy > 0.25 && (!isVentilatorActive || !isIntubated)) {
       interactions.push({
         title: 'Bloqueio Neuromuscular Sem Suporte Ventilatório Mecânico',
         severity: 'lethal',
@@ -84,7 +87,47 @@ export class DynamicInteractionsEngine {
       });
     }
 
-    // 8. Feline Local Anesthetic Cardiotoxicity
+    // 8. Awareness under paralysis: the motor exam cannot be used as anesthesia depth.
+    if (receptors.nmOccupancy > 0.35 && receptors.hypnoticEffect < 0.35) {
+      interactions.push({
+        title: 'Consciência Preservada sob Bloqueio Neuromuscular',
+        severity: 'lethal',
+        description: 'O paciente está imóvel, porém sem hipnose adequada. Ausência de movimento não significa inconsciência ou analgesia.',
+        pharmacologyMechanism: 'O bloqueio nicotínico ocorre apenas na placa motora; não atravessa a barreira hematoencefálica e não deprime percepção cortical nem nocicepção.',
+      });
+    }
+
+    // 9. Integrated sedative/opioid/induction respiratory synergy.
+    if (receptors.centralSedation > 0.45 && receptors.respiratoryDepression > 0.58) {
+      interactions.push({
+        title: 'Somação Depressora Central de Sedativos e Opioides',
+        severity: receptors.respiratoryDepression > 0.78 ? 'danger' : 'warning',
+        description: 'A sedação combinada reduziu de forma não linear o drive ventilatório e a resposta ao CO₂; monitorar ventilação, não apenas SpO₂.',
+        pharmacologyMechanism: 'Convergência de Gi opioide/alfa-2 e hiperpolarização GABAérgica nos circuitos bulbares reduz frequência e volume corrente.',
+      });
+    }
+
+    // 10. Additive vasodilation/histamine burden.
+    if (receptors.directBloodPressureEffect < -0.38 || receptors.acuteBolusHypotension > 0.5) {
+      interactions.push({
+        title: 'Carga Vasodilatadora e Redução de Retorno Venoso',
+        severity: receptors.acuteBolusHypotension > 0.7 ? 'danger' : 'warning',
+        description: 'Bloqueio vasomotor, venodilatação e/ou liberação de histamina estão reduzindo pré-carga, débito cardíaco e pressão arterial.',
+        pharmacologyMechanism: 'Redução aditiva do tônus arterial e da capacitância venosa por bloqueio alfa-1, anestésicos gerais e efeitos de bólus rápido.',
+      });
+    }
+
+    // 11. Sugammadex does not encapsulate atracurium.
+    if (receptors.reversalCe.sugammadex > 0.05 && activeIds.has('atracurium')) {
+      interactions.push({
+        title: 'Sugamadex Ineficaz para Atracúrio',
+        severity: 'danger',
+        description: 'O bloqueio por atracúrio permanece. Manter ventilação e usar reversão apropriada quando indicada.',
+        pharmacologyMechanism: 'Sugamadex encapsula bloqueadores aminosteroides; atracúrio é benzilisoquinolínico e não é seu substrato.',
+      });
+    }
+
+    // 12. Feline Local Anesthetic Cardiotoxicity
     if (patient.species === 'feline' && receptors.naVBlockade > 0.20) {
       interactions.push({
         title: 'Intoxicação Miocárdica por Anestésico Local IV em Felino',
@@ -94,7 +137,7 @@ export class DynamicInteractionsEngine {
       });
     }
 
-    // 9. Multi-Modal Balanced Analgesia Synergy (Opioid + Alpha-2 + NMDA Antagonist)
+    // 13. Multi-Modal Balanced Analgesia Synergy (Opioid + Alpha-2 + NMDA Antagonist)
     if (receptors.muOpioidDrive > 0.30 && receptors.alpha2Drive > 0.25 && receptors.nmdaBlockade > 0.20) {
       interactions.push({
         title: 'Analgesia Multimodal Preventiva Balanceada (Tríade O-A-K)',

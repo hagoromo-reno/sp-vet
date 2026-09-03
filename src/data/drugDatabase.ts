@@ -39,6 +39,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
     },
     receptorProfile: {
       alpha1: { affinity: 0.90, intrinsicEfficacy: -0.90 }, // competitive antagonist of vascular alpha-1
+      dopamineD2: { affinity: 0.92, intrinsicEfficacy: -1.0 },
+      histamineH1: { affinity: 0.55, intrinsicEfficacy: -0.80 },
+      serotonin2: { affinity: 0.45, intrinsicEfficacy: -0.70 },
     },
     effectHR: -0.05,
     effectBP: -0.35, // significant vasodilation / hypotension
@@ -472,6 +475,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.10,
       warningDescription: 'Efeito teto na depressão respiratória; perfil muito seguro.',
     },
+    receptorProfile: {
+      kappaOpioid: { affinity: 0.92, intrinsicEfficacy: 0.85 },
+      muOpioid: { affinity: 0.88, intrinsicEfficacy: 0.20 },
+    },
     effectHR: -0.08,
     effectBP: -0.04,
     effectRR: -0.12,
@@ -514,6 +521,10 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: false,
       lethalityRiskScore: 0.08,
       warningDescription: 'Atraso longo de biofase para pico máximo.',
+    },
+    receptorProfile: {
+      muOpioid: { affinity: 0.99, intrinsicEfficacy: 0.48 },
+      kappaOpioid: { affinity: 0.35, intrinsicEfficacy: -0.20 },
     },
     effectHR: -0.08,
     effectBP: -0.04,
@@ -701,6 +712,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       lethalityRiskScore: 0.15,
       warningDescription: 'Mioclonias transitórias se administrado sem pré-medicação com benzodiazepínicos.',
     },
+    receptorProfile: {
+      gabaA: { propofolBarbiturateDirect: 0.88, directChlorideGating: 0.72 },
+    },
     effectHR: 0.0,
     effectBP: -0.05,
     effectRR: -0.30,
@@ -741,6 +755,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       histamineRelease: true,
       lethalityRiskScore: 0.60,
       warningDescription: 'Bólus rápido provoca taquicardia reflexa com bigeminismo ventricular e choque vasodilatador.',
+    },
+    receptorProfile: {
+      gabaA: { propofolBarbiturateDirect: 0.92, directChlorideGating: 0.82 },
     },
     effectHR: 0.15,
     effectBP: -0.35,
@@ -1275,8 +1292,9 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
     category: 'emergency_inotrope',
     description: 'Solução concentrada de potássio. ADVERTÊNCIA EXTREMA: NUNCA aplicar em bólus IV direto! Provoca hipercalemia fulminante, fibrilação ventricular e parada cardíaca instantânea em diástole.',
     defaultConcentrationMgMl: 191.0, // 191 mg/ml (2.56 mEq/ml)
+    concentrationInDoseUnitPerMl: 2.56,
     unit: 'mEq',
-    doseUnit: 'mEq/kg',
+    doseUnit: 'mEq/kg/h',
     recommendedDose: {
       canine: { min: 0.1, max: 0.5, typical: 0.2 }, // In infusion max 0.5 mEq/kg/h
       feline: { min: 0.1, max: 0.4, typical: 0.2 },
@@ -1361,6 +1379,7 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
     category: 'emergency_inotrope',
     description: 'Agente alcalinizante para correção de acidose metabólica severa (pH < 7.15, HCO3 < 12) e hipercalemia.',
     defaultConcentrationMgMl: 84.0, // 84 mg/ml = 1 mEq/ml
+    concentrationInDoseUnitPerMl: 1.0,
     unit: 'mEq',
     doseUnit: 'mEq/kg',
     recommendedDose: {
@@ -1605,7 +1624,7 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       rabbit: { min: 5.0, max: 15.0, typical: 10.0 },
       avian: { min: 5.0, max: 15.0, typical: 10.0 },
     },
-    supportedRoutes: ['IV', 'CRI'],
+    supportedRoutes: ['CRI'],
     onsetMinutes: 5.0,
     durationMinutes: 45,
     transitLagSecondsIV: 15,
@@ -1687,7 +1706,7 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
       bovine: { min: 5.0, max: 15.0, typical: 10.0 },
       rabbit: { min: 8.0, max: 15.0, typical: 10.0 },
     },
-    supportedRoutes: ['IV', 'CRI'],
+    supportedRoutes: ['IV_slow'],
     onsetMinutes: 10.0,
     durationMinutes: 1440,
     transitLagSecondsIV: 30,

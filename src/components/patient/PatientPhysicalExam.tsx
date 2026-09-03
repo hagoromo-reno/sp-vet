@@ -53,7 +53,7 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
       vitals.respiratoryRate > 35 ? 'Taquipneia com murmúrio vesicular aumentado' :
       'Murmúrio vesicular bilateral límpido, sem estertores';
 
-    setActiveTestMessage(`Auscultação Torácica: Bulhas cardíacas com ${rhythmDesc} (${vitals.heartRate} bpm) | Campos pulmonares: ${lungDesc}`);
+    setActiveTestMessage(`Auscultação Torácica: Bulhas cardíacas com ${rhythmDesc} (${Math.round(vitals.heartRate)} bpm) | Campos pulmonares: ${lungDesc}`);
   };
 
   return (
@@ -176,7 +176,7 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
             <span className="text-[10px] text-indigo-400">Clique</span>
           </div>
           <div className="text-xs font-bold text-indigo-300 truncate">
-            {vitals.heartRate} bpm · {vitals.respiratoryRate} rpm
+            {Math.round(vitals.heartRate)} bpm · {Math.round(vitals.respiratoryRate)} rpm
           </div>
           <div className="text-[10px] text-[#888888] mt-1">
             Pedal: <strong className="text-[#f5f5f5]">{vitals.pedalReflex}</strong>

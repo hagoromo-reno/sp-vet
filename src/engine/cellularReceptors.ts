@@ -1,45 +1,70 @@
 import {
   ActiveDrugDose,
   DrugDefinition,
-  DrugReceptorProfile,
   PatientProfile,
 } from '../types/simulator';
 import { VETERINARY_DRUG_DATABASE } from '../data/drugDatabase';
 import { SPECIES_CELLULAR_CONFIGS } from './speciesPhysiology';
+import { getRoutePharmacokinetics, getSpeciesDoseRange } from './drugAdministration';
 
 export interface ReceptorStateSnapshot {
-  // Normalized Occupancies / Drives (0 to 1+)
+  // Normalized receptor drives. Negative values represent functional antagonism.
   alpha1Drive: number;
   alpha2Drive: number;
   beta1Drive: number;
   beta2Drive: number;
   m2Drive: number;
   m3Drive: number;
-  nmOccupancy: number; // Motor endplate block
-  
-  // GABA-A System
-  gabaAChlorideConductance: number; // 0.1 awake, 1.0 surgical, > 3.0 deep/toxic
+  dopamineD2Drive: number;
+  histamineH1Drive: number;
+  serotonin2Drive: number;
+  nmOccupancy: number;
+
+  // GABA-A and central-state axes
+  gabaAChlorideConductance: number;
   bzdAllostericOccupancy: number;
   propofolSiteOccupancy: number;
   neurosteroidSiteOccupancy: number;
   volatileSiteOccupancy: number;
-  
-  // Opioid & Analgesic System
+  centralSedation: number;
+  hypnoticEffect: number;
+  dissociativeEffect: number;
+  muscleRelaxation: number;
+  respiratoryDepression: number;
+  macSparingFraction: number;
+
+  // Opioid, nociception and ion-channel systems
   muOpioidDrive: number;
   kappaOpioidDrive: number;
-  nmdaBlockade: number; // 0 to 1
-  
-  // Ion Channels & Enzymes
-  naVBlockade: number; // Local anesthetic cardiac/neuronal effect
+  nmdaBlockade: number;
+  naVBlockade: number;
+  localNeuralBlockade: number;
+  caVBlockade: number;
   acheInhibition: number;
-  
-  // Intracellular Second Messengers (relative to baseline 1.0)
-  cAMPMyocardial: number; // beta1 (Gs) vs M2/alpha2 (Gi)
-  cAMPVascular: number; // beta2 (Gs) relaxation vs alpha1 (Gq) constriction
-  intracellularCalcium: number; // Cardiomyocyte inotropic drive
-  nociceptiveInhibition: number; // Total surgical analgesia index (0 to 1)
-  
-  // Active Antagonists Ce
+  nociceptiveInhibition: number;
+
+  // Integrated calibrated organ-level effects from the catalog
+  directHeartRateEffect: number;
+  directBloodPressureEffect: number;
+  acuteBolusHypotension: number;
+  acuteBolusRespiratoryDepression: number;
+  acuteBolusBradycardia: number;
+  acuteBolusArrhythmia: number;
+  histamineRelease: number;
+
+  // Supportive therapies / biochemical interventions
+  volumeExpansion: number;
+  oxygenCarryingSupport: number;
+  potassiumLoad: number;
+  calciumMembraneStabilization: number;
+  alkalinization: number;
+  hyperkalemicCardiotoxicity: number;
+
+  // Intracellular second messengers
+  cAMPMyocardial: number;
+  cAMPVascular: number;
+  intracellularCalcium: number;
+
   reversalCe: {
     atipamezole: number;
     naloxone: number;
@@ -50,247 +75,362 @@ export interface ReceptorStateSnapshot {
   };
 }
 
+interface AggregatedExposure {
+  drugDef: DrugDefinition;
+  totalCe: number;
+  systemicCe: number;
+  centralCe: number;
+  localCe: number;
+}
+
+const clamp = (value: number, min = 0, max = 1): number => Math.min(max, Math.max(min, value));
+
+// These agents express their clinical benefit only by removing a matching
+// pharmacological burden. Their catalog vectors describe the net bedside
+// observation, not an independent sedative/respiratory/pressor effect. Applying
+// both the target-specific mechanism and those vectors would double-count the
+// reversal and could make an antidote stimulate an otherwise normal patient.
+const TARGET_DEPENDENT_REVERSAL_IDS = new Set([
+  'atipamezole',
+  'naloxone',
+  'flumazenil',
+  'neostigmine',
+  'sugammadex',
+  'lipid_emulsion_20',
+]);
+
+/** Saturable Emax/Hill response for normalized effect-site exposure. */
+export function hillResponse(exposure: number, ec50 = 0.45, hill = 1.35): number {
+  const ce = Math.max(0, exposure);
+  if (ce === 0) return 0;
+  const numerator = Math.pow(ce, hill);
+  return numerator / (Math.pow(Math.max(0.0001, ec50), hill) + numerator);
+}
+
+/** Bliss-independent combination avoids impossible linear receptor/effect growth. */
+const combineEffects = (effects: number[]): number => {
+  let remaining = 1;
+  for (const effect of effects) remaining *= 1 - clamp(effect);
+  return clamp(1 - remaining);
+};
+
 export class CellularReceptorsEngine {
   /**
-   * Evaluates competitive binding, allosteric multi-site modulation on GABA-A,
-   * second-messenger transductions (cAMP, Ca2+, Cl-), and antinociceptive summation.
+   * Integrates saturable target occupancy, competitive reversal and separate
+   * sedation, hypnosis, analgesia, dissociation and motor-block axes.
    */
   public static computeReceptorState(
     patient: PatientProfile,
     activeDoses: ActiveDrugDose[],
-    inhalantCe: number, // 1.0 = 1 MAC
-    inhalantAgent: 'isoflurane' | 'sevoflurane'
+    inhalantCe: number,
+    _inhalantAgent: 'isoflurane' | 'sevoflurane'
   ): ReceptorStateSnapshot {
     const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
+    const exposures = new Map<string, AggregatedExposure>();
 
-    // Collect effective bio-phase concentrations (Ce) by drug ID
-    const drugCeMap: Record<string, number> = {};
     for (const dose of activeDoses) {
-      drugCeMap[dose.drugId] = (drugCeMap[dose.drugId] || 0) + dose.currentCe;
+      const drugDef = VETERINARY_DRUG_DATABASE.find((item) => item.id === dose.drugId);
+      if (!drugDef || dose.currentCe <= 0.00001) continue;
+      if (!getSpeciesDoseRange(drugDef, patient.species)) continue;
+      const route = getRoutePharmacokinetics(drugDef, dose.route);
+      const current = exposures.get(drugDef.id) || {
+        drugDef,
+        totalCe: 0,
+        systemicCe: 0,
+        centralCe: 0,
+        localCe: 0,
+      };
+      current.totalCe += dose.currentCe;
+      current.systemicCe += dose.currentCe * route.systemicEffectFraction;
+      current.localCe += dose.currentCe * route.localNeuralEffectFraction;
+      // Neuraxial opioids retain a strong spinal effect with limited systemic exposure.
+      const neuraxialOpioidFactor = dose.route === 'Epidural' && drugDef.specialTraits?.isOpioid ? 0.7 : 0;
+      current.centralCe += dose.currentCe * Math.max(route.systemicEffectFraction, neuraxialOpioidFactor);
+      exposures.set(drugDef.id, current);
     }
 
-    // ----------------------------------------------------
-    // 1. ANTAGONIST CONCENTRATIONS (REVERSAL AGENTS)
-    // ----------------------------------------------------
-    const atipamezoleCe = drugCeMap['atipamezole'] || 0;
-    const naloxoneCe = drugCeMap['naloxone'] || 0;
-    const flumazenilCe = drugCeMap['flumazenil'] || 0;
-    const sugammadexCe = drugCeMap['sugammadex'] || 0;
-    const neostigmineCe = drugCeMap['neostigmine'] || 0;
-    const lipidEmulsionCe = drugCeMap['lipid_emulsion_20'] || 0;
+    const ceFor = (id: string): number => exposures.get(id)?.totalCe || 0;
+    const atipamezoleCe = ceFor('atipamezole');
+    const naloxoneCe = ceFor('naloxone');
+    const flumazenilCe = ceFor('flumazenil');
+    const sugammadexCe = ceFor('sugammadex');
+    const neostigmineCe = ceFor('neostigmine');
+    const lipidEmulsionCe = ceFor('lipid_emulsion_20');
 
-    // Local anesthetic lipid sink sequestration
-    let localAnestheticSinkReduction = 1.0;
-    if (lipidEmulsionCe > 0.05) {
-      localAnestheticSinkReduction = Math.max(0.05, 1.0 - lipidEmulsionCe * 2.5);
-    }
+    // Competitive antagonist shifts. Concentrations are normalized to a usual dose.
+    const alpha2SchildFactor = 1 + 7 * hillResponse(atipamezoleCe, 0.3, 1.2);
+    const muSchildFactor = 1 + 8 * hillResponse(naloxoneCe, 0.25, 1.2);
+    const kappaSchildFactor = 1 + 3 * hillResponse(naloxoneCe, 0.35, 1.2);
+    const bzdSchildFactor = 1 + 8 * hillResponse(flumazenilCe, 0.25, 1.2);
+    const lipidSinkReduction = 1 - 0.9 * hillResponse(lipidEmulsionCe, 0.35, 1.2);
 
-    // ----------------------------------------------------
-    // 2. COMPETITIVE ANTAGONISM (SCHILD / CHENG-PRUSOFF LAW)
-    // ----------------------------------------------------
-    // Alpha-2 displacement by Atipamezole
-    const alpha2SchildFactor = 1.0 + atipamezoleCe * 4.5;
-    
-    // Mu-Opioid displacement by Naloxone
-    const muOpioidSchildFactor = 1.0 + naloxoneCe * 5.0;
-
-    // Benzodiazepine displacement by Flumazenil
-    const bzdSchildFactor = 1.0 + flumazenilCe * 4.8;
-
-    // ----------------------------------------------------
-    // 3. RECEPTOR OCCUPANCY ACCUMULATION
-    // ----------------------------------------------------
     let rawAlpha1 = 0;
     let rawAlpha2 = 0;
     let rawBeta1 = 0;
     let rawBeta2 = 0;
     let rawM2 = 0;
     let rawM3 = 0;
+    let rawD2 = 0;
+    let rawH1 = 0;
+    let raw5HT2 = 0;
     let rawNMBA = 0;
-    let rawMuOpioid = 0;
-    let rawKappaOpioid = 0;
-    let rawNMDABlock = 0;
-    let rawNaVBlock = 0;
-    let rawAChEInhib = 0;
+    let rawMu = 0;
+    let rawKappa = 0;
+    let rawNMDA = 0;
+    let rawSystemicNaV = 0;
+    let rawLocalNaV = 0;
+    let rawCaV = 0;
+    let rawAChE = 0;
+    let bzdSite = 0;
+    let propofolSite = 0;
+    let neurosteroidSite = 0;
 
-    // GABA-A Allosteric Sites
-    let bzdSiteOccupancy = 0;
-    let propofolSiteOccupancy = 0;
-    let neurosteroidSiteOccupancy = 0;
+    const sedationEffects: number[] = [];
+    const hypnoticEffects: number[] = [];
+    const dissociativeEffects: number[] = [];
+    const relaxationEffects: number[] = [];
+    const respiratoryDepressants: number[] = [];
+    const respiratoryStimulants: number[] = [];
+    const analgesicEffects: number[] = [];
+    const macSparingEffects: number[] = [];
+    let rigidityDrive = 0;
+    let arousalDrive = 0;
+    let directHeartRateEffect = 0;
+    let directBloodPressureEffect = 0;
+    let volumeExpansion = 0;
+    let oxygenCarryingSupport = 0;
+    let potassiumLoad = 0;
+    let calciumMembraneStabilization = 0;
+    let alkalinization = 0;
 
-    for (const dose of activeDoses) {
-      const drugDef = VETERINARY_DRUG_DATABASE.find((d) => d.id === dose.drugId);
-      if (!drugDef) continue;
-      const Ce = dose.currentCe;
-      if (Ce <= 0.001) continue;
-
+    for (const exposure of exposures.values()) {
+      const { drugDef } = exposure;
       const profile = drugDef.receptorProfile;
+      const applyCatalogPhenotype = !TARGET_DEPENDENT_REVERSAL_IDS.has(drugDef.id);
+      const speciesResponseFactor = drugDef.id === 'atropine'
+        ? speciesConfig.atropineResponseFactor
+        : 1;
+      const systemicResponse = hillResponse(exposure.systemicCe) * speciesResponseFactor;
+      let centralExposure = exposure.centralCe;
 
-      // If explicit receptor profile exists, integrate directly:
-      if (profile) {
-        if (profile.alpha1) {
-          rawAlpha1 += Ce * profile.alpha1.affinity * profile.alpha1.intrinsicEfficacy;
-        }
-        if (profile.alpha2) {
-          const speciesSensitivity = speciesConfig.alpha2SensitivityFactor;
-          rawAlpha2 += (Ce * profile.alpha2.affinity * profile.alpha2.intrinsicEfficacy * speciesSensitivity) / alpha2SchildFactor;
-        }
-        if (profile.beta1) {
-          rawBeta1 += Ce * profile.beta1.affinity * profile.beta1.intrinsicEfficacy;
-        }
-        if (profile.beta2) {
-          rawBeta2 += Ce * profile.beta2.affinity * profile.beta2.intrinsicEfficacy;
-        }
-        if (profile.m2) {
-          rawM2 += Ce * profile.m2.affinity * profile.m2.intrinsicEfficacy;
-        }
-        if (profile.m3) {
-          rawM3 += Ce * profile.m3.affinity * profile.m3.intrinsicEfficacy;
-        }
-        if (profile.nm) {
-          rawNMBA += Ce * profile.nm.affinity;
-        }
-        if (profile.gabaA) {
-          if (profile.gabaA.bzdAllosteric) {
-            bzdSiteOccupancy += (Ce * profile.gabaA.bzdAllosteric) / bzdSchildFactor;
-          }
-          if (profile.gabaA.propofolBarbiturateDirect) {
-            propofolSiteOccupancy += Ce * profile.gabaA.propofolBarbiturateDirect;
-          }
-          if (profile.gabaA.neurosteroidSite) {
-            neurosteroidSiteOccupancy += Ce * profile.gabaA.neurosteroidSite;
-          }
-        }
-        if (profile.muOpioid) {
-          rawMuOpioid += (Ce * profile.muOpioid.affinity * profile.muOpioid.intrinsicEfficacy) / muOpioidSchildFactor;
-        }
-        if (profile.kappaOpioid) {
-          rawKappaOpioid += (Ce * profile.kappaOpioid.affinity * profile.kappaOpioid.intrinsicEfficacy) / muOpioidSchildFactor;
-        }
-        if (profile.nmdaPoreBlock) {
-          rawNMDABlock += Ce * profile.nmdaPoreBlock;
-        }
-        if (profile.naVChannelBlock) {
-          rawNaVBlock += Ce * profile.naVChannelBlock * localAnestheticSinkReduction;
-        }
-        if (profile.acheInhibition) {
-          rawAChEInhib += Ce * profile.acheInhibition;
-        }
-      } else {
-        // Fallback mapping from drug IDs & specialTraits for any unprofiled drugs
-        if (drugDef.id === 'dexmedetomidine' || drugDef.id === 'xylazine' || drugDef.id === 'detomidine') {
-          const speciesSens = speciesConfig.alpha2SensitivityFactor;
-          rawAlpha2 += (Ce * 1.5 * speciesSens) / alpha2SchildFactor;
-          rawAlpha1 += Ce * 0.25; // Peripheral vasoconstriction
-        } else if (drugDef.id === 'acepromazine') {
-          rawAlpha1 -= Ce * 1.4; // Alpha-1 competitive blockade
-        } else if (drugDef.id === 'epinephrine') {
-          rawAlpha1 += Ce * 1.6;
-          rawBeta1 += Ce * 2.2;
-          rawBeta2 += Ce * 1.2;
-        } else if (drugDef.id === 'norepinephrine') {
-          rawAlpha1 += Ce * 2.5;
-          rawBeta1 += Ce * 1.4;
-        } else if (drugDef.id === 'dobutamine') {
-          rawBeta1 += Ce * 2.4;
-          rawBeta2 += Ce * 0.6;
-        } else if (drugDef.id === 'atropine' || drugDef.id === 'glycopyrrolate') {
-          rawM2 -= Ce * 2.2; // Muscarinic M2 competitive blockade
-          rawM3 -= Ce * 2.0;
-        } else if (drugDef.id === 'propofol' || drugDef.id === 'etomidate' || drugDef.id === 'thiopental') {
-          propofolSiteOccupancy += Ce * 1.2;
-        } else if (drugDef.id === 'alfaxalone') {
-          neurosteroidSiteOccupancy += Ce * 1.4;
-        } else if (drugDef.id === 'midazolam' || drugDef.id === 'diazepam') {
-          bzdSiteOccupancy += (Ce * 1.3) / bzdSchildFactor;
-        } else if (drugDef.id === 'ketamine') {
-          rawNMDABlock += Ce * 1.4;
-        } else if (drugDef.id === 'fentanyl' || drugDef.id === 'methadone' || drugDef.id === 'morphine') {
-          rawMuOpioid += (Ce * 1.6) / muOpioidSchildFactor;
-        } else if (drugDef.id === 'butorphanol') {
-          rawKappaOpioid += (Ce * 1.4) / muOpioidSchildFactor;
-          rawMuOpioid += (Ce * 0.2) / muOpioidSchildFactor; // Partial / weak mu
-        } else if (drugDef.id === 'atracurium') {
-          rawNMBA += Ce * 1.5;
-        } else if (drugDef.id === 'lidocaine_2pct' || drugDef.id === 'bupivacaine_05') {
-          rawNaVBlock += Ce * 1.3 * localAnestheticSinkReduction;
-        } else if (drugDef.id === 'neostigmine') {
-          rawAChEInhib += Ce * 1.8;
-        }
+      if (drugDef.specialTraits?.isAlpha2Agonist) centralExposure /= alpha2SchildFactor;
+      if (drugDef.specialTraits?.isOpioid) centralExposure /= muSchildFactor;
+      if (drugDef.specialTraits?.isBenzodiazepine) centralExposure /= bzdSchildFactor;
+      const centralResponse = hillResponse(centralExposure);
+
+      if (profile?.alpha1) {
+        rawAlpha1 += systemicResponse * profile.alpha1.affinity * profile.alpha1.intrinsicEfficacy;
       }
+      if (profile?.alpha2) {
+        const targetResponse = hillResponse(exposure.centralCe / alpha2SchildFactor);
+        rawAlpha2 += targetResponse * profile.alpha2.affinity * profile.alpha2.intrinsicEfficacy * speciesConfig.alpha2SensitivityFactor;
+      }
+      if (profile?.beta1) rawBeta1 += systemicResponse * profile.beta1.affinity * profile.beta1.intrinsicEfficacy;
+      if (profile?.beta2) rawBeta2 += systemicResponse * profile.beta2.affinity * profile.beta2.intrinsicEfficacy;
+      if (profile?.m2) rawM2 += systemicResponse * profile.m2.affinity * profile.m2.intrinsicEfficacy;
+      if (profile?.m3) rawM3 += systemicResponse * profile.m3.affinity * profile.m3.intrinsicEfficacy;
+      if (profile?.dopamineD2) rawD2 += centralResponse * profile.dopamineD2.affinity * profile.dopamineD2.intrinsicEfficacy;
+      if (profile?.histamineH1) rawH1 += centralResponse * profile.histamineH1.affinity * profile.histamineH1.intrinsicEfficacy;
+      if (profile?.serotonin2) raw5HT2 += systemicResponse * profile.serotonin2.affinity * profile.serotonin2.intrinsicEfficacy;
+      if (profile?.nm) rawNMBA += systemicResponse * profile.nm.affinity;
+
+      if (profile?.gabaA) {
+        const gabaResponse = hillResponse(centralExposure * speciesConfig.gabaSensitivityFactor);
+        bzdSite += (gabaResponse * (profile.gabaA.bzdAllosteric || 0));
+        propofolSite += gabaResponse * Math.max(
+          profile.gabaA.propofolBarbiturateDirect || 0,
+          profile.gabaA.directChlorideGating || 0
+        );
+        neurosteroidSite += gabaResponse * Math.max(
+          profile.gabaA.neurosteroidSite || 0,
+          profile.gabaA.directChlorideGating || 0
+        );
+      }
+
+      if (profile?.muOpioid) {
+        const response = hillResponse(exposure.centralCe / muSchildFactor);
+        rawMu += response * profile.muOpioid.affinity * profile.muOpioid.intrinsicEfficacy
+          * speciesConfig.muOpioidSensitivityFactor;
+      }
+      if (profile?.kappaOpioid) {
+        const response = hillResponse(exposure.centralCe / kappaSchildFactor);
+        rawKappa += response * profile.kappaOpioid.affinity * profile.kappaOpioid.intrinsicEfficacy
+          * speciesConfig.kappaOpioidSensitivityFactor;
+      }
+      if (profile?.nmdaPoreBlock) rawNMDA += centralResponse * profile.nmdaPoreBlock * speciesConfig.nmdaSensitivityFactor;
+      if (profile?.caVChannelBlock) rawCaV += systemicResponse * profile.caVChannelBlock;
+      if (profile?.acheInhibition) rawAChE += systemicResponse * profile.acheInhibition;
+
+      if (profile?.naVChannelBlock) {
+        const recommended = getSpeciesDoseRange(drugDef, patient.species);
+        const typicalDose = Math.max(0.0001, recommended?.typical || 1);
+        const toxicDose = speciesConfig.lidocaineIvCardiotoxicityThresholdMgKg;
+        const normalizedToxicThreshold = drugDef.id === 'lidocaine_2pct'
+          ? Math.max(2.5, toxicDose / typicalDose)
+          : 3.5;
+        rawSystemicNaV += hillResponse(exposure.systemicCe, normalizedToxicThreshold * 0.8, 2.2)
+          * profile.naVChannelBlock * lipidSinkReduction;
+        rawLocalNaV += hillResponse(exposure.localCe, 0.35, 1.5) * profile.naVChannelBlock;
+      }
+
+      // Every catalog vector now has a physiological consumer. Receptor mechanisms
+      // remain causal; these bounded vectors calibrate net observed organ effects.
+      if (applyCatalogPhenotype && drugDef.effectDepth > 0) {
+        const depthEffect = clamp(drugDef.effectDepth * centralResponse);
+        if (drugDef.specialTraits?.isDissociative) {
+          dissociativeEffects.push(depthEffect);
+        } else if (drugDef.category === 'induction' && drugDef.id !== 'guaifenesin') {
+          hypnoticEffects.push(depthEffect);
+        } else if (drugDef.category === 'premedication' || drugDef.category === 'opioid_analgesic' || drugDef.id === 'guaifenesin') {
+          sedationEffects.push(depthEffect);
+        }
+      } else if (applyCatalogPhenotype && drugDef.effectDepth < 0) {
+        arousalDrive += Math.abs(drugDef.effectDepth) * centralResponse;
+      }
+
+      if (applyCatalogPhenotype) {
+        if (drugDef.effectAnalgesia > 0) analgesicEffects.push(drugDef.effectAnalgesia * centralResponse);
+        if (drugDef.macReductionPct > 0) macSparingEffects.push(drugDef.macReductionPct * centralResponse);
+        if (drugDef.muscleRelaxation > 0) relaxationEffects.push(drugDef.muscleRelaxation * centralResponse);
+        if (drugDef.muscleRelaxation < 0) rigidityDrive += Math.abs(drugDef.muscleRelaxation) * centralResponse;
+        if (drugDef.effectRR < 0) respiratoryDepressants.push(Math.abs(drugDef.effectRR) * centralResponse);
+        if (drugDef.effectRR > 0) respiratoryStimulants.push(drugDef.effectRR * systemicResponse);
+
+        directHeartRateEffect += drugDef.effectHR * systemicResponse;
+        directBloodPressureEffect += drugDef.effectBP * systemicResponse;
+      }
+
+      if (drugDef.id === 'fluid_lrs') volumeExpansion += systemicResponse * 0.45;
+      if (drugDef.id === 'hypertonic_saline_72') volumeExpansion += systemicResponse * 0.8;
+      if (drugDef.id === 'whole_blood') {
+        volumeExpansion += systemicResponse * 0.65;
+        oxygenCarryingSupport += systemicResponse;
+      }
+      if (drugDef.id === 'potassium_chloride') potassiumLoad += systemicResponse;
+      if (drugDef.id === 'calcium_gluconate') calciumMembraneStabilization += systemicResponse;
+      if (drugDef.id === 'sodium_bicarbonate') alkalinization += systemicResponse;
     }
 
-    // Neuromuscular Block Reversal Kinetics
-    let effectiveNMBABlock = Math.max(0, rawNMBA);
-    if (sugammadexCe > 0.05) {
-      effectiveNMBABlock = Math.max(0, effectiveNMBABlock - sugammadexCe * 3.5);
+    // Fallbacks are additive only when the explicit target is absent; a partial
+    // receptor profile can no longer silence the rest of a drug's mechanism.
+    const ensureTarget = (id: string, targetExists: boolean | undefined, apply: (response: number) => void): void => {
+      const exposure = exposures.get(id);
+      if (exposure && !targetExists) apply(hillResponse(exposure.centralCe));
+    };
+    for (const id of ['dexmedetomidine', 'xylazine', 'detomidine']) {
+      const def = exposures.get(id)?.drugDef;
+      ensureTarget(id, Boolean(def?.receptorProfile?.alpha2), (response) => {
+        rawAlpha2 += response * speciesConfig.alpha2SensitivityFactor / alpha2SchildFactor;
+      });
     }
-    if (rawAChEInhib > 0.05) {
-      // Accumulation of endogenous acetylcholine displaces NMBA at the motor endplate
-      effectiveNMBABlock = Math.max(0, effectiveNMBABlock - rawAChEInhib * 2.2);
-      // Concomitant parasympathetic overdrive if atropine is not co-administered
-      rawM2 += rawAChEInhib * 1.4;
-      rawM3 += rawAChEInhib * 1.6;
+    ensureTarget('epinephrine', Boolean(exposures.get('epinephrine')?.drugDef.receptorProfile?.beta1), (r) => {
+      rawAlpha1 += r * 0.85; rawBeta1 += r; rawBeta2 += r * 0.75;
+    });
+    ensureTarget('norepinephrine', Boolean(exposures.get('norepinephrine')?.drugDef.receptorProfile?.alpha1), (r) => {
+      rawAlpha1 += r; rawBeta1 += r * 0.65;
+    });
+    ensureTarget('dobutamine', Boolean(exposures.get('dobutamine')?.drugDef.receptorProfile?.beta1), (r) => {
+      rawBeta1 += r; rawBeta2 += r * 0.3;
+    });
+    ensureTarget('guaifenesin', false, () => undefined);
+
+    // Neostigmine reverses atracurium. Sugammadex is deliberately not applied to
+    // atracurium (it only encapsulates aminosteroidal blockers).
+    const neostigmineReversal = 0.9 * hillResponse(neostigmineCe, 0.35, 1.4);
+    const effectiveNMBABlock = clamp(rawNMBA * (1 - neostigmineReversal));
+
+    const macSparingFraction = Math.min(0.75, combineEffects(macSparingEffects));
+    const effectiveInhalantCe = Math.max(0, inhalantCe) / Math.max(0.3, 1 - macSparingFraction);
+    const volatileSite = hillResponse(effectiveInhalantCe, 0.65, 1.5);
+
+    const allostericBZDMultiplier = 1 + 1.15 * clamp(bzdSite);
+    const directGating = 0.78 * propofolSite + 0.82 * neurosteroidSite + 0.86 * volatileSite;
+    const gabaAChlorideConductance = 0.08 + directGating * allostericBZDMultiplier + 0.11 * clamp(bzdSite);
+
+    const receptorSedation = clamp(
+      0.5 * Math.abs(Math.min(0, rawD2)) +
+      0.18 * Math.abs(Math.min(0, rawH1)) +
+      0.45 * Math.max(0, rawAlpha2) +
+      0.12 * Math.max(0, rawMu) +
+      0.08 * Math.max(0, rawKappa) +
+      0.22 * clamp(bzdSite)
+    );
+    let centralSedation = combineEffects([...sedationEffects, receptorSedation]);
+    if (speciesConfig.opioidManiaSusceptibility && rawMu > 0.45 && rawAlpha2 < 0.2 && propofolSite < 0.15 && neurosteroidSite < 0.15) {
+      // Pure-mu opioids can cause dysphoria/excitation in cats and especially
+      // horses when not balanced by an alpha-2 or hypnotic.
+      arousalDrive += Math.min(0.35, (rawMu - 0.45) * 0.55);
+      directHeartRateEffect += Math.min(0.18, (rawMu - 0.45) * 0.28);
+    }
+    centralSedation = clamp(centralSedation - clamp(arousalDrive) * 0.45);
+
+    const injectableHypnosis = combineEffects(hypnoticEffects);
+    const hypnoticEffect = combineEffects([
+      injectableHypnosis,
+      volatileSite * 0.94,
+      Math.min(0.35, centralSedation * 0.22),
+    ]);
+    const dissociativeEffect = combineEffects(dissociativeEffects);
+    const muscleRelaxation = clamp(combineEffects(relaxationEffects) - clamp(rigidityDrive) * 0.75);
+
+    const phenotypicRespiratoryDepression = combineEffects(respiratoryDepressants);
+    const respiratoryStimulation = combineEffects(respiratoryStimulants);
+    const respiratoryDepression = clamp(
+      combineEffects([
+        phenotypicRespiratoryDepression,
+        clamp(Math.max(0, rawMu) * 0.42),
+        clamp(hypnoticEffect * 0.38),
+      ]) - respiratoryStimulation * 0.6
+    );
+
+    const mechanisticAnalgesicSignal =
+      1.75 * Math.max(0, rawMu) +
+      1.05 * Math.max(0, rawKappa) +
+      1.1 * Math.max(0, rawAlpha2) +
+      1.0 * Math.max(0, rawNMDA) +
+      2.2 * Math.max(0, rawLocalNaV);
+    const mechanisticAnalgesia = hillResponse(mechanisticAnalgesicSignal, 1.0, 1.7);
+    const phenotypicAnalgesia = combineEffects(analgesicEffects);
+    const nociceptiveInhibition = clamp(Math.max(mechanisticAnalgesia, phenotypicAnalgesia));
+
+    // Acute bolus envelope. It persists across ticks instead of being calculated
+    // and discarded on the single arrival frame.
+    let acuteBolusHypotension = 0;
+    let acuteBolusRespiratoryDepression = 0;
+    let acuteBolusBradycardia = 0;
+    let acuteBolusArrhythmia = 0;
+    let histamineRelease = 0;
+    for (const dose of activeDoses) {
+      if ((dose.bolusShockRemainingSec || 0) <= 0 || (dose.bolusShockMagnitude || 0) <= 0) continue;
+      const def = VETERINARY_DRUG_DATABASE.find((item) => item.id === dose.drugId);
+      if (!def?.fastBolusRisk) continue;
+      const fade = clamp((dose.bolusShockRemainingSec || 0) / 25);
+      const magnitude = clamp((dose.bolusShockMagnitude || 0) * fade, 0, 1.5);
+      acuteBolusHypotension = Math.max(acuteBolusHypotension, def.fastBolusRisk.hypotensionSeverity * magnitude);
+      acuteBolusRespiratoryDepression = Math.max(acuteBolusRespiratoryDepression, def.fastBolusRisk.apneaRisk * magnitude);
+      acuteBolusBradycardia = Math.max(acuteBolusBradycardia, def.fastBolusRisk.reflexBradycardiaRisk * magnitude);
+      acuteBolusArrhythmia = Math.max(acuteBolusArrhythmia, def.fastBolusRisk.arrhythmiaRisk * magnitude);
+      if (def.fastBolusRisk.histamineRelease) histamineRelease = Math.max(histamineRelease, magnitude);
     }
 
-    // ----------------------------------------------------
-    // 4. ALLOSTERIC COOPERATIVITY AT GABA-A COMPLEX
-    // ----------------------------------------------------
-    // Direct gating components: Propofol, Etomidate, Barbiturate, Alfaxalone, Inhalation
-    const volatileSiteOccupancy = Math.max(0, inhalantCe);
-    const directGatingSum = 
-      0.95 * propofolSiteOccupancy + 
-      1.10 * neurosteroidSiteOccupancy + 
-      1.25 * volatileSiteOccupancy;
-
-    // Allosteric potentiators: Benzodiazepines act as pure positive allosteric modulators
-    // (they have low direct chloride conductance alone, but multiply the effect of direct gating agents!)
-    const allostericBZDMultiplier = 1.0 + 2.6 * Math.min(2.0, bzdSiteOccupancy);
-    const allostericVolatileSynergy = 1.0 + 0.8 * Math.min(2.0, volatileSiteOccupancy);
-
-    // Dynamic Chloride Conductance (gCl-):
-    // Baseline resting neuronal conductance = 0.08
-    const baseChloride = 0.08;
-    const directBzdTonicGabaGCl = 0.12 * Math.min(1.5, bzdSiteOccupancy); // tonic GABA channel opening frequency increase
-    const chlorideConductanceGabaA = 
-      baseChloride + 
-      (directGatingSum * allostericBZDMultiplier * allostericVolatileSynergy) +
-      directBzdTonicGabaGCl;
-
-    // ----------------------------------------------------
-    // 5. SECOND MESSENGER TRANSDUCTION (cAMP & Ca2+)
-    // ----------------------------------------------------
-    // Baseline cAMP = 1.0
-    // Gs stimulation: Beta-1, Beta-2
-    // Gi inhibition: Alpha-2, M2, Mu-opioid
-    const netMyocardialGsDrive = Math.max(0, rawBeta1);
-    const netMyocardialGiDrive = Math.max(0, rawM2 * 1.2 + rawAlpha2 * 0.8 + rawMuOpioid * 0.4);
-    const cAMPMyocardial = Math.max(0.15, Math.min(3.5, 1.0 + 0.85 * netMyocardialGsDrive - 0.75 * netMyocardialGiDrive));
-
-    // Vascular cAMP & IP3 (Smooth Muscle Tone)
-    const netVasodilationDrive = 0.6 * rawBeta2 + (rawAlpha1 < 0 ? Math.abs(rawAlpha1) * 0.9 : 0);
-    const netVasoconstrictionDrive = Math.max(0, rawAlpha1) * 1.4 + Math.max(0, rawAlpha2) * 0.7;
-    const cAMPVascular = Math.max(0.2, Math.min(3.0, 1.0 + 0.7 * netVasodilationDrive - 0.8 * netVasoconstrictionDrive));
-
-    // Cardiomyocyte Intracellular Calcium [Ca2+]i transient
-    // Modulated by cAMP (PKA phosphorylation of L-type Ca channels & phospholamban)
-    // Directly depressed by local anesthetics (NaV/CaV inhibition) and high inhalants
-    const directMyocardialDepression = 0.45 * rawNaVBlock + 0.35 * Math.max(0, volatileSiteOccupancy - 1.0);
-    const intracellularCalcium = Math.max(0.1, Math.min(3.0, cAMPMyocardial * (1.0 - directMyocardialDepression)));
-
-    // ----------------------------------------------------
-    // 6. NOCICEPTIVE INHIBITION (SURGICAL ANALGESIA INDEX)
-    // ----------------------------------------------------
-    // Integrated spinal dorsal horn & descending PAG-RVM antinociceptive summation
-    const rawAnalgesicSignal = 
-      1.9 * rawMuOpioid + 
-      1.2 * rawKappaOpioid + 
-      1.3 * rawAlpha2 + 
-      1.1 * rawNMDABlock + 
-      1.8 * rawNaVBlock; // local anesthetic block is complete antinociception
-
-    // Sigmoidal saturation curve for analgesia (0 to 1)
-    const nociceptiveInhibition = Math.min(1.0, Math.pow(rawAnalgesicSignal, 2) / (Math.pow(1.1, 2) + Math.pow(rawAnalgesicSignal, 2)));
+    const netMyocardialGs = Math.max(0, rawBeta1);
+    const netMyocardialGi = Math.max(0, rawM2 * 0.72 + rawAlpha2 * 0.35 + rawMu * 0.18);
+    const cAMPMyocardial = clamp(1 + 0.78 * netMyocardialGs - 0.68 * netMyocardialGi, 0.15, 3.5);
+    const vasodilationDrive = 0.6 * Math.max(0, rawBeta2) + Math.abs(Math.min(0, rawAlpha1)) * 0.8;
+    const vasoconstrictionDrive = Math.max(0, rawAlpha1) * 1.2 + Math.max(0, rawAlpha2) * 0.5;
+    const cAMPVascular = clamp(1 + 0.65 * vasodilationDrive - 0.72 * vasoconstrictionDrive, 0.2, 3);
+    const estimatedPotassium = patient.baselineVitals.potassiumMeqL + clamp(potassiumLoad) * 1.2 - clamp(alkalinization) * 0.65;
+    const untreatedHyperkalemicToxicity = clamp((estimatedPotassium - 5.5) / 2.5);
+    const hyperkalemicCardiotoxicity = clamp(
+      untreatedHyperkalemicToxicity * (1 - clamp(calciumMembraneStabilization) * 0.82)
+    );
+    const myocardialDepression = 0.5 * rawSystemicNaV + 0.35 * rawCaV + 0.18 * volatileSite
+      + hyperkalemicCardiotoxicity * 0.42;
+    const intracellularCalcium = clamp(
+      cAMPMyocardial * (1 - myocardialDepression) + calciumMembraneStabilization * 0.12,
+      0.1,
+      3
+    );
 
     return {
       alpha1Drive: rawAlpha1,
@@ -299,21 +439,45 @@ export class CellularReceptorsEngine {
       beta2Drive: rawBeta2,
       m2Drive: rawM2,
       m3Drive: rawM3,
-      nmOccupancy: Math.min(1.0, effectiveNMBABlock),
-      gabaAChlorideConductance: chlorideConductanceGabaA,
-      bzdAllostericOccupancy: bzdSiteOccupancy,
-      propofolSiteOccupancy,
-      neurosteroidSiteOccupancy,
-      volatileSiteOccupancy,
-      muOpioidDrive: rawMuOpioid,
-      kappaOpioidDrive: rawKappaOpioid,
-      nmdaBlockade: Math.min(1.0, rawNMDABlock),
-      naVBlockade: Math.min(1.0, rawNaVBlock),
-      acheInhibition: Math.min(1.0, rawAChEInhib),
+      dopamineD2Drive: rawD2,
+      histamineH1Drive: rawH1,
+      serotonin2Drive: raw5HT2,
+      nmOccupancy: effectiveNMBABlock,
+      gabaAChlorideConductance,
+      bzdAllostericOccupancy: clamp(bzdSite),
+      propofolSiteOccupancy: clamp(propofolSite),
+      neurosteroidSiteOccupancy: clamp(neurosteroidSite),
+      volatileSiteOccupancy: volatileSite,
+      centralSedation,
+      hypnoticEffect,
+      dissociativeEffect,
+      muscleRelaxation,
+      respiratoryDepression,
+      macSparingFraction,
+      muOpioidDrive: rawMu,
+      kappaOpioidDrive: rawKappa,
+      nmdaBlockade: clamp(rawNMDA),
+      naVBlockade: clamp(rawSystemicNaV),
+      localNeuralBlockade: clamp(rawLocalNaV),
+      caVBlockade: clamp(rawCaV),
+      acheInhibition: clamp(rawAChE),
+      nociceptiveInhibition,
+      directHeartRateEffect: clamp(directHeartRateEffect, -1.5, 1.5),
+      directBloodPressureEffect: clamp(directBloodPressureEffect, -1.5, 1.5),
+      acuteBolusHypotension: clamp(acuteBolusHypotension),
+      acuteBolusRespiratoryDepression: clamp(acuteBolusRespiratoryDepression),
+      acuteBolusBradycardia: clamp(acuteBolusBradycardia),
+      acuteBolusArrhythmia: clamp(acuteBolusArrhythmia),
+      histamineRelease: clamp(histamineRelease),
+      volumeExpansion: clamp(volumeExpansion),
+      oxygenCarryingSupport: clamp(oxygenCarryingSupport),
+      potassiumLoad: clamp(potassiumLoad),
+      calciumMembraneStabilization: clamp(calciumMembraneStabilization),
+      alkalinization: clamp(alkalinization),
+      hyperkalemicCardiotoxicity,
       cAMPMyocardial,
       cAMPVascular,
       intracellularCalcium,
-      nociceptiveInhibition,
       reversalCe: {
         atipamezole: atipamezoleCe,
         naloxone: naloxoneCe,

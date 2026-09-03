@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActiveDrugDose,
   AdministrationSpeed,
@@ -8,6 +8,14 @@ import {
   PatientProfile,
 } from '../../types/simulator';
 import { VETERINARY_DRUG_DATABASE } from '../../data/drugDatabase';
+import {
+  calculateAdministration,
+  getRoutePharmacokinetics,
+  getSpeciesDoseRange,
+  isTimeBasedDoseUnit,
+  validateAdministrationCommand,
+} from '../../engine/drugAdministration';
+import { hillResponse } from '../../engine/cellularReceptors';
 import {
   Syringe,
   Search,
@@ -44,12 +52,19 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
   const [selectedRoute, setSelectedRoute] = useState<DrugRoute>('IV');
   const [adminSpeed, setAdminSpeed] = useState<AdministrationSpeed>('bolus_slow');
   const [customDosePerKg, setCustomDosePerKg] = useState<number>(() => {
-    const recommended = VETERINARY_DRUG_DATABASE[0].recommendedDose[patient.species] || VETERINARY_DRUG_DATABASE[0].recommendedDose.canine;
-    return recommended ? recommended.typical : 1.0;
+    const recommended = getSpeciesDoseRange(VETERINARY_DRUG_DATABASE[0], patient.species);
+    return recommended?.typical ?? 0;
   });
   const [customConcentrationMgMl, setCustomConcentrationMgMl] = useState<number>(VETERINARY_DRUG_DATABASE[0].defaultConcentrationMgMl);
   const [isCRI, setIsCRI] = useState(false);
   const [adminSuccessMsg, setAdminSuccessMsg] = useState<string | null>(null);
+  const [adminErrorMsg, setAdminErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const recommended = getSpeciesDoseRange(selectedDrug, patient.species);
+    setCustomDosePerKg(recommended?.typical ?? 0);
+    setAdminErrorMsg(null);
+  }, [patient.species, selectedDrug]);
 
   // Filtered drug catalog
   const filteredDrugs = VETERINARY_DRUG_DATABASE.filter((drug) => {
@@ -64,31 +79,48 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
 
   const handleSelectDrug = (drug: DrugDefinition) => {
     setSelectedDrug(drug);
-    const recommended = drug.recommendedDose[patient.species] || drug.recommendedDose.canine;
-    const initialDose = recommended ? recommended.typical : 1.0;
+    const recommended = getSpeciesDoseRange(drug, patient.species);
+    const initialDose = recommended?.typical ?? 0;
     setCustomDosePerKg(initialDose);
     setCustomConcentrationMgMl(drug.defaultConcentrationMgMl);
-    setSelectedRoute(drug.supportedRoutes[0] || 'IV');
-    const isDefaultCRI = drug.doseUnit.includes('/min') || drug.doseUnit.includes('/h');
+    const hasValidatedRate = drug.doseUnit.includes('/min') || drug.doseUnit.includes('/h');
+    const isDefaultCRI = hasValidatedRate && drug.supportedRoutes.includes('CRI');
+    setSelectedRoute(isDefaultCRI ? 'CRI' : (drug.supportedRoutes.find((route) => route !== 'CRI') || 'IV'));
     setIsCRI(isDefaultCRI);
-    setAdminSpeed(isDefaultCRI ? 'infusion_cri' : drug.supportedRoutes.includes('IV_slow') ? 'bolus_slow' : 'bolus_slow');
+    setAdminSpeed(isDefaultCRI ? 'infusion_cri' : 'bolus_slow');
   };
 
   // Calculations for chosen drug and patient weight
-  const totalDoseAmount = Number((customDosePerKg * patient.weightKg).toFixed(3));
-  
-  // Calculate Volume in mL:
-  let calculatedVolumeMl = 0;
-  if (selectedDrug.unit === 'mcg') {
-    const totalDoseMg = totalDoseAmount / 1000.0;
-    calculatedVolumeMl = Number((totalDoseMg / customConcentrationMgMl).toFixed(3));
-  } else if (selectedDrug.unit === 'mEq') {
-    calculatedVolumeMl = Number((totalDoseAmount / 1.0).toFixed(2));
-  } else {
-    calculatedVolumeMl = Number((totalDoseAmount / customConcentrationMgMl).toFixed(3));
-  }
+  const calculatedAdministration = calculateAdministration(
+    selectedDrug,
+    customDosePerKg,
+    patient.weightKg,
+    customConcentrationMgMl
+  );
+  const totalDoseAmount = calculatedAdministration.doseAmount;
+  const calculatedVolumeMl = calculatedAdministration.volumeMl;
+  const recommendedRange = getSpeciesDoseRange(selectedDrug, patient.species);
+  const isRateDose = isTimeBasedDoseUnit(selectedDrug.doseUnit);
+  const canUseCRI = Boolean(recommendedRange) && selectedDrug.supportedRoutes.includes('CRI') && isRateDose;
+  const canUseBolus = Boolean(recommendedRange) && !isRateDose
+    && selectedDrug.supportedRoutes.some((route) => route !== 'CRI');
+  const canUseRapidBolus = canUseBolus && selectedDrug.supportedRoutes.includes('IV');
+  const selectableRoutes = selectedDrug.supportedRoutes.filter((route) => isRateDose ? route === 'CRI' : route !== 'CRI');
+  const routePK = getRoutePharmacokinetics(selectedDrug, selectedRoute);
 
   const handleAdminister = () => {
+    const validationErrors = validateAdministrationCommand(patient, selectedDrug, {
+      route: selectedRoute,
+      administrationSpeed: isCRI ? 'infusion_cri' : adminSpeed,
+      isCRI,
+      dosePerKg: customDosePerKg,
+      concentrationMgMl: customConcentrationMgMl,
+    });
+    if (validationErrors.length > 0) {
+      setAdminErrorMsg(validationErrors.join(' '));
+      setAdminSuccessMsg(null);
+      return;
+    }
     const deliveryDuration = adminSpeed === 'bolus_rapid' ? 4 : adminSpeed === 'bolus_slow' ? 60 : 0;
 
     onAdministerDrug({
@@ -101,12 +133,18 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
       dosePerKg: customDosePerKg,
       volumeMl: calculatedVolumeMl,
       deliveryDurationSec: deliveryDuration,
-      transitLagRemainingSec: selectedDrug.transitLagSecondsIV || 20,
+      transitLagRemainingSec: routePK.transitLagSeconds,
       isCRI: isCRI,
+      isInfusionRunning: isCRI,
       criRatePerKgMin: isCRI ? customDosePerKg : undefined,
+      criRateMlPerHour: isCRI ? calculatedAdministration.pumpRateMlPerHour : undefined,
     });
 
-    setAdminSuccessMsg(`Injetado: ${selectedDrug.name} (${customDosePerKg} ${selectedDrug.doseUnit} = ${calculatedVolumeMl} mL) [${adminSpeed.replace('_', ' ').toUpperCase()}]`);
+    setAdminSuccessMsg(isCRI
+      ? `CRI iniciada: ${selectedDrug.name} (${customDosePerKg} ${selectedDrug.doseUnit}; ${calculatedAdministration.pumpRateMlPerHour ?? 0} mL/h)`
+      : `Administrado: ${selectedDrug.name} (${customDosePerKg} ${selectedDrug.doseUnit} = ${calculatedVolumeMl} mL) [${adminSpeed.replace('_', ' ').toUpperCase()}]`
+    );
+    setAdminErrorMsg(null);
     setTimeout(() => setAdminSuccessMsg(null), 3500);
   };
 
@@ -115,27 +153,44 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
     const drug = VETERINARY_DRUG_DATABASE.find((d) => d.id === drugId);
     if (!drug) return;
 
-    const recommended = drug.recommendedDose[patient.species] || drug.recommendedDose.canine;
-    const dosePerKg = recommended?.typical || 1.0;
-    const totalDose = dosePerKg * patient.weightKg;
-    let volMl = 0;
-    if (drug.unit === 'mcg') {
-      volMl = Number(((totalDose / 1000) / drug.defaultConcentrationMgMl).toFixed(3));
-    } else {
-      volMl = Number((totalDose / drug.defaultConcentrationMgMl).toFixed(3));
+    const recommended = getSpeciesDoseRange(drug, patient.species);
+    if (!recommended || isTimeBasedDoseUnit(drug.doseUnit)) {
+      setAdminErrorMsg(`${drug.name} não possui dose rápida validada para ${patient.species}.`);
+      return;
+    }
+    const dosePerKg = recommended.typical;
+    const calculated = calculateAdministration(drug, dosePerKg, patient.weightKg);
+    const totalDose = calculated.doseAmount;
+    const volMl = calculated.volumeMl;
+
+    const route: DrugRoute = drug.supportedRoutes.includes('IV')
+      ? 'IV'
+      : drug.supportedRoutes.includes('IV_slow')
+        ? 'IV_slow'
+        : drug.supportedRoutes.find((item) => item !== 'CRI') || 'IV';
+    const effectiveSpeed: AdministrationSpeed = route === 'IV' ? speed : 'bolus_slow';
+    const validationErrors = validateAdministrationCommand(patient, drug, {
+      route,
+      administrationSpeed: effectiveSpeed,
+      isCRI: false,
+      dosePerKg,
+    });
+    if (validationErrors.length > 0) {
+      setAdminErrorMsg(validationErrors.join(' '));
+      return;
     }
 
     onAdministerDrug({
       drugId: drug.id,
       drugName: drug.name,
       category: drug.category,
-      route: 'IV',
-      administrationSpeed: speed,
+      route,
+      administrationSpeed: effectiveSpeed,
       doseAmount: Number(totalDose.toFixed(3)),
       dosePerKg,
       volumeMl: volMl,
-      deliveryDurationSec: speed === 'bolus_rapid' ? 4 : 60,
-      transitLagRemainingSec: drug.transitLagSecondsIV || 15,
+      deliveryDurationSec: effectiveSpeed === 'bolus_rapid' ? 4 : 60,
+      transitLagRemainingSec: getRoutePharmacokinetics(drug, route).transitLagSeconds,
       isCRI: false,
     });
 
@@ -143,14 +198,14 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
     setTimeout(() => setAdminSuccessMsg(null), 3500);
   };
 
-  const recommendedRange = selectedDrug.recommendedDose[patient.species] || selectedDrug.recommendedDose.canine;
-
   // Check potential warnings
   const isBovineXylazineDanger = patient.species === 'bovine' && selectedDrug.id === 'xylazine' && customDosePerKg > 0.15;
   const isFelineLidocaineDanger = patient.species === 'feline' && selectedDrug.id === 'lidocaine_2pct' && selectedRoute.includes('IV') && (customDosePerKg > 1.0 || adminSpeed === 'bolus_rapid');
+  const isFelinePropofolWarning = patient.species === 'feline' && selectedDrug.id === 'propofol';
   const isKclBolusDanger = selectedDrug.id === 'potassium_chloride' && (adminSpeed === 'bolus_rapid' || customDosePerKg > 0.6);
   const isPropofolFastApnea = selectedDrug.id === 'propofol' && adminSpeed === 'bolus_rapid';
   const isAlpha2RapidShock = (selectedDrug.id === 'dexmedetomidine' || selectedDrug.id === 'xylazine') && adminSpeed === 'bolus_rapid';
+  const isAboveRecommendedMaximum = Boolean(recommendedRange && customDosePerKg > recommendedRange.max);
 
   return (
     <div className="bg-[#0d0d0d] border border-[#222222] rounded-xl p-4 flex flex-col space-y-4 shadow-2xl">
@@ -275,7 +330,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
         <div className="lg:col-span-5 max-h-[380px] overflow-y-auto space-y-1.5 pr-1">
           {filteredDrugs.map((drug) => {
             const isSelected = selectedDrug.id === drug.id;
-            const rec = drug.recommendedDose[patient.species] || drug.recommendedDose.canine;
+            const rec = getSpeciesDoseRange(drug, patient.species);
             return (
               <div
                 key={drug.id}
@@ -283,7 +338,9 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                 className={`p-2.5 rounded-lg border cursor-pointer transition flex items-center justify-between ${
                   isSelected
                     ? 'bg-[#0f1a14] border-emerald-500/70 shadow-md shadow-black/40 ring-1 ring-emerald-500/50'
-                    : 'bg-[#121212] border-[#222222] hover:bg-[#181818] hover:border-[#2f2f2f]'
+                    : rec
+                      ? 'bg-[#121212] border-[#222222] hover:bg-[#181818] hover:border-[#2f2f2f]'
+                      : 'bg-[#101010] border-[#1d1d1d] opacity-60'
                 }`}
               >
                 <div className="truncate pr-2">
@@ -302,7 +359,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
 
                 <div className="shrink-0 text-right">
                   <span className="text-[10px] font-mono-code px-1.5 py-0.5 rounded bg-[#181818] border border-[#262626] text-emerald-400 font-semibold block">
-                    {rec?.typical || 1.0} {drug.doseUnit}
+                    {rec ? `${rec.typical} ${drug.doseUnit}` : 'sem faixa na espécie'}
                   </span>
                   <span className="text-[9px] text-[#666666] font-mono-code">
                     Lag: {drug.transitLagSecondsIV || 20}s
@@ -336,9 +393,11 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
               <div className="flex items-center space-x-2">
                 <input
                   type="number"
-                  step="0.01"
+                  min="0"
+                  step={recommendedRange ? Math.max(0.001, (recommendedRange.max - recommendedRange.min) / 100) : 0.01}
                   value={customDosePerKg}
                   onChange={(e) => setCustomDosePerKg(parseFloat(e.target.value) || 0)}
+                  disabled={!recommendedRange}
                   className="w-24 bg-[#0d0d0d] border border-[#333333] text-emerald-300 font-bold text-xs rounded px-2 py-1 text-right font-mono-code focus:outline-none focus:border-emerald-500"
                 />
                 <span className="text-[#e5e5e5]">{selectedDrug.doseUnit}</span>
@@ -359,7 +418,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                 <div className="flex justify-between text-[10px] font-mono-code text-[#737373] mt-0.5">
                   <span>Mín: {recommendedRange.min}</span>
                   <span className="text-emerald-400 font-bold">Típica ({patient.species}): {recommendedRange.typical}</span>
-                  <span>Máx Seguro: {recommendedRange.max} {selectedDrug.doseUnit}</span>
+                  <span>Limite de referência: {recommendedRange.max} {selectedDrug.doseUnit}</span>
                 </div>
               </div>
             )}
@@ -373,18 +432,26 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                 Modo e Velocidade de Aplicação:
               </span>
               <span className="text-[10px] text-[#888888] font-mono-code">
-                Atraso de Circulação (Lag): {selectedDrug.transitLagSecondsIV || 20}s
+                Início por {selectedRoute}: ~{Math.round(routePK.transitLagSeconds)}s + equilíbrio de biofase
               </span>
             </label>
 
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => { setAdminSpeed('bolus_rapid'); setIsCRI(false); }}
+                onClick={() => {
+                  if (!canUseRapidBolus) return;
+                  setAdminSpeed('bolus_rapid');
+                  setIsCRI(false);
+                  setSelectedRoute('IV');
+                }}
+                disabled={!canUseRapidBolus}
                 className={`p-2 rounded border text-left transition ${
                   adminSpeed === 'bolus_rapid' && !isCRI
                     ? 'bg-[#2b1414] border-red-500/80 text-red-200'
-                    : 'bg-[#141414] border-[#2a2a2a] text-[#888888] hover:bg-[#1a1a1a]'
+                    : canUseRapidBolus
+                      ? 'bg-[#141414] border-[#2a2a2a] text-[#888888] hover:bg-[#1a1a1a]'
+                      : 'bg-[#101010] border-[#202020] text-[#4f4f4f] cursor-not-allowed'
                 }`}
               >
                 <div className="text-xs font-bold font-mono-code flex items-center gap-1 text-red-400">
@@ -396,11 +463,19 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
 
               <button
                 type="button"
-                onClick={() => { setAdminSpeed('bolus_slow'); setIsCRI(false); }}
+                onClick={() => {
+                  if (!canUseBolus) return;
+                  setAdminSpeed('bolus_slow');
+                  setIsCRI(false);
+                  if (selectedRoute === 'CRI') setSelectedRoute(selectableRoutes.find((route) => route !== 'CRI') || 'IV_slow');
+                }}
+                disabled={!canUseBolus}
                 className={`p-2 rounded border text-left transition ${
                   adminSpeed === 'bolus_slow' && !isCRI
                     ? 'bg-[#0f1f18] border-emerald-500/80 text-emerald-200'
-                    : 'bg-[#141414] border-[#2a2a2a] text-[#888888] hover:bg-[#1a1a1a]'
+                    : canUseBolus
+                      ? 'bg-[#141414] border-[#2a2a2a] text-[#888888] hover:bg-[#1a1a1a]'
+                      : 'bg-[#101010] border-[#202020] text-[#4f4f4f] cursor-not-allowed'
                 }`}
               >
                 <div className="text-xs font-bold font-mono-code flex items-center gap-1 text-emerald-400">
@@ -412,22 +487,48 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
 
               <button
                 type="button"
-                onClick={() => { setAdminSpeed('infusion_cri'); setIsCRI(true); }}
+                onClick={() => {
+                  if (!canUseCRI) return;
+                  setAdminSpeed('infusion_cri');
+                  setIsCRI(true);
+                  setSelectedRoute('CRI');
+                }}
+                disabled={!canUseCRI}
+                title={!canUseCRI ? 'O catálogo ainda não possui um regime de manutenção por tempo validado para este fármaco.' : undefined}
                 className={`p-2 rounded border text-left transition ${
                   isCRI
                     ? 'bg-[#121f2b] border-cyan-500/80 text-cyan-200'
-                    : 'bg-[#141414] border-[#2a2a2a] text-[#888888] hover:bg-[#1a1a1a]'
+                    : canUseCRI
+                      ? 'bg-[#141414] border-[#2a2a2a] text-[#888888] hover:bg-[#1a1a1a]'
+                      : 'bg-[#101010] border-[#202020] text-[#4f4f4f] cursor-not-allowed'
                 }`}
               >
                 <div className="text-xs font-bold font-mono-code flex items-center gap-1 text-cyan-400">
                   <Clock className="w-3 h-3" />
                   Infusão CRI
                 </div>
-                <div className="text-[9px] text-[#888888] mt-0.5">Bomba Contínua</div>
+                <div className="text-[9px] text-[#888888] mt-0.5">{canUseCRI ? 'Bomba contínua' : 'Regime não cadastrado'}</div>
               </button>
             </div>
 
             {/* DYNAMIC CLINICAL PHARMACOKINETIC SAFETY WARNINGS */}
+            {isAboveRecommendedMaximum && (
+              <div className="p-2 rounded bg-[#35220d] border border-amber-500/80 text-[11px] text-amber-100 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <div>
+                  <strong className="text-amber-300">DOSE ACIMA DA FAIXA DE REFERÊNCIA:</strong>{' '}
+                  {customDosePerKg} {selectedDrug.doseUnit} equivale a {(customDosePerKg / recommendedRange.max).toFixed(1)}× o limite catalogado. O motor aplicará efeitos adversos e toxicidade cumulativa.
+                </div>
+              </div>
+            )}
+            {!recommendedRange && (
+              <div className="p-2 rounded bg-[#2a1d0d] border border-amber-700/70 text-[11px] text-amber-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Sem regime curado para <strong>{patient.species}</strong>. O simulador não substituirá essa lacuna por uma dose canina.
+                </span>
+              </div>
+            )}
             {isPropofolFastApnea && (
               <div className="p-2 rounded bg-[#2b1212] border border-red-500/80 text-[11px] text-red-200 flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
@@ -464,6 +565,15 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
               </div>
             )}
 
+            {isFelinePropofolWarning && (
+              <div className="p-2 rounded bg-[#2b1f12] border border-amber-600/80 text-[11px] text-amber-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <div>
+                  <strong className="text-amber-300">PARTICULARIDADE FELINA (UGT1A6):</strong> Felinos possuem deficiência congênita na glucuronidação fenólica. Doses repetidas ou infusões contínuas de propofol geram recuperação excessivamente lenta e risco de lesão oxidativa eritrocitária (corpúsculos de Heinz). Recomenda-se alfaxalona para manutenção em gatos.
+                </div>
+              </div>
+            )}
+
             {isKclBolusDanger && (
               <div className="p-2 rounded bg-[#3b0d10] border border-red-600 text-[11px] text-red-200 flex items-start gap-2">
                 <ShieldAlert className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
@@ -477,16 +587,18 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
           {/* Calculated Output Display & Syringe */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             <div className="p-2.5 bg-[#171717] rounded border border-[#262626]">
-              <span className="text-[10px] text-[#737373] block font-mono-code">Dose Total ({patient.weightKg}kg):</span>
+              <span className="text-[10px] text-[#737373] block font-mono-code">
+                {isCRI ? `Quantidade por ${selectedDrug.doseUnit.endsWith('/min') ? 'minuto' : 'hora'}` : `Dose total (${patient.weightKg} kg)`}:
+              </span>
               <strong className="text-sm text-[#f5f5f5] font-mono-code font-bold">
                 {totalDoseAmount} {selectedDrug.unit}
               </strong>
             </div>
 
             <div className="p-2.5 bg-[#171717] rounded border border-[#262626]">
-              <span className="text-[10px] text-[#737373] block font-mono-code">Volume a Injetar:</span>
+              <span className="text-[10px] text-[#737373] block font-mono-code">{isCRI ? 'Taxa calculada da bomba:' : 'Volume a injetar:'}</span>
               <strong className="text-base text-emerald-400 font-digital font-extrabold">
-                {calculatedVolumeMl} mL
+                {isCRI ? `${calculatedAdministration.pumpRateMlPerHour ?? 0} mL/h` : `${calculatedVolumeMl} mL`}
               </strong>
             </div>
 
@@ -494,10 +606,16 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
               <span className="text-[10px] text-[#737373] block font-mono-code">Via de Aplicação:</span>
               <select
                 value={selectedRoute}
-                onChange={(e) => setSelectedRoute(e.target.value as DrugRoute)}
+                onChange={(e) => {
+                  const route = e.target.value as DrugRoute;
+                  setSelectedRoute(route);
+                  const routeIsCri = route === 'CRI';
+                  setIsCRI(routeIsCri);
+                  setAdminSpeed(routeIsCri ? 'infusion_cri' : 'bolus_slow');
+                }}
                 className="bg-[#0d0d0d] text-[#e5e5e5] text-xs rounded border border-[#333333] font-mono-code w-full px-1 py-0.5 mt-0.5 focus:outline-none"
               >
-                {selectedDrug.supportedRoutes.map((r) => (
+                {selectableRoutes.map((r) => (
                   <option key={r} value={r}>
                     {r}
                   </option>
@@ -510,8 +628,11 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
           <div className="pt-1">
             <button
               onClick={handleAdminister}
+              disabled={!recommendedRange || customDosePerKg <= 0 || selectableRoutes.length === 0}
               className={`w-full py-2.5 px-4 rounded-lg text-xs font-extrabold font-mono-code transition flex items-center justify-center space-x-2 shadow-lg shadow-black/50 ${
-                adminSpeed === 'bolus_rapid'
+                !recommendedRange || customDosePerKg <= 0 || selectableRoutes.length === 0
+                  ? 'bg-[#202020] text-[#666666] cursor-not-allowed'
+                  : adminSpeed === 'bolus_rapid'
                   ? 'bg-amber-600 hover:bg-amber-500 text-white'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white'
               }`}
@@ -531,6 +652,12 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
               <span>{adminSuccessMsg}</span>
             </div>
           )}
+          {adminErrorMsg && (
+            <div className="p-2 rounded bg-[#2b0c0f] border border-red-700/70 text-xs text-red-200 font-mono-code flex items-start space-x-2">
+              <AlertOctagon className="w-4 h-4 shrink-0 text-red-400" />
+              <span>{adminErrorMsg}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -539,12 +666,14 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
         <div className="mt-2 pt-3 border-t border-[#1f1f1f]">
           <h4 className="text-xs font-bold text-[#d4d4d4] mb-2 flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5 text-cyan-400" />
-            Fármacos Ativos no Paciente (Concentração no Sítio Efetor Ce & Tempo de Trânsito)
+            Fármacos ativos (exposição relativa no sítio efetor Ce e trânsito)
           </h4>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
             {activeDoses.map((dose) => {
               const inTransit = (dose.transitLagRemainingSec || 0) > 0;
+              const definition = VETERINARY_DRUG_DATABASE.find((drug) => drug.id === dose.drugId);
+              const effectOccupancy = hillResponse(dose.currentCe);
               return (
                 <div
                   key={dose.id}
@@ -560,22 +689,24 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                       )}
                     </div>
                     <div className="text-[10px] text-[#888888]">
-                      {dose.dosePerKg} {dose.route} · {dose.volumeMl} mL ({dose.administrationSpeed?.replace('_', ' ') || 'bolus'}) {dose.isCRI ? '(CRI)' : ''}
+                      {dose.dosePerKg} {definition?.doseUnit || ''} · {dose.route} · {dose.isCRI
+                        ? `${dose.criRateMlPerHour ?? 0} mL/h ${dose.isInfusionRunning === false ? '(interrompida; washout)' : '(CRI)'}`
+                        : `${dose.volumeMl} mL (${dose.administrationSpeed?.replace('_', ' ') || 'bolus'})`}
                     </div>
                     {/* Visual Ce Bar */}
                     <div className="w-28 bg-[#222222] h-1.5 rounded-full mt-1.5 overflow-hidden">
                       <div
                         className="h-full bg-emerald-400 transition-all duration-300"
-                        style={{ width: `${Math.min(100, Math.round(dose.currentCe * 100))}%` }}
+                        style={{ width: `${Math.round(effectOccupancy * 100)}%` }}
                       ></div>
                     </div>
                   </div>
 
                   <div className="text-right">
                     <span className="text-xs text-emerald-400 font-bold block">
-                      Ce: {(dose.currentCe * 100).toFixed(0)}%
+                      Ce rel.: {dose.currentCe.toFixed(2)}×
                     </span>
-                    {dose.isCRI && (
+                    {dose.isCRI && dose.isInfusionRunning !== false && (
                       <button
                         onClick={() => onStopCRI(dose.id)}
                         className="mt-1 text-[9px] px-1.5 py-0.5 rounded bg-[#2b0c0f] text-red-300 border border-red-800/80 hover:bg-[#3d1217] transition flex items-center gap-0.5"

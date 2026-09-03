@@ -1,18 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { PatientProfile, ResuscitationState, VitalSigns } from '../../types/simulator';
+import { ActiveDrugDose, PatientProfile, ResuscitationState, VitalSigns } from '../../types/simulator';
 import { AudioSynthesizer } from '../../engine/audioSynthesizer';
+import { VETERINARY_DRUG_DATABASE } from '../../data/drugDatabase';
+import { getSpeciesDoseRange, isTimeBasedDoseUnit } from '../../engine/drugAdministration';
 import { HeartPulse, Zap, ShieldAlert, Play, Square, Syringe, Clock } from 'lucide-react';
 
 interface CPCRResuscitationPanelProps {
   patient: PatientProfile;
+  activeDoses: ActiveDrugDose[];
   vitals: VitalSigns;
   resuscitation: ResuscitationState;
   onUpdateResuscitation: (updates: Partial<ResuscitationState>) => void;
-  onAdministerQuickEmergencyDrug: (drugId: string, dosePerKg: number, route: 'IV' | 'IV_slow') => void;
+  onAdministerQuickEmergencyDrug: (drugId: string) => void;
 }
 
 export const CPCRResuscitationPanel: React.FC<CPCRResuscitationPanelProps> = ({
   patient,
+  activeDoses,
   vitals,
   resuscitation,
   onUpdateResuscitation,
@@ -23,6 +27,22 @@ export const CPCRResuscitationPanel: React.FC<CPCRResuscitationPanelProps> = ({
 
   // Recommended Shock Energy (RECOVER 2024: 2 - 4 J/kg)
   const recommendedJoules = Math.round(patient.weightKg * 3);
+
+  const quickDose = (drugId: string): { value: number; unit: string } | undefined => {
+    const drug = VETERINARY_DRUG_DATABASE.find((item) => item.id === drugId);
+    if (!drug || isTimeBasedDoseUnit(drug.doseUnit)) return undefined;
+    const range = getSpeciesDoseRange(drug, patient.species);
+    return range ? { value: range.typical, unit: drug.doseUnit } : undefined;
+  };
+  const hasActive = (predicate: (dose: ActiveDrugDose) => boolean): boolean => activeDoses.some(
+    (dose) => dose.currentCe > 0.01 && predicate(dose)
+  );
+  const hasAlpha2 = hasActive((dose) => ['dexmedetomidine', 'xylazine', 'detomidine'].includes(dose.drugId));
+  const hasOpioid = hasActive((dose) => ['morphine', 'methadone', 'fentanyl', 'butorphanol', 'buprenorphine'].includes(dose.drugId));
+  const hasBenzodiazepine = hasActive((dose) => ['midazolam', 'diazepam'].includes(dose.drugId));
+  const hasAminosteroidalNmba = hasActive((dose) => ['rocuronium', 'vecuronium'].includes(dose.drugId));
+  const hasLocalAnestheticBurden = hasActive((dose) => ['lidocaine_2pct', 'bupivacaine_05'].includes(dose.drugId));
+  const buttonDisabledClass = 'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-inherit';
 
   // CPR Timer cycle (2-minute cycles recommended by RECOVER)
   useEffect(() => {
@@ -162,35 +182,39 @@ export const CPCRResuscitationPanel: React.FC<CPCRResuscitationPanelProps> = ({
 
           <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono-code">
             <button
-              onClick={() => onAdministerQuickEmergencyDrug('epinephrine', 0.01, 'IV')}
-              className="p-1.5 rounded bg-[#2b0c0f] hover:bg-[#3d1217] border border-red-800/70 text-red-300 font-bold transition truncate"
-              title="Adrenalina dose baixa (0.01 mg/kg)"
+              onClick={() => onAdministerQuickEmergencyDrug('epinephrine')}
+              disabled={!quickDose('epinephrine')}
+              className={`p-1.5 rounded bg-[#2b0c0f] hover:bg-[#3d1217] border border-red-800/70 text-red-300 font-bold transition truncate ${buttonDisabledClass}`}
+              title="Dose típica específica da espécie cadastrada"
             >
-              ⚡ Adrenalina (0.01 mg/kg)
+              ⚡ Adrenalina {quickDose('epinephrine') ? `(${quickDose('epinephrine')?.value} ${quickDose('epinephrine')?.unit})` : '(sem faixa)'}
             </button>
 
             <button
-              onClick={() => onAdministerQuickEmergencyDrug('atropine', 0.04, 'IV')}
-              className="p-1.5 rounded bg-[#2b1708] hover:bg-[#3d210b] border border-amber-800/70 text-amber-300 font-bold transition truncate"
-              title="Atropina dose alta de PCR (0.04 mg/kg)"
+              onClick={() => onAdministerQuickEmergencyDrug('atropine')}
+              disabled={!quickDose('atropine')}
+              className={`p-1.5 rounded bg-[#2b1708] hover:bg-[#3d210b] border border-amber-800/70 text-amber-300 font-bold transition truncate ${buttonDisabledClass}`}
+              title="Dose típica específica da espécie cadastrada"
             >
-              💉 Atropina (0.04 mg/kg)
+              💉 Atropina {quickDose('atropine') ? `(${quickDose('atropine')?.value} ${quickDose('atropine')?.unit})` : '(sem faixa)'}
             </button>
 
             <button
-              onClick={() => onAdministerQuickEmergencyDrug('lidocaine_2pct', 2.0, 'IV_slow')}
-              className="p-1.5 rounded bg-[#0b1f24] hover:bg-[#112d35] border border-cyan-800/70 text-cyan-300 font-bold transition truncate"
-              title="Lidocaína 2% para VPCs/TV (2 mg/kg)"
+              onClick={() => onAdministerQuickEmergencyDrug('lidocaine_2pct')}
+              disabled={!quickDose('lidocaine_2pct')}
+              className={`p-1.5 rounded bg-[#0b1f24] hover:bg-[#112d35] border border-cyan-800/70 text-cyan-300 font-bold transition truncate ${buttonDisabledClass}`}
+              title="Dose antiarrítmica típica específica da espécie cadastrada"
             >
-              🛡️ Lidocaína 2% (2 mg/kg)
+              🛡️ Lidocaína {quickDose('lidocaine_2pct') ? `(${quickDose('lidocaine_2pct')?.value} ${quickDose('lidocaine_2pct')?.unit})` : '(sem faixa)'}
             </button>
 
             <button
-              onClick={() => onAdministerQuickEmergencyDrug('calcium_gluconate', 100.0, 'IV_slow')}
-              className="p-1.5 rounded bg-[#0f2415] hover:bg-[#15331e] border border-emerald-800/70 text-emerald-300 font-bold transition truncate"
+              onClick={() => onAdministerQuickEmergencyDrug('calcium_gluconate')}
+              disabled={!quickDose('calcium_gluconate')}
+              className={`p-1.5 rounded bg-[#0f2415] hover:bg-[#15331e] border border-emerald-800/70 text-emerald-300 font-bold transition truncate ${buttonDisabledClass}`}
               title="Gluconato de Cálcio 10% (Hipercalemia/Cardioproteção)"
             >
-              🧪 Cálcio 10% (1 ml/kg)
+              🧪 Cálcio {quickDose('calcium_gluconate') ? `(${quickDose('calcium_gluconate')?.value} ${quickDose('calcium_gluconate')?.unit})` : '(sem faixa)'}
             </button>
           </div>
 
@@ -202,37 +226,42 @@ export const CPCRResuscitationPanel: React.FC<CPCRResuscitationPanelProps> = ({
             </div>
             <div className="grid grid-cols-3 gap-1 text-[9px] font-mono-code">
               <button
-                onClick={() => onAdministerQuickEmergencyDrug('atipamezole', 0.20, 'IV')}
-                className="p-1 rounded bg-[#0c222b] hover:bg-[#12303d] border border-cyan-700/80 text-cyan-200 font-bold transition truncate"
-                title="Atipamezol Reversão de Alfa-2 (Dexmedetomidina/Xilazina)"
+                onClick={() => onAdministerQuickEmergencyDrug('atipamezole')}
+                disabled={!quickDose('atipamezole') || !hasAlpha2}
+                className={`p-1 rounded bg-[#0c222b] hover:bg-[#12303d] border border-cyan-700/80 text-cyan-200 font-bold transition truncate ${buttonDisabledClass}`}
+                title={hasAlpha2 ? 'Reversão de agonista alfa-2 ativo' : 'Nenhum agonista alfa-2 ativo'}
               >
                 🔄 Atipamezol
               </button>
               <button
-                onClick={() => onAdministerQuickEmergencyDrug('naloxone', 0.04, 'IV')}
-                className="p-1 rounded bg-[#1c0c2b] hover:bg-[#29123d] border border-purple-700/80 text-purple-200 font-bold transition truncate"
-                title="Naloxona Reversão de Opioides (Metadona/Fentanil/Morfina)"
+                onClick={() => onAdministerQuickEmergencyDrug('naloxone')}
+                disabled={!quickDose('naloxone') || !hasOpioid}
+                className={`p-1 rounded bg-[#1c0c2b] hover:bg-[#29123d] border border-purple-700/80 text-purple-200 font-bold transition truncate ${buttonDisabledClass}`}
+                title={hasOpioid ? 'Reversão de opioide ativo' : 'Nenhum opioide ativo'}
               >
                 🔄 Naloxona
               </button>
               <button
-                onClick={() => onAdministerQuickEmergencyDrug('flumazenil', 0.02, 'IV')}
-                className="p-1 rounded bg-[#1a142b] hover:bg-[#261d3f] border border-violet-700/80 text-violet-200 font-bold transition truncate"
-                title="Flumazenil Reversão de Benzodiazepínicos (Midazolam)"
+                onClick={() => onAdministerQuickEmergencyDrug('flumazenil')}
+                disabled={!quickDose('flumazenil') || !hasBenzodiazepine}
+                className={`p-1 rounded bg-[#1a142b] hover:bg-[#261d3f] border border-violet-700/80 text-violet-200 font-bold transition truncate ${buttonDisabledClass}`}
+                title={hasBenzodiazepine ? 'Reversão de benzodiazepínico ativo' : 'Nenhum benzodiazepínico ativo'}
               >
                 🔄 Flumazenil
               </button>
               <button
-                onClick={() => onAdministerQuickEmergencyDrug('sugammadex', 4.0, 'IV')}
-                className="p-1 rounded bg-[#0f2415] hover:bg-[#163620] border border-emerald-700/80 text-emerald-200 font-bold transition truncate"
-                title="Sugamadex Reversão de NMBA (Atracúrio)"
+                onClick={() => onAdministerQuickEmergencyDrug('sugammadex')}
+                disabled={!quickDose('sugammadex') || !hasAminosteroidalNmba}
+                className={`p-1 rounded bg-[#0f2415] hover:bg-[#163620] border border-emerald-700/80 text-emerald-200 font-bold transition truncate ${buttonDisabledClass}`}
+                title="Requer rocurônio/vecurônio ativo; não reverte atracúrio"
               >
                 🔄 Sugamadex
               </button>
               <button
-                onClick={() => onAdministerQuickEmergencyDrug('lipid_emulsion_20', 2.0, 'IV')}
-                className="col-span-2 p-1 rounded bg-[#2b220c] hover:bg-[#3d3112] border border-yellow-700/80 text-yellow-200 font-bold transition truncate"
-                title="Intralipid 20% Resgate Intoxicação Anestésico Local"
+                onClick={() => onAdministerQuickEmergencyDrug('lipid_emulsion_20')}
+                disabled={!quickDose('lipid_emulsion_20') || !hasLocalAnestheticBurden}
+                className={`col-span-2 p-1 rounded bg-[#2b220c] hover:bg-[#3d3112] border border-yellow-700/80 text-yellow-200 font-bold transition truncate ${buttonDisabledClass}`}
+                title={hasLocalAnestheticBurden ? 'Resgate para carga sistêmica de anestésico local' : 'Nenhum anestésico local ativo'}
               >
                 🛡️ Intralipid 20% (Lipid Sink)
               </button>

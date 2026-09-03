@@ -2,6 +2,12 @@ import { PatientProfile, SpeciesCellularParticularity, SpeciesType } from '../ty
 
 export interface SpeciesCellularConfig {
   species: SpeciesType;
+  cardiacOutputMlKgMin: number; // resting cardiac index used to scale SV/SVR across body sizes
+  muOpioidSensitivityFactor: number;
+  kappaOpioidSensitivityFactor: number;
+  gabaSensitivityFactor: number;
+  nmdaSensitivityFactor: number;
+  atropineResponseFactor: number;
   restingVagalTone: number; // 0 to 1
   splenicContractionReserve: number; // 0 to 0.25 (fraction of RBC auto-transfused during adrenergic stress)
   alpha2DReceptorExpression: boolean; // Bovine 10x hypersensitivity to alpha-2
@@ -23,6 +29,12 @@ export interface SpeciesCellularConfig {
 export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig> = {
   canine: {
     species: 'canine',
+    cardiacOutputMlKgMin: 110,
+    muOpioidSensitivityFactor: 1.05,
+    kappaOpioidSensitivityFactor: 1,
+    gabaSensitivityFactor: 1,
+    nmdaSensitivityFactor: 1,
+    atropineResponseFactor: 1,
     restingVagalTone: 0.75, // Elevated resting vagal tone
     splenicContractionReserve: 0.16, // Contraction of rich splenic capsule releases 15-20% hematocrit
     alpha2DReceptorExpression: false,
@@ -42,6 +54,12 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   },
   feline: {
     species: 'feline',
+    cardiacOutputMlKgMin: 140,
+    muOpioidSensitivityFactor: 1,
+    kappaOpioidSensitivityFactor: 0.95,
+    gabaSensitivityFactor: 1.05,
+    nmdaSensitivityFactor: 1,
+    atropineResponseFactor: 1,
     restingVagalTone: 0.30,
     splenicContractionReserve: 0.05,
     alpha2DReceptorExpression: false,
@@ -61,6 +79,12 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   },
   equine: {
     species: 'equine',
+    cardiacOutputMlKgMin: 75,
+    muOpioidSensitivityFactor: 0.85,
+    kappaOpioidSensitivityFactor: 1.1,
+    gabaSensitivityFactor: 0.95,
+    nmdaSensitivityFactor: 1,
+    atropineResponseFactor: 1,
     restingVagalTone: 0.90, // Extremely high resting vagal tone (resting HR 28-40 bpm)
     splenicContractionReserve: 0.22, // Massive splenic reservoir (can raise HCT from 32% to 50% under stress)
     alpha2DReceptorExpression: false,
@@ -74,16 +98,25 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
     ruminalFermentationGasRateLPerHour: 0,
     continuousSalivaProductionLPerDay: 12.0,
     atropineSalivaryContraindication: false,
-    opioidManiaSusceptibility: false,
+    opioidManiaSusceptibility: true,
     normalPhysiologicalSecondDegreeAVBlock: true, // Mobitz I (Wenckebach) is normal in healthy resting horse
     normalPhysiologicalSinusArrhythmia: false,
   },
   bovine: {
     species: 'bovine',
+    cardiacOutputMlKgMin: 95,
+    muOpioidSensitivityFactor: 0.9,
+    kappaOpioidSensitivityFactor: 1,
+    gabaSensitivityFactor: 1,
+    nmdaSensitivityFactor: 0.95,
+    atropineResponseFactor: 0.8,
     restingVagalTone: 0.45,
     splenicContractionReserve: 0.08,
     alpha2DReceptorExpression: true, // Specific alpha-2D subtype in ruminant brainstem
-    alpha2SensitivityFactor: 10.0, // 10x higher sensitivity/affinity for xylazine! Requires 1/10th equine dose
+    // The roughly 10-fold clinical sensitivity is already represented by the
+    // species-specific dose ranges. This residual factor models response at an
+    // equi-effective normalized dose without applying the difference twice.
+    alpha2SensitivityFactor: 1.35,
     ugt1a6Deficiency: false,
     glucuronidationClearanceMultiplier: 1.1,
     laryngealReflexSensitivity: 1.4,
@@ -99,6 +132,12 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   },
   rabbit: {
     species: 'rabbit',
+    cardiacOutputMlKgMin: 240,
+    muOpioidSensitivityFactor: 0.9,
+    kappaOpioidSensitivityFactor: 1,
+    gabaSensitivityFactor: 1.05,
+    nmdaSensitivityFactor: 1.05,
+    atropineResponseFactor: 0.2,
     restingVagalTone: 0.20,
     splenicContractionReserve: 0.04,
     alpha2DReceptorExpression: false,
@@ -118,6 +157,12 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
   },
   avian: {
     species: 'avian',
+    cardiacOutputMlKgMin: 320,
+    muOpioidSensitivityFactor: 0.8,
+    kappaOpioidSensitivityFactor: 1.15,
+    gabaSensitivityFactor: 1,
+    nmdaSensitivityFactor: 0.95,
+    atropineResponseFactor: 0.85,
     restingVagalTone: 0.15,
     splenicContractionReserve: 0.02,
     alpha2DReceptorExpression: false,

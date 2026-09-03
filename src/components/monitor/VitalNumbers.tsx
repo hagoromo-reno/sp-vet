@@ -60,11 +60,13 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
   // Format Guedel Stage cleanly without truncation
   const getGuedelDisplay = () => {
     if (vitals.isDead) return { stage: 'ÓBITO', sub: 'Sem atividade' };
-    if (vitals.anestheticDepthScore < 20) return { stage: 'Estágio I', sub: 'Consciente / Sedação Leve' };
-    if (vitals.anestheticDepthScore < 40) return { stage: 'Estágio II', sub: 'Excitação / Delírio' };
-    if (vitals.anestheticDepthScore < 55) return { stage: 'Estágio III · P1', sub: 'Anestesia Superficial' };
-    if (vitals.anestheticDepthScore < 75) return { stage: 'Estágio III · P2', sub: 'Cirúrgico Adequado' };
-    if (vitals.anestheticDepthScore < 90) return { stage: 'Estágio III · P3', sub: 'Anestesia Profunda' };
+    if (vitals.guedelStage.startsWith('Anestesia Dissociativa')) return { stage: 'Dissociativo', sub: 'Reflexos preservados' };
+    if (vitals.guedelStage.includes('Consciente')) return { stage: 'Estágio I', sub: 'Consciente / Alerta' };
+    if (vitals.guedelStage.includes('Sedação')) return { stage: 'Estágio I', sub: 'Sedação / Responsivo' };
+    if (vitals.guedelStage.includes('Excitação')) return { stage: 'Estágio II', sub: 'Excitação / Delírio' };
+    if (vitals.guedelStage.includes('Plano 1')) return { stage: 'Estágio III · P1', sub: 'Anestesia superficial' };
+    if (vitals.guedelStage.includes('Plano 2')) return { stage: 'Estágio III · P2', sub: 'Cirúrgico adequado' };
+    if (vitals.guedelStage.includes('Plano 3')) return { stage: 'Estágio III · P3', sub: 'Anestesia profunda' };
     return { stage: 'Estágio IV', sub: 'Parada Bulbar Iminente' };
   };
 
@@ -157,7 +159,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
 
           <div className="my-0.5 flex items-baseline justify-between">
             <span className={`text-3xl lg:text-4xl font-extrabold font-digital tracking-wider ${vitals.isDead ? 'text-red-500' : 'text-emerald-400'}`}>
-              {vitals.isDead || vitals.cardiacRhythm === 'asystole' ? '0' : vitals.heartRate}
+              {vitals.isDead || vitals.cardiacRhythm === 'asystole' ? '0' : Math.round(vitals.heartRate)}
             </span>
             <span className="text-[11px] font-mono-code text-emerald-500/80 uppercase truncate max-w-[110px]">
               {vitals.cardiacRhythm.replace(/_/g, ' ')}
@@ -190,7 +192,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
 
           <div className="my-0.5 flex items-baseline justify-between">
             <span className={`text-3xl lg:text-4xl font-extrabold font-digital tracking-wider ${vitals.isDead ? 'text-red-400' : 'text-cyan-400'}`}>
-              {vitals.isDead ? '---' : `${vitals.pulseOximetrySpO2}%`}
+              {vitals.isDead ? '---' : `${Math.round(vitals.pulseOximetrySpO2)}%`}
             </span>
             <span className="text-[11px] font-mono-code text-cyan-400/90 font-bold">
               PI: {vitals.perfusionIndex}%
@@ -198,7 +200,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
           </div>
 
           <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
-            <span>PaO₂ est.: <strong className="text-cyan-200">{vitals.arterialBloodGases.paO2} mmHg</strong></span>
+            <span>PaO₂ est.: <strong className="text-cyan-200">{Math.round(vitals.arterialBloodGases.paO2)} mmHg</strong></span>
             <span className="text-[9px] text-[#666666]">Oximetria</span>
           </div>
         </div>
@@ -256,13 +258,13 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
               <>
                 <div>
                   <span className="text-xl lg:text-2xl font-bold font-digital text-red-400">
-                    {vitals.isDead ? '0/0' : `${vitals.systolicBP}/${vitals.diastolicBP}`}
+                    {vitals.isDead ? '0/0' : `${Math.round(vitals.systolicBP)}/${Math.round(vitals.diastolicBP)}`}
                   </span>
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] text-[#888888] font-mono-code mr-1">PAM</span>
                   <span className="text-2xl lg:text-3xl font-extrabold font-digital text-red-400">
-                    ({vitals.isDead ? '0' : vitals.meanArterialPressure})
+                    ({vitals.isDead ? '0' : Math.round(vitals.meanArterialPressure)})
                   </span>
                 </div>
               </>
@@ -329,7 +331,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
 
           <div className="my-0.5 flex items-baseline justify-between">
             <span className="text-3xl lg:text-4xl font-extrabold font-digital text-yellow-400 tracking-wider">
-              {vitals.isDead ? '0' : vitals.etCO2}
+              {vitals.isDead ? '0' : Math.round(vitals.etCO2)}
             </span>
             <span className="text-[11px] font-mono-code text-yellow-500/90 font-bold">
               FiCO₂: {vitals.fiCO2}
@@ -337,7 +339,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
           </div>
 
           <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
-            <span>FR: <strong className="text-yellow-200 font-bold">{vitals.isDead ? '0' : vitals.respiratoryRate} rpm</strong></span>
+            <span>FR: <strong className="text-yellow-200 font-bold">{vitals.isDead ? '0' : Math.round(vitals.respiratoryRate)} rpm</strong></span>
             <span className="text-[9px] text-[#666666]">Capnografia</span>
           </div>
         </div>
@@ -362,7 +364,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
 
           <div className="my-0.5 flex items-baseline justify-between">
             <span className="text-2xl lg:text-3xl font-extrabold font-digital text-orange-400">
-              {vitals.bodyTemperatureC}°C
+              {vitals.bodyTemperatureC.toFixed(1)}°C
             </span>
             <span className="text-[10px] font-mono-code px-1.5 py-0.5 rounded bg-[#26150b] text-orange-300 border border-orange-800/40 font-bold">
               {equipment.warmingBlanketActive ? 'Aquecedor ON' : 'Aquecedor OFF'}

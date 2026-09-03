@@ -21,6 +21,11 @@ export interface HemodynamicOutputs {
   baroreceptorGain: number; // 0 to 1
   baroreceptorVagalTone: number; // -1 to +1
   myocardialIschemiaScore: number; // 0 to 1
+  criticalEventTimers: {
+    severeBradycardiaSeconds: number;
+    severeTachycardiaSeconds: number;
+    profoundHypotensionSeconds: number;
+  };
   isArrestTriggered: boolean;
   arrestType?: 'asystole' | 'ventricular_fibrillation' | 'pulseless_ventricular_tachycardia' | 'pea';
   arrestCause?: string;
@@ -46,7 +51,14 @@ export class HemodynamicCircuitEngine {
     previousMAP: number,
     previousHR: number,
     previousIschemiaScore: number,
-    ruminalBloatSeverity: number = 0
+    ruminalBloatSeverity: number = 0,
+    previousCriticalTimers: HemodynamicOutputs['criticalEventTimers'] = {
+      severeBradycardiaSeconds: 0,
+      severeTachycardiaSeconds: 0,
+      profoundHypotensionSeconds: 0,
+    },
+    previousSpO2: number = 98,
+    previousLactate: number = 1
   ): HemodynamicOutputs {
     const speciesInfo = SPECIES_DATABASE[patient.species] || SPECIES_DATABASE.canine;
     const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
@@ -59,7 +71,7 @@ export class HemodynamicCircuitEngine {
     // ----------------------------------------------------
     // Normal baseline SVR scaled by patient body weight
     // Typical dog 20kg: CO ~ 2.2 L/min, MAP ~ 85, SVR ~ (85-4)/2.2 * 80 ~ 2900 dynes
-    const baselineCOApprox = (patient.weightKg * 0.11); // ~ 110 ml/kg/min
+    const baselineCOApprox = patient.weightKg * speciesConfig.cardiacOutputMlKgMin / 1000;
     const baselineSVR = Math.round(((baseMAP - 4) / Math.max(0.1, baselineCOApprox)) * 80);
 
     // Receptors affecting vascular smooth muscle tone:
@@ -67,24 +79,30 @@ export class HemodynamicCircuitEngine {
     // Vasodilators: Beta-2, Volatile inhalants, Acepromazine (alpha-1 block), local anesthetics
     const alpha1Constriction = Math.max(0, receptors.alpha1Drive) * 0.65;
     const alpha2Constriction = Math.max(0, receptors.alpha2Drive) * 0.40;
-    const alpha1Blockade = receptors.alpha1Drive < 0 ? Math.abs(receptors.alpha1Drive) * 0.45 : 0;
-    const volatileVasodilation = Math.max(0, receptors.volatileSiteOccupancy) * 0.35;
+    const alpha1Blockade = receptors.alpha1Drive < 0 ? Math.min(1, Math.abs(receptors.alpha1Drive)) * 0.16 : 0;
+    const volatileVasodilation = Math.max(0, receptors.volatileSiteOccupancy) * 0.18;
     const beta2Dilation = Math.max(0, receptors.beta2Drive) * 0.25;
+    const calibratedPressureDilation = Math.max(0, -receptors.directBloodPressureEffect) * 0.10;
+    const calibratedPressureSupport = Math.max(0, receptors.directBloodPressureEffect) * 0.16;
+    const acuteVasodilation = receptors.acuteBolusHypotension * 0.28 + receptors.histamineRelease * 0.22;
 
     // Sepsis pathology vasodilation
     const sepsisDilation = patient.pathologyConditions.sepsisVasodilation ? 0.45 : 0;
 
     const netVascularResistanceFactor = Math.max(
       0.35,
-      1.0 + alpha1Constriction + alpha2Constriction - alpha1Blockade - volatileVasodilation - beta2Dilation - sepsisDilation
+      1.0 + alpha1Constriction + alpha2Constriction + calibratedPressureSupport
+        - alpha1Blockade - volatileVasodilation - beta2Dilation - calibratedPressureDilation
+        - acuteVasodilation
     );
     const SVR = Math.round(baselineSVR * netVascularResistanceFactor);
 
     // ----------------------------------------------------
     // 2. PRELOAD & VENOUS RETURN (END-DIASTOLIC VOLUME)
     // ----------------------------------------------------
-    // Baseline stroke volume ~ 1.0 - 1.5 ml/kg
-    const baselineSV = patient.weightKg * 1.25;
+    // SV is derived from a species-scaled resting cardiac index. Using a fixed
+    // mL/kg stroke volume made pressure/CO impossible for horses, cattle and birds.
+    const baselineSV = (baselineCOApprox * 1000) / Math.max(1, baseHR);
     let bloodVolumeRatio = 1.0;
 
     if (patient.pathologyConditions.hypovolemiaSeverity) {
@@ -109,6 +127,16 @@ export class HemodynamicCircuitEngine {
     if (ruminalBloatSeverity > 0.15) {
       bloodVolumeRatio = Math.max(0.40, bloodVolumeRatio - ruminalBloatSeverity * 0.45);
     }
+
+    // Alpha-1 blockade and general anesthetics dilate the venous capacitance bed.
+    // This prevents the previous non-physiological rise in stroke volume after acepromazine.
+    const venousPooling =
+      Math.min(1, Math.abs(Math.min(0, receptors.alpha1Drive))) * 0.22 +
+      receptors.hypnoticEffect * 0.12 +
+      calibratedPressureDilation * 0.45 +
+      acuteVasodilation * 0.25;
+    bloodVolumeRatio = Math.max(0.3, bloodVolumeRatio - venousPooling);
+    bloodVolumeRatio = Math.min(1.4, bloodVolumeRatio + receptors.volumeExpansion * 0.28);
 
     // Effective circulating preload
     const preloadEDV = baselineSV * 1.5 * Math.max(0.3, bloodVolumeRatio);
@@ -143,17 +171,18 @@ export class HemodynamicCircuitEngine {
     // SV = (Preload * Inotropy) / (1 + AfterloadRatio * 0.5)
     const afterloadRatio = SVR / baselineSVR;
     let computedSV = (preloadEDV * 0.65 * inotropyFactor) / (0.4 + afterloadRatio * 0.6);
-    computedSV = Math.max(1.0, Math.min(baselineSV * 2.2, computedSV));
-    const strokeVolumeMl = Number(computedSV.toFixed(1));
+    computedSV = Math.max(baselineSV * 0.12, Math.min(baselineSV * 2.2, computedSV));
+    let strokeVolumeMl = computedSV;
 
     // ----------------------------------------------------
     // ----------------------------------------------------
     // 5. BARORECEPTOR REFLEX CONTROL LOOP (PHYSIOLOGICALLY DAMPED)
     // ----------------------------------------------------
     // Sensitivity / Gain of the Baroreceptor reflex (attenuated by depth/volatile agents)
-    const volatileSuppression = Math.max(0, receptors.volatileSiteOccupancy) * 0.55;
-    const propofolSuppression = receptors.propofolSiteOccupancy * 0.40;
-    const baroreceptorGain = Math.max(0.08, 1.0 - volatileSuppression - propofolSuppression);
+    const volatileSuppression = Math.max(0, receptors.volatileSiteOccupancy) * 0.38;
+    const propofolSuppression = receptors.propofolSiteOccupancy * 0.30;
+    const sedativeSuppression = receptors.centralSedation * 0.18 + Math.max(0, receptors.alpha2Drive) * 0.18;
+    const baroreceptorGain = Math.max(0.08, 1.0 - volatileSuppression - propofolSuppression - sedativeSuppression);
 
     // Sigmoidal normalized MAP deviation from baseline (prevents algebraic loop resonance)
     const rawMapError = (previousMAP > 0 ? previousMAP : baseMAP) - baseMAP;
@@ -175,19 +204,18 @@ export class HemodynamicCircuitEngine {
     autonomicHRMultiplier += receptors.beta1Drive * 0.55;
     autonomicHRMultiplier -= receptors.m2Drive * 0.50;
     autonomicHRMultiplier -= receptors.alpha2Drive * 0.40;
+    autonomicHRMultiplier += receptors.directHeartRateEffect * 0.18;
+    autonomicHRMultiplier -= receptors.acuteBolusBradycardia * 0.28;
+    autonomicHRMultiplier -= receptors.hyperkalemicCardiotoxicity * 0.30;
 
     // Baroreceptor feedback contribution (smoothly bounded)
     autonomicHRMultiplier += baroreceptorEffector;
 
-    // Anticholinergic unmasking (Atropine / Glycopyrrolate blocks M2 vagal tone)
-    if (receptors.m2Drive < -0.3) {
-      autonomicHRMultiplier += Math.abs(receptors.m2Drive) * 0.30;
-    }
-
     // Surgical stimulation tachycardia if nociception or depth is insufficient
     if (isSurgicalStimulationActive) {
       const nociceptiveDeficit = Math.max(0, 1.0 - receptors.nociceptiveInhibition);
-      const depthDeficit = receptors.gabaAChlorideConductance < 1.0 ? 1.0 - receptors.gabaAChlorideConductance : 0;
+      const effectiveUnconsciousness = Math.max(receptors.hypnoticEffect, receptors.dissociativeEffect);
+      const depthDeficit = Math.max(0, 1.0 - effectiveUnconsciousness);
       autonomicHRMultiplier += (nociceptiveDeficit * 0.30 + depthDeficit * 0.15);
     }
 
@@ -205,7 +233,14 @@ export class HemodynamicCircuitEngine {
     // Eliminates 100ms numerical limit-cycle flickering
     const hrSmoothingAlpha = 1.0 - Math.exp(-dtSeconds / 1.8);
     const effectiveHR = previousHR > 0 ? (previousHR + (targetHR - previousHR) * hrSmoothingAlpha) : targetHR;
-    const finalHR = Math.round(effectiveHR);
+    const finalHR = Number(effectiveHR.toFixed(3));
+
+    // Very high rates shorten diastole and reduce preload instead of increasing CO forever.
+    if (effectiveHR > baseHR * 1.2) {
+      const fillingPenalty = 1 / (1 + ((effectiveHR / baseHR) - 1.2) * 0.75);
+      strokeVolumeMl *= Math.max(0.42, fillingPenalty);
+    }
+    strokeVolumeMl = Number(strokeVolumeMl.toFixed(3));
 
     // ----------------------------------------------------
     // 7. CARDIAC OUTPUT & ARTERIAL PRESSURE
@@ -220,11 +255,20 @@ export class HemodynamicCircuitEngine {
     // Low-pass filter MAP to eliminate high-frequency flickering
     const mapSmoothingAlpha = 1.0 - Math.exp(-dtSeconds / 1.4);
     const smoothedMAP = previousMAP > 0 ? (previousMAP + (rawMAP - previousMAP) * mapSmoothingAlpha) : rawMAP;
-    const finalMAP = Math.round(smoothedMAP);
+    const finalMAP = Number(smoothedMAP.toFixed(3));
     const targetMAP = finalMAP;
 
     // Pulse pressure based on stroke volume and arterial compliance
-    const pulsePressure = Math.max(16, Math.round(strokeVolumeMl * 0.85 * (SVR / baselineSVR)));
+    const baselinePulsePressure = Math.max(
+      18,
+      ((speciesInfo.normalVitals.sysBpMin + speciesInfo.normalVitals.sysBpMax) / 2) -
+        ((speciesInfo.normalVitals.diaBpMin + speciesInfo.normalVitals.diaBpMax) / 2)
+    );
+    const normalizedStrokeVolume = strokeVolumeMl / Math.max(0.001, baselineSV);
+    const pulsePressure = Math.max(
+      12,
+      Math.round(baselinePulsePressure * normalizedStrokeVolume * Math.sqrt(Math.max(0.25, SVR / baselineSVR)))
+    );
     let sysBP = Math.round(smoothedMAP + pulsePressure * 0.55);
     let diaBP = Math.round(Math.max(10, smoothedMAP - pulsePressure * 0.45));
 
@@ -240,20 +284,28 @@ export class HemodynamicCircuitEngine {
     const cpp = Math.max(0, diaBP - 8);
     const coronaryAdequacy = cpp / Math.max(1, baseMAP * 0.6);
 
-    let ischemRate = 0;
+    let ischemRatePerMinute = 0;
     if (demandRatio > 1.8 && coronaryAdequacy < 1.1) {
       // Severe mismatch (e.g. Alpha-2 peripheral constriction + Atropine tachycardia)
-      ischemRate = 0.08 * (demandRatio - 1.5);
-    } else if (targetMAP < speciesConfig.criticalMapThresholdMmHg) {
-      // Coronary hypoperfusion
-      const deficit = speciesConfig.criticalMapThresholdMmHg - targetMAP;
-      ischemRate = 0.04 * (deficit / 20.0);
+      ischemRatePerMinute = 0.08 * (demandRatio - 1.5);
+    } else if (targetMAP < Math.max(32, baseMAP * 0.52)) {
+      // Coronary hypoperfusion is distinct from the higher equine MAP target used
+      // to prevent dependent-muscle/nerve injury during prolonged recumbency.
+      const myocardialCriticalMap = Math.max(32, baseMAP * 0.52);
+      const deficit = myocardialCriticalMap - targetMAP;
+      ischemRatePerMinute = 0.04 * (deficit / 20.0);
     } else if (previousIschemiaScore > 0) {
       // Recovery
-      ischemRate = -0.015;
+      ischemRatePerMinute = -0.015;
     }
 
-    const myocardialIschemiaScore = Math.min(1.0, Math.max(0, previousIschemiaScore + ischemRate * dtSeconds));
+    if (previousSpO2 < 80) ischemRatePerMinute += 0.12 * ((80 - previousSpO2) / 20);
+    if (previousLactate > 5) ischemRatePerMinute += 0.06 * ((previousLactate - 5) / 5);
+
+    const myocardialIschemiaScore = Math.min(1.0, Math.max(
+      0,
+      previousIschemiaScore + ischemRatePerMinute * (dtSeconds / 60) + receptors.acuteBolusArrhythmia * 0.0015 * dtSeconds
+    ));
 
     // ----------------------------------------------------
     // 9. CARDIAC RHYTHM DETERMINATION
@@ -271,8 +323,10 @@ export class HemodynamicCircuitEngine {
       rhythm = 'ventricular_fibrillation';
     } else if (myocardialIschemiaScore > 0.40) {
       rhythm = 'ventricular_tachycardia';
-    } else if (myocardialIschemiaScore > 0.20 || patient.pathologyConditions.gastricDilatationVolvulus) {
+    } else if (myocardialIschemiaScore > 0.20 || receptors.acuteBolusArrhythmia > 0.55 || patient.pathologyConditions.gastricDilatationVolvulus) {
       rhythm = 'ventricular_premature_complexes';
+    } else if (receptors.hyperkalemicCardiotoxicity > 0.72) {
+      rhythm = 'av_block_3rd_degree';
     } else if (speciesConfig.normalPhysiologicalSecondDegreeAVBlock && targetHR < baseHR * 0.95 && receptors.beta1Drive < 0.2) {
       // Normal Equine high vagal tone
       rhythm = 'av_block_2nd_degree';
@@ -289,17 +343,29 @@ export class HemodynamicCircuitEngine {
       rhythm = 'sinus';
     }
 
-    // B. Critical Bradycardia Arrest
-    const fatalBradyThreshold = patient.species === 'canine' ? 24 : patient.species === 'feline' ? 50 : patient.species === 'equine' ? 12 : 18;
-    if (targetHR <= fatalBradyThreshold && simTimeSeconds > 20) {
+    // B-D. Critical states must persist; global simulation time is not a duration.
+    const legacyTachyThreshold = patient.species === 'canine' ? 250 : patient.species === 'feline' ? 285 : patient.species === 'equine' ? 120 : 165;
+    const fatalBradyThreshold = Math.max(8, speciesInfo.normalVitals.hrMin * 0.35);
+    const fatalTachyThreshold = Math.max(legacyTachyThreshold, speciesInfo.normalVitals.hrMax * 1.55);
+    const criticalEventTimers = {
+      severeBradycardiaSeconds: targetHR <= fatalBradyThreshold
+        ? previousCriticalTimers.severeBradycardiaSeconds + dtSeconds
+        : Math.max(0, previousCriticalTimers.severeBradycardiaSeconds - dtSeconds * 2),
+      severeTachycardiaSeconds: targetHR >= fatalTachyThreshold
+        ? previousCriticalTimers.severeTachycardiaSeconds + dtSeconds
+        : Math.max(0, previousCriticalTimers.severeTachycardiaSeconds - dtSeconds * 2),
+      profoundHypotensionSeconds: targetMAP < 20
+        ? previousCriticalTimers.profoundHypotensionSeconds + dtSeconds
+        : Math.max(0, previousCriticalTimers.profoundHypotensionSeconds - dtSeconds * 2),
+    };
+
+    if (criticalEventTimers.severeBradycardiaSeconds >= 12) {
       isArrestTriggered = true;
       arrestType = 'asystole';
       arrestCause = `Assistolia Terminal por Bradicardia Refratária (FC ${Math.round(targetHR)} bpm)`;
     }
 
-    // C. Extreme Tachycardia / PEA Collapse
-    const fatalTachyThreshold = patient.species === 'canine' ? 250 : patient.species === 'feline' ? 285 : patient.species === 'equine' ? 120 : 165;
-    if (targetHR >= fatalTachyThreshold && simTimeSeconds > 20) {
+    if (criticalEventTimers.severeTachycardiaSeconds >= 10) {
       isArrestTriggered = true;
       arrestType = 'ventricular_fibrillation';
       arrestCause = `Taquiarritmia e Fibrilação Ventricular Terminal (FC crítica ${Math.round(targetHR)} bpm com perda de enchimento diastólico)`;
@@ -313,7 +379,7 @@ export class HemodynamicCircuitEngine {
     }
 
     // E. Terminal Hypotension Collapse
-    if (targetMAP < 20 && simTimeSeconds > 30) {
+    if (criticalEventTimers.profoundHypotensionSeconds >= 18) {
       isArrestTriggered = true;
       arrestType = 'pea';
       arrestCause = 'Parada Cardíaca por Choque Irreversível e Ausência de Perfusão Sistêmica (PAM < 20 mmHg)';
@@ -332,14 +398,22 @@ export class HemodynamicCircuitEngine {
       cardiacRhythm: rhythm,
       systolicBP: Math.round(sysBP),
       diastolicBP: Math.round(diaBP),
-      meanArterialPressure: Math.round(targetMAP),
+      // Preserve solver precision between frames. Rounding here made the closed
+      // baroreflex converge to different equilibria at 0.1 s versus 1-2 s steps;
+      // presentation components remain responsible for integer display.
+      meanArterialPressure: Number(targetMAP.toFixed(3)),
       cardiacOutputLMin,
       strokeVolumeMl,
       systemicVascularResistanceDyne: SVR,
       inotropicStateEmax,
       baroreceptorGain: Number(baroreceptorGain.toFixed(2)),
       baroreceptorVagalTone: Number(baroreceptorEffector.toFixed(2)),
-      myocardialIschemiaScore: Number(myocardialIschemiaScore.toFixed(2)),
+      myocardialIschemiaScore: Number(myocardialIschemiaScore.toFixed(5)),
+      criticalEventTimers: {
+        severeBradycardiaSeconds: Number(criticalEventTimers.severeBradycardiaSeconds.toFixed(3)),
+        severeTachycardiaSeconds: Number(criticalEventTimers.severeTachycardiaSeconds.toFixed(3)),
+        profoundHypotensionSeconds: Number(criticalEventTimers.profoundHypotensionSeconds.toFixed(3)),
+      },
       isArrestTriggered,
       arrestType,
       arrestCause,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { PatientProfile, VitalSigns } from '../../types/simulator';
 import {
   Activity,
@@ -36,6 +36,44 @@ export const CellularPhysiologyModal: React.FC<CellularPhysiologyModalProps> = (
   const cellular = vitals.cellularState;
   const particularities = cellular?.speciesParticularities || [];
   const interactions = vitals.activeDrugInteractions || [];
+  const clinicalEffectAxes = [
+    {
+      label: 'Tranquilização',
+      value: cellular?.centralSedation ?? 0,
+      detail: 'Diminuição de alerta, sem implicar inconsciência',
+      color: '#a78bfa',
+    },
+    {
+      label: 'Hipnose',
+      value: cellular?.hypnoticEffect ?? 0,
+      detail: 'Depressão cortical por anestésicos gerais',
+      color: '#22d3ee',
+    },
+    {
+      label: 'Dissociação',
+      value: cellular?.dissociativeEffect ?? 0,
+      detail: 'Estado NMDA com reflexos parcialmente preservados',
+      color: '#f472b6',
+    },
+    {
+      label: 'Relaxamento',
+      value: cellular?.muscleRelaxation ?? 0,
+      detail: 'Tônus muscular; não representa analgesia',
+      color: '#60a5fa',
+    },
+    {
+      label: 'Depressão respiratória',
+      value: cellular?.respiratoryDepression ?? 0,
+      detail: 'Integração bulbar, opioide e hipnótica',
+      color: '#fb923c',
+    },
+    {
+      label: 'Bloqueio regional',
+      value: cellular?.localNeuralBlockade ?? 0,
+      detail: 'Bloqueio NaV local, separado da exposição sistêmica',
+      color: '#34d399',
+    },
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -190,6 +228,34 @@ export const CellularPhysiologyModal: React.FC<CellularPhysiologyModalProps> = (
                 Barorreflexo: {cellular?.baroreceptorGain?.toFixed(2) ?? '1.0'}x
               </span>
               <span className="text-[9px] text-[#717182]">Tônus arteriolar sistêmico</span>
+            </div>
+          </div>
+
+          {/* Clinical effect axes are intentionally separate: sedation is not hypnosis,
+              paralysis is not anesthesia, and regional block is not systemic toxicity. */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-bold text-white">Eixos clínicos integrados</h3>
+              <span className="text-[10px] text-[#717182] font-mono">
+                MAC efetor: {cellular?.volatileAnestheticMac?.toFixed(2) ?? '0.00'} · Poupança: {Math.round((cellular?.macSparingFraction ?? 0) * 100)}%
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {clinicalEffectAxes.map((axis) => (
+                <div key={axis.label} className="p-3 rounded-xl bg-[#111118] border border-[#232330] space-y-2">
+                  <div className="flex items-baseline justify-between gap-1">
+                    <span className="text-[10px] text-[#a9a9ba] font-semibold leading-tight">{axis.label}</span>
+                    <span className="text-sm font-mono font-bold text-white">{Math.round(axis.value * 100)}%</span>
+                  </div>
+                  <div className="w-full bg-[#20202d] rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="h-full transition-all duration-300"
+                      style={{ width: `${Math.min(100, axis.value * 100)}%`, backgroundColor: axis.color }}
+                    />
+                  </div>
+                  <p className="text-[9px] leading-snug text-[#717182]">{axis.detail}</p>
+                </div>
+              ))}
             </div>
           </div>
 

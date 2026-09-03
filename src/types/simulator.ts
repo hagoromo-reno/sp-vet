@@ -100,6 +100,10 @@ export interface DrugReceptorProfile {
   m2?: TargetAffinity;
   m3?: TargetAffinity;
   nm?: TargetAffinity; // Neuromuscular nicotinic
+  // Central arousal / tranquilization targets
+  dopamineD2?: TargetAffinity;
+  histamineH1?: TargetAffinity;
+  serotonin2?: TargetAffinity;
   // GABA-A Allosteric Complex
   gabaA?: {
     bzdAllosteric?: number; // 0 to 1
@@ -136,6 +140,16 @@ export interface CellularBiophysicsState {
   chlorideConductanceGabaA: number; // baseline 0.1, surgical 1.0-2.5, coma > 3.5
   nociceptiveInhibition: number; // 0 to 1 (analgesia index)
   nmbaReceptorBlockade: number; // 0 to 1 (motor endplate blockade)
+  centralSedation: number; // 0 to 1 (tranquilization while still arousable)
+  hypnoticEffect: number; // 0 to 1 (loss of consciousness from general anesthetics)
+  dissociativeEffect: number; // 0 to 1 (NMDA-mediated dissociative anesthesia)
+  muscleRelaxation: number; // 0 to 1
+  respiratoryDepression: number; // 0 to 1 integrated bulbar/ventilatory depression
+  macSparingFraction: number; // 0 to 0.75 reduction in volatile requirement
+  volatileAnestheticMac: number; // end-organ volatile exposure in species MAC multiples
+  localNeuralBlockade: number; // 0 to 1 regional/perineural NaV blockade
+  systemicNaVBlockade: number; // 0 to 1 circulating NaV exposure
+  electrolyteCardiotoxicity: number; // 0 to 1 net hyperkalemic membrane instability
   cardiacOutputLMin: number; // L/min (HR * SV / 1000)
   strokeVolumeMl: number; // mL
   systemicVascularResistanceDyne: number; // dynes*s/cm^5
@@ -143,6 +157,7 @@ export interface CellularBiophysicsState {
   baroreceptorGain: number; // sensitivity (0 = suppressed by anesthesia, 1.0 = fully responsive)
   baroreceptorVagalTone: number; // -1 to +1
   pulmonaryShuntFractionPct: number; // Qs/Qt (%)
+  dependentMyopathyRisk: number; // 0 to 1, especially relevant to recumbent equids
   speciesParticularities: SpeciesCellularParticularity[];
 }
 
@@ -153,8 +168,10 @@ export interface DrugDefinition {
   category: DrugCategory;
   description: string;
   defaultConcentrationMgMl: number; // mg/ml (or mcg/ml, or % for fluids/inhalants)
+  /** Concentration expressed in the displayed dose unit per mL (for mEq products). */
+  concentrationInDoseUnitPerMl?: number;
   unit: 'mg' | 'mcg' | 'g' | 'ml' | '%' | 'UI' | 'mEq';
-  doseUnit: 'mg/kg' | 'mcg/kg' | 'mg/kg/h' | 'mcg/kg/min' | 'ml/kg' | 'ml/kg/h' | '%' | 'UI/kg' | 'mEq/kg';
+  doseUnit: 'mg/kg' | 'mcg/kg' | 'mg/kg/h' | 'mcg/kg/min' | 'ml/kg' | 'ml/kg/h' | '%' | 'UI/kg' | 'mEq/kg' | 'mEq/kg/h';
   recommendedDose: {
     canine: { min: number; max: number; typical: number };
     feline: { min: number; max: number; typical: number };
@@ -224,8 +241,11 @@ export interface ActiveDrugDose {
   isFullyDelivered?: boolean;
   isFastBolusShockTriggered?: boolean;
   isCRI?: boolean;
+  isInfusionRunning?: boolean;
   criRatePerKgMin?: number;
   criRateMlPerHour?: number;
+  bolusShockMagnitude?: number;
+  bolusShockRemainingSec?: number;
   currentCe: number; // Effect-site concentration (0 to 1 normalized)
   currentCp: number; // Plasma concentration
 }
@@ -305,6 +325,7 @@ export interface VitalSigns {
     | 'Estágio III Plano 1 (Leve)'
     | 'Estágio III Plano 2 (Cirúrgico)'
     | 'Estágio III Plano 3 (Profundo)'
+    | 'Anestesia Dissociativa (Reflexos Preservados)'
     | 'Estágio IV (Depressão Bulbar / Parada)';
   eyePosition: EyePosition;
   palpebralReflex: ReflexStrength;
@@ -355,6 +376,11 @@ export interface VitalSigns {
   barotraumaCollapse: boolean;
   felineLidocaineToxicity: boolean;
   bovineBloatRespiratoryRestriction: boolean;
+  criticalEventTimers: {
+    severeBradycardiaSeconds: number;
+    severeTachycardiaSeconds: number;
+    profoundHypotensionSeconds: number;
+  };
   cellularState: CellularBiophysicsState;
 }
 

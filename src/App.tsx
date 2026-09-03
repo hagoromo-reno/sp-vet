@@ -11,7 +11,15 @@ import {
 } from './types/simulator';
 import { PRESET_SCENARIOS } from './data/scenarios';
 import { SPECIES_DATABASE } from './data/speciesData';
+import { VETERINARY_DRUG_DATABASE } from './data/drugDatabase';
 import { PKPDEngine } from './engine/pkpdEngine';
+import {
+  calculateAdministration,
+  getRoutePharmacokinetics,
+  getSpeciesDoseRange,
+  isTimeBasedDoseUnit,
+  validateAdministrationCommand,
+} from './engine/drugAdministration';
 import { AudioSynthesizer } from './engine/audioSynthesizer';
 import { CanvasWaveforms } from './components/monitor/CanvasWaveforms';
 import { VitalNumbers } from './components/monitor/VitalNumbers';
@@ -212,9 +220,9 @@ export default function App() {
       if (isNibpMeasuring && newSimTime - nibpMeasureStartRef.current >= 3.0) {
         setIsNibpMeasuring(false);
         setLastNibpMeasurement({
-          sys: vitals.systolicBP,
-          dia: vitals.diastolicBP,
-          map: vitals.meanArterialPressure,
+          sys: Math.round(vitals.systolicBP),
+          dia: Math.round(vitals.diastolicBP),
+          map: Math.round(vitals.meanArterialPressure),
           timestampSimSec: newSimTime,
         });
       }
@@ -290,14 +298,14 @@ export default function App() {
           {
             simTimeSeconds: newSimTime,
             timeLabel,
-            hr: newVitals.heartRate,
-            sysBP: newVitals.systolicBP,
-            diaBP: newVitals.diastolicBP,
-            map: newVitals.meanArterialPressure,
-            spo2: newVitals.pulseOximetrySpO2,
-            etco2: newVitals.etCO2,
-            rr: newVitals.respiratoryRate,
-            tempC: newVitals.bodyTemperatureC,
+            hr: Math.round(newVitals.heartRate),
+            sysBP: Math.round(newVitals.systolicBP),
+            diaBP: Math.round(newVitals.diastolicBP),
+            map: Math.round(newVitals.meanArterialPressure),
+            spo2: Math.round(newVitals.pulseOximetrySpO2),
+            etco2: Math.round(newVitals.etCO2),
+            rr: Math.round(newVitals.respiratoryRate),
+            tempC: Number(newVitals.bodyTemperatureC.toFixed(1)),
             vaporizerPct: equipment.vaporizerDialPct,
             depthScore: newVitals.anestheticDepthScore,
           },
@@ -321,8 +329,8 @@ export default function App() {
   ]);
 
   // RESET SIMULATION
-  const handleResetSimulation = () => {
-    const defaultSpeciesInfo = SPECIES_DATABASE[patient.species];
+  const resetSimulationForPatient = (targetPatient: PatientProfile) => {
+    const defaultSpeciesInfo = SPECIES_DATABASE[targetPatient.species];
     const freshEquipment: AnesthesiaEquipmentState = {
       oxygenFlowLMin: 1.5,
       nitrousOxideFlowLMin: 0.0,
@@ -341,7 +349,7 @@ export default function App() {
       isVentilatorActive: false,
       ventilatorSettings: {
         rateBpm: defaultSpeciesInfo.normalVitals.rrTypical,
-        tidalVolumeMl: Math.round(patient.weightKg * 12),
+        tidalVolumeMl: Math.round(targetPatient.weightKg * 12),
         peepCmH2O: 0,
         ieRatio: '1:2',
         pipPressureLimitCmH2O: 18,
@@ -370,7 +378,7 @@ export default function App() {
     const { vitals: freshVitals } = PKPDEngine.stepSimulation(
       0.1,
       0,
-      patient,
+      targetPatient,
       [],
       freshEquipment,
       freshResuscitation,
@@ -396,7 +404,7 @@ export default function App() {
     setFeedbackToast({
       id: `reset_${Date.now()}`,
       title: 'Caso Reiniciado do Início',
-      message: `Simulação para ${patient.name} (${patient.species.toUpperCase()}) retornou ao estado basal (00:00).`,
+      message: `Simulação para ${targetPatient.name} (${targetPatient.species.toUpperCase()}) retornou ao estado basal (00:00).`,
       type: 'airway',
     });
 
@@ -406,11 +414,13 @@ export default function App() {
         simTimeSeconds: 0,
         realTimestamp: new Date().toLocaleTimeString(),
         type: 'system',
-        message: `Simulação reiniciada para ${patient.name} (${patient.species.toUpperCase()})`,
+        message: `Simulação reiniciada para ${targetPatient.name} (${targetPatient.species.toUpperCase()})`,
         severity: 'normal',
       },
     ]);
   };
+
+  const handleResetSimulation = () => resetSimulationForPatient(patient);
 
   // QUICK MANUAL BREATH TRIGGER (Apertar Balão)
   const handleTriggerManualBreath = () => {
@@ -486,23 +496,59 @@ export default function App() {
   const handleSelectScenario = (newPatient: PatientProfile) => {
     setPatient(newPatient);
     setIsScenarioModalOpen(false);
-    handleResetSimulation();
+    resetSimulationForPatient(newPatient);
   };
 
   // ADMINISTER DRUG
   const handleAdministerDrug = (
     doseData: Omit<ActiveDrugDose, 'id' | 'administeredAtSimTime' | 'peakEffectSimTime' | 'currentCe' | 'currentCp' | 'deliveryElapsedSec' | 'isFullyDelivered' | 'isFastBolusShockTriggered'>
   ) => {
+    const drugDefinition = VETERINARY_DRUG_DATABASE.find((drug) => drug.id === doseData.drugId);
+    if (!drugDefinition) {
+      setEventLogs((prev) => [...prev, {
+        id: `drug_rejected_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'system',
+        message: `Administração rejeitada: fármaco desconhecido (${doseData.drugId}).`,
+        severity: 'danger',
+      }]);
+      return;
+    }
+    const validationErrors = validateAdministrationCommand(patient, drugDefinition, {
+      route: doseData.route,
+      administrationSpeed: doseData.administrationSpeed,
+      isCRI: doseData.isCRI,
+      dosePerKg: doseData.dosePerKg,
+    });
+    if (validationErrors.length > 0) {
+      setEventLogs((prev) => [...prev, {
+        id: `drug_rejected_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'system',
+        message: `Administração rejeitada: ${drugDefinition.name}.`,
+        details: validationErrors.join(' '),
+        severity: 'danger',
+      }]);
+      return;
+    }
+    const defaultTransitLag = drugDefinition
+      ? getRoutePharmacokinetics(drugDefinition, doseData.route).transitLagSeconds
+      : 20;
     const newDose: ActiveDrugDose = {
       ...doseData,
       id: `dose_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       administeredAtSimTime: simTimeSeconds,
-      peakEffectSimTime: simTimeSeconds + 60,
+      peakEffectSimTime: simTimeSeconds + (drugDefinition?.onsetMinutes || 1) * 60,
       deliveryElapsedSec: 0,
-      deliveryDurationSec: doseData.deliveryDurationSec || (doseData.administrationSpeed === 'bolus_rapid' ? 4 : 60),
-      transitLagRemainingSec: doseData.transitLagRemainingSec !== undefined ? doseData.transitLagRemainingSec : 20,
+      deliveryDurationSec: doseData.deliveryDurationSec ?? (doseData.administrationSpeed === 'bolus_rapid' ? 4 : 60),
+      transitLagRemainingSec: doseData.transitLagRemainingSec ?? defaultTransitLag,
       isFullyDelivered: false,
       isFastBolusShockTriggered: false,
+      isInfusionRunning: doseData.isCRI ? doseData.isInfusionRunning !== false : false,
+      bolusShockMagnitude: 0,
+      bolusShockRemainingSec: 0,
       currentCp: 0, // starts at zero and is absorbed/infused based on transit lag and bolus speed
       currentCe: 0,
     };
@@ -525,7 +571,9 @@ export default function App() {
   };
 
   const handleStopCRI = (doseId: string) => {
-    setActiveDoses((prev) => prev.filter((d) => d.id !== doseId));
+    setActiveDoses((prev) => prev.map((dose) => dose.id === doseId
+      ? { ...dose, isInfusionRunning: false, criRatePerKgMin: 0 }
+      : dose));
     setEventLogs((prev) => [
       ...prev,
       {
@@ -533,7 +581,7 @@ export default function App() {
         simTimeSeconds,
         realTimestamp: new Date().toLocaleTimeString(),
         type: 'drug',
-        message: `Infusão contínua (CRI) interrompida.`,
+        message: `Infusão contínua (CRI) interrompida; concentração residual em washout.`,
         severity: 'warning',
       },
     ]);
@@ -626,23 +674,44 @@ export default function App() {
   };
 
   // QUICK EMERGENCY DRUG
-  const handleAdministerQuickEmergencyDrug = (
-    drugId: string,
-    dosePerKg: number,
-    route: 'IV' | 'IV_slow'
-  ) => {
-    const drugName = drugId === 'epinephrine' ? 'Epinefrina (Adrenalina)' :
-      drugId === 'atropine' ? 'Sulfato de Atropina' :
-      drugId === 'lidocaine_2pct' ? 'Lidocaína 2%' : 'Gluconato de Cálcio 10%';
+  const handleAdministerQuickEmergencyDrug = (drugId: string) => {
+    const drug = VETERINARY_DRUG_DATABASE.find((item) => item.id === drugId);
+    if (!drug) return;
+    const range = getSpeciesDoseRange(drug, patient.species);
+    if (!range || isTimeBasedDoseUnit(drug.doseUnit)) {
+      setEventLogs((prev) => [...prev, {
+        id: `quick_drug_rejected_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'system',
+        message: `Atalho indisponível para ${drug.name} em ${patient.species}.`,
+        details: 'Não existe dose rápida específica validada para esta espécie/contexto.',
+        severity: 'danger',
+      }]);
+      return;
+    }
+    const route = drug.supportedRoutes.includes('IV')
+      ? 'IV'
+      : drug.supportedRoutes.includes('IV_slow')
+        ? 'IV_slow'
+        : undefined;
+    if (!route) return;
+    const dosePerKg = range.typical;
+    const calculated = calculateAdministration(drug, dosePerKg, patient.weightKg);
+    const speed = route === 'IV' ? 'bolus_rapid' : 'bolus_slow';
 
     handleAdministerDrug({
       drugId,
-      drugName,
-      category: 'emergency_inotrope',
+      drugName: drug.name,
+      category: drug.category,
       route,
-      doseAmount: Number((dosePerKg * patient.weightKg).toFixed(2)),
+      administrationSpeed: speed,
+      doseAmount: calculated.doseAmount,
       dosePerKg,
-      volumeMl: Number(((dosePerKg * patient.weightKg) / 1.0).toFixed(2)),
+      volumeMl: calculated.volumeMl,
+      deliveryDurationSec: speed === 'bolus_rapid' ? 4 : 60,
+      transitLagRemainingSec: getRoutePharmacokinetics(drug, route).transitLagSeconds,
+      isCRI: false,
     });
   };
 
@@ -1005,6 +1074,7 @@ export default function App() {
             {activeTab === 'emergency_cpr' && (
               <CPCRResuscitationPanel
                 patient={patient}
+                activeDoses={activeDoses}
                 vitals={vitals}
                 resuscitation={resuscitation}
                 onUpdateResuscitation={(updates) => setResuscitation((prev) => ({ ...prev, ...updates }))}
