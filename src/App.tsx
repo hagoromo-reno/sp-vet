@@ -42,8 +42,13 @@ import { CellularPhysiologyModal } from './components/monitor/CellularPhysiology
 import { AirwayQuickBar } from './components/airway/AirwayQuickBar';
 import { AnestheticDepthBoard } from './components/monitor/AnestheticDepthBoard';
 import { GeneralEventLogModal } from './components/records/GeneralEventLogModal';
+import { PhysiologyEngineStatus } from './components/monitor/PhysiologyEngineStatus';
 import { EmergencyFeedbackToast, EmergencyFeedbackItem } from './components/emergency/EmergencyFeedbackToast';
 import { LaryngealReflexModal } from './components/airway/LaryngealReflexModal';
+import {
+  PhysiologyGatewayClient,
+  type PhysiologyGatewayState,
+} from './physiology/PhysiologyGatewayClient';
 import {
   Activity,
   Syringe,
@@ -201,6 +206,32 @@ export default function App() {
   const lastLogSimTimeRef = useRef<number>(0);
   const oxygenFlushEndSimTimeRef = useRef<number>(0);
   const previousClinicalAlertKeysRef = useRef<Set<string>>(new Set());
+  const physiologyGatewayRef = useRef<PhysiologyGatewayClient | null>(null);
+  const [physiologyGatewayState, setPhysiologyGatewayState] = useState<PhysiologyGatewayState>({
+    connection: 'disconnected',
+    nativeWorkerAvailable: false,
+    messagePt: 'Motor fisiológico local ativo.',
+  });
+
+  // The external whole-body engine starts in shadow mode. Its output is visible
+  // for validation, but cannot replace monitor values until the canine model is
+  // independently validated and the protocol explicitly marks it authoritative.
+  useEffect(() => {
+    const client = new PhysiologyGatewayClient();
+    physiologyGatewayRef.current = client;
+    const unsubscribe = client.subscribe(setPhysiologyGatewayState);
+    client.connect();
+
+    return () => {
+      unsubscribe();
+      client.disconnect();
+      physiologyGatewayRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    physiologyGatewayRef.current?.initialize(patient);
+  }, [patient]);
 
   // Auto-open death report on transition to dead
   useEffect(() => {
@@ -360,6 +391,15 @@ export default function App() {
       }
       prevArrestStateRef.current = newVitals.isCardiacArrest;
 
+      physiologyGatewayRef.current?.advance({
+        deltaTimeSeconds: dt,
+        simulationTimeSeconds: newSimTime,
+        vitals: newVitals,
+        activeDoses: updatedDoses,
+        equipment: activeEquipment,
+        surgicalStimulus: activeSurgicalStimulus,
+      });
+
       setVitals(newVitals);
       setActiveDoses(updatedDoses);
 
@@ -491,6 +531,7 @@ export default function App() {
     setActiveSurgicalProcedure(null);
     setClinicalOccurrenceHistory([]);
     previousClinicalAlertKeysRef.current = new Set();
+    physiologyGatewayRef.current?.reset(targetPatient);
 
     setFeedbackToast({
       id: `reset_${Date.now()}`,
@@ -954,6 +995,11 @@ export default function App() {
               <span className="font-bold text-[#f5f5f5]">{patient.name}</span>
               <span className="text-[#888888]">({patient.weightKg}kg · ASA {patient.asa})</span>
             </button>
+
+            <PhysiologyEngineStatus
+              state={physiologyGatewayState}
+              isCanine={patient.species === 'canine'}
+            />
 
             {/* Cellular Biophysics & Receptors Button */}
             <button

@@ -1,0 +1,76 @@
+{
+  "modelId": "canine-adult-whole-body-alpha",
+  "profileVersion": "0.1.0-alpha",
+  "status": "experimental-shadow-only",
+  "warmUpSeconds": 1200,
+  "referenceAnimal": {
+    "species": "canine",
+    "lifeStage": "adult",
+    "bodyWeightKg": 20.5
+  },
+  "cardiovascular": {
+    "cardiacOutputMlMinKg": 165,
+    "heartRatePerMin": { "mean": 87, "sd": 22 },
+    "meanArterialPressureMmHg": { "mean": 103, "sd": 15 },
+    "organBloodFlowFractions": {
+      "brain": 0.02,
+      "kidney": 0.173,
+      "muscle": 0.217,
+      "myocardium": 0.046,
+      "gastrointestinal": 0.1
+    }
+  },
+  "respiratory": {
+    "functionalResidualCapacityMlKg": { "mean": 45, "sd": 8 },
+    "tidalVolumeMlKg": 11.5,
+    "centralAndPeripheralCo2ControllerSetPointMmHg": 37.5,
+    "seriesDeadSpaceMlKg": { "mean": 6, "sd": 1 },
+    "staticThoracicComplianceMlCmH2OKg": { "mean": 1.85, "sd": 0.56 }
+  },
+  "tissueMassFractions": {
+    "liver": 0.0329,
+    "kidneys": 0.0055,
+    "muscle": 0.4565,
+    "brain": 0.0078,
+    "lungs": 0.0082,
+    "myocardium": 0.0078,
+    "gastrointestinal": 0.0368
+  },
+  "sources": [
+    {
+      "id": "haskins-2005",
+      "type": "primary-study",
+      "citation": "Haskins et al. Reference cardiopulmonary values in normal dogs. Comparative Medicine. 2005;55(2):156-161. PMID 15884778",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/15884778/"
+    },
+    {
+      "id": "elwell-cuddy-2018",
+      "type": "primary-study",
+      "citation": "Elwell-Cuddy et al. Development of a physiologically based pharmacokinetic model for methadone in dogs. J Vet Pharmacol Ther. 2018. DOI 10.1111/jvp.12676",
+      "url": "https://iccm.k-state.edu/models/pbpk/pbpkpdfs/2018-Elwell-Cuddy-Methadone-PBPK.pdf"
+    },
+    {
+      "id": "king-1992",
+      "type": "primary-study",
+      "citation": "King et al. Static thoracic compliance as a measurement of pulmonary function in dogs. Am J Vet Res. 1992. PMID 1767978",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/1767978/"
+    },
+    {
+      "id": "larsson-1992",
+      "type": "primary-study",
+      "citation": "Larsson et al. Pulmonary effects of body position, PEEP, and surfactant depletion in dogs. Acta Anaesthesiol Scand. 1992. PMID 1539477",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/1539477/"
+    }
+  ],
+  "explicitAssumptionsPendingPrimaryValidation": [
+    "blood volume of 85 mL/kg",
+    "resting tidal volume calibration of 11.5 mL/kg",
+    "central and peripheral respiratory CO2 controller set points calibrated to 37.5 mmHg",
+    "airway resistance inherited from the Pulse adult baseline",
+    "bone, skin and spleen mass fractions",
+    "allometric alveolar surface area",
+    "allometric skin surface area",
+    "resting energy requirement relation",
+    "right-to-left lung volume ratio"
+  ]
+}

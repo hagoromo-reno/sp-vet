@@ -1,0 +1,8 @@
+FROM kitware/pulse:4.3.1 AS official_data
+
+FROM debian:bookworm
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libstdc++6 \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=official_data /pulse/bin /pulse/bin
+WORKDIR /pulse/bin
