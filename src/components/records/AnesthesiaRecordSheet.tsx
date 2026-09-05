@@ -1,7 +1,7 @@
 import React from 'react';
 import { LogEntry, PatientProfile, VitalRecordPoint } from '../../types/simulator';
 import { FileText, Printer, Clock, CheckCircle2 } from 'lucide-react';
-import { formatDecimal, formatPressure, formatRate } from '../../utils/formatters';
+import { formatDecimal, formatPressure, formatRate, formatSpecies } from '../../utils/formatters';
 
 interface AnesthesiaRecordSheetProps {
   patient: PatientProfile;
@@ -53,14 +53,14 @@ export const AnesthesiaRecordSheet: React.FC<AnesthesiaRecordSheetProps> = ({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-[#121212] border border-[#222222] rounded-lg text-xs font-mono-code">
         <div>
           <span className="text-[#737373] block text-[10px]">PACIENTE:</span>
-          <strong className="text-[#f5f5f5]">{patient.name} ({patient.species.toUpperCase()})</strong>
+          <strong className="text-[#f5f5f5]">{patient.name} ({formatSpecies(patient.species).toUpperCase()})</strong>
         </div>
         <div>
           <span className="text-[#737373] block text-[10px]">RAÇA / PESO:</span>
           <strong className="text-[#f5f5f5]">{patient.breed} · {patient.weightKg} kg</strong>
         </div>
         <div>
-          <span className="text-[#737373] block text-[10px]">STATUS ASA:</span>
+          <span className="text-[#737373] block text-[10px]">CLASSIFICAÇÃO ASA:</span>
           <strong className="text-emerald-400 font-bold">Classe ASA {patient.asa}</strong>
         </div>
         <div>
@@ -94,6 +94,8 @@ export const AnesthesiaRecordSheet: React.FC<AnesthesiaRecordSheetProps> = ({
                   <th className="p-2 text-yellow-300">FR (rpm)</th>
                   <th className="p-2 text-orange-400">Temp (°C)</th>
                   <th className="p-2 text-pink-300">Glicemia</th>
+                  <th className="p-2 text-rose-300">Dor</th>
+                  <th className="p-2 text-indigo-300">Atividade</th>
                   <th className="p-2 text-purple-400">Inalatório %</th>
                 </tr>
               </thead>
@@ -109,6 +111,8 @@ export const AnesthesiaRecordSheet: React.FC<AnesthesiaRecordSheetProps> = ({
                     <td className="p-2 text-yellow-200">{formatRate(log.rr)}</td>
                     <td className="p-2 text-orange-300">{formatDecimal(log.tempC, 1)}°C</td>
                     <td className="p-2 text-pink-200">{formatRate(log.glucoseMgDl)} mg/dL</td>
+                    <td className="p-2 text-rose-200">{formatDecimal(log.painScore, 1)}/10</td>
+                    <td className="p-2 text-indigo-200">{formatRate(log.activityLevelPct)}%</td>
                     <td className="p-2 text-purple-300">{formatDecimal(log.vaporizerPct, 1)}%</td>
                   </tr>
                 ))}

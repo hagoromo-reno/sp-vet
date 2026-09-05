@@ -16,7 +16,8 @@ import {
   validateAdministrationCommand,
 } from '../../engine/drugAdministration';
 import { hillResponse } from '../../engine/cellularReceptors';
-import { formatDecimal, formatDose } from '../../utils/formatters';
+import { analyzeDrugExposure } from '../../engine/exposureAnalysis';
+import { formatDecimal, formatDose, formatSpecies } from '../../utils/formatters';
 import {
   Syringe,
   Search,
@@ -228,7 +229,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
               </span>
             </h3>
             <span className="text-[11px] text-[#888888]">
-              Paciente: <strong className="text-white">{patient.name}</strong> · Peso: <strong className="text-emerald-400">{patient.weightKg} kg</strong> · Espécie: <strong className="text-cyan-300">{patient.species.toUpperCase()}</strong>
+              Paciente: <strong className="text-white">{patient.name}</strong> · Peso: <strong className="text-emerald-400">{patient.weightKg} kg</strong> · Espécie: <strong className="text-cyan-300">{formatSpecies(patient.species).toUpperCase()}</strong>
             </span>
           </div>
         </div>
@@ -293,7 +294,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
             className="text-[10px] font-mono-code px-2 py-1 rounded bg-[#2b220c] hover:bg-[#3d3112] border border-yellow-700/80 text-yellow-200 font-bold transition whitespace-nowrap"
             title="Emulsão Lipídica 20% Resgate de Intoxicação por Anestésicos Locais (Lidocaína em gatos / Bupivacaína)"
           >
-            Intralipid (Lipid Sink)
+            Intralipid (Sequestro Lipídico)
           </button>
         </div>
       </div>
@@ -306,6 +307,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
           { id: 'induction', label: 'Indutores' },
           { id: 'opioid_analgesic', label: 'Opioides & Analgesia' },
           { id: 'emergency_inotrope', label: 'Emergência & Inotrópicos' },
+          { id: 'antihypertensive', label: 'Anti-hipertensivos Agudos' },
           { id: 'antiarrhythmic', label: 'Antiarrítmicos' },
           { id: 'antagonist_reversal', label: 'Antagonistas (Reversão)' },
           { id: 'nmba', label: 'Bloqueadores NMBA' },
@@ -695,6 +697,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
               const inTransit = (dose.transitLagRemainingSec || 0) > 0;
               const definition = VETERINARY_DRUG_DATABASE.find((drug) => drug.id === dose.drugId);
               const effectOccupancy = hillResponse(dose.currentCe);
+              const exposure = definition ? analyzeDrugExposure(dose, definition) : undefined;
               return (
                 <div
                   key={dose.id}
@@ -711,7 +714,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                     </div>
                     <div className="text-[10px] text-[#888888]">
                       {formatDecimal(dose.dosePerKg, 2)} {dose.isCRI && definition?.criDoseUnit ? definition.criDoseUnit : (definition?.doseUnit || '')} · {dose.route} · {dose.isCRI
-                        ? `${formatDecimal(dose.criRateMlPerHour, 2)} mL/h ${dose.isInfusionRunning === false ? '(interrompida; washout)' : '(CRI)'}`
+                        ? `${formatDecimal(dose.criRateMlPerHour, 2)} mL/h ${dose.isInfusionRunning === false ? '(interrompida; em eliminação)' : '(CRI)'}`
                         : `${formatDecimal(dose.volumeMl, 2)} mL (${dose.administrationSpeed?.replace('_', ' ') || 'bolus'})`}
                     </div>
                     {/* Visual Ce Bar */}
@@ -727,6 +730,24 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                     <span className="text-xs text-emerald-400 font-bold block">
                       Ce rel.: {dose.currentCe.toFixed(2)}×
                     </span>
+                    <span className="text-[10px] text-cyan-300 block">
+                      Cp: {dose.currentCp.toFixed(2)}×
+                    </span>
+                    {exposure && (
+                      <span className="text-[9px] text-amber-300 block">
+                        {exposure.phaseLabel}{exposure.estimatedEffectMinutesRemaining !== undefined
+                          ? ` · efeito <5% em ~${formatDecimal(exposure.estimatedEffectMinutesRemaining, 0)} min`
+                          : ''}
+                      </span>
+                    )}
+                    {dose.pkCompartments && (
+                      <span
+                        className="text-[9px] text-[#737373] block"
+                        title={`Central ${dose.pkCompartments.centralAmountNormalized.toFixed(2)} · rápido ${dose.pkCompartments.rapidPeripheralAmountNormalized.toFixed(2)} · profundo ${dose.pkCompartments.deepPeripheralAmountNormalized.toFixed(2)} · eliminado ${dose.pkCompartments.cumulativeEliminatedNormalized.toFixed(2)}`}
+                      >
+                        Tecidos: {(dose.pkCompartments.rapidPeripheralAmountNormalized + dose.pkCompartments.deepPeripheralAmountNormalized).toFixed(2)}× · CL {dose.pkCompartments.effectiveClearanceMultiplier.toFixed(2)}×
+                      </span>
+                    )}
                     {dose.isCRI && dose.isInfusionRunning !== false && (
                       <button
                         onClick={() => onStopCRI(dose.id)}

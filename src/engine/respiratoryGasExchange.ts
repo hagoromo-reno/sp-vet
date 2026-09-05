@@ -7,6 +7,10 @@ import {
 import { SPECIES_DATABASE } from '../data/speciesData';
 import { ReceptorStateSnapshot } from './cellularReceptors';
 import { SPECIES_CELLULAR_CONFIGS } from './speciesPhysiology';
+import {
+  NEUTRAL_PHYSIOLOGICAL_MODIFIERS,
+  type PhysiologicalModifiers,
+} from './systemCoupling';
 
 export interface RespiratoryOutputs {
   respiratoryRate: number; // bpm
@@ -61,7 +65,11 @@ export class RespiratoryGasExchangeEngine {
     previousRespiratoryRate?: number,
     previousEtCO2?: number,
     nociceptiveStressLevel: number = 0,
-    persistentHematocritPct?: number
+    persistentHematocritPct?: number,
+    integratedCentralDrive: number = 1,
+    integratedNeuromuscularCapacity: number = 1,
+    alveolarRecruitment: number = 1,
+    coupling: PhysiologicalModifiers = NEUTRAL_PHYSIOLOGICAL_MODIFIERS
   ): RespiratoryOutputs {
     const speciesInfo = SPECIES_DATABASE[patient.species] || SPECIES_DATABASE.canine;
     const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
@@ -83,11 +91,12 @@ export class RespiratoryGasExchangeEngine {
     let isRespiratoryArrest = false;
     let arrestCause: string | undefined;
 
+    const coupledCentralDrive = integratedCentralDrive * coupling.respiratoryDriveMultiplier;
     let spontaneousRR = baselineRR;
     let spontaneousVT = baselineVT;
 
     // A. Neuromuscular Blockade Paralysis
-    if (receptors.nmOccupancy > 0.40) {
+    if (integratedNeuromuscularCapacity < 0.60 || receptors.nmOccupancy > 0.62) {
       spontaneousRR = 0;
       spontaneousVT = 0;
       isRespiratoryArrest = true;
@@ -96,6 +105,7 @@ export class RespiratoryGasExchangeEngine {
     // B. Post-Induction Apnea (Propofol / Alfaxalone / Thiopental Bolus or BZD synergy)
     else if (
       receptors.acuteBolusRespiratoryDepression > 0.72 ||
+      coupledCentralDrive < 0.12 ||
       receptors.hypnoticEffect > 0.94 ||
       receptors.respiratoryDepression > 0.90 ||
       (receptors.propofolSiteOccupancy > 0.78 && receptors.bzdAllostericOccupancy > 0.25)
@@ -119,7 +129,11 @@ export class RespiratoryGasExchangeEngine {
       // GABA-A depression
       const gabaSuppression = receptors.hypnoticEffect * 0.55;
       const opioidSuppression = Math.max(0, receptors.muOpioidDrive) * 0.22;
-      const netDepression = Math.max(receptors.respiratoryDepression, gabaSuppression + opioidSuppression);
+      const netDepression = Math.max(
+        receptors.respiratoryDepression,
+        gabaSuppression + opioidSuppression,
+        1 - coupledCentralDrive
+      );
 
       // Graded depression preserves a compensatory ventilatory floor. True apnea
       // is handled by the explicit thresholds above rather than emerging from
@@ -174,7 +188,7 @@ export class RespiratoryGasExchangeEngine {
 
     const baseCompliance = Math.max(0.1, speciesConfig.dynamicComplianceMlKgCmH2O * patient.weightKg);
     const restrictiveFactor = Math.max(0.38, 1 - ruminalBloatSeverity * 0.48 - Math.max(0, pulmonaryShuntFractionPct - 5) / 100);
-    const effectiveCompliance = baseCompliance * restrictiveFactor;
+    const effectiveCompliance = baseCompliance * restrictiveFactor * Math.max(0.65, alveolarRecruitment);
 
     if (hasSealedAirway && equipment.isVentilatorActive && equipment.ventilatorMode !== 'spontaneous') {
       // Mechanical Ventilator Active
@@ -241,19 +255,21 @@ export class RespiratoryGasExchangeEngine {
     const baselineAlveolarV = ((baselineVT - deadSpaceMl) * baselineRR) / 1000.0;
     const ventilationRatio = alveolarVentilationLMin / Math.max(0.1, baselineAlveolarV);
 
-    let targetSteadyEtCO2 = patient.baselineVitals.etco2;
+    let targetSteadyEtCO2 = patient.baselineVitals.etco2 * coupling.metabolicCo2Multiplier;
     if (finalRR === 0) {
       targetSteadyEtCO2 = 0;
     } else if (ventilationRatio < 0.80) {
       capnogramType = 'hypoventilation';
       const severity = Math.min(1.0, (0.80 - ventilationRatio) / 0.45);
       const maxHypoventEt = patient.baselineVitals.etco2 / Math.max(0.35, ventilationRatio);
-      targetSteadyEtCO2 = patient.baselineVitals.etco2 + (maxHypoventEt - patient.baselineVitals.etco2) * severity;
+      const metabolicBaselineEtCO2 = patient.baselineVitals.etco2 * coupling.metabolicCo2Multiplier;
+      targetSteadyEtCO2 = metabolicBaselineEtCO2 + (maxHypoventEt - metabolicBaselineEtCO2) * severity;
     } else if (ventilationRatio > 1.25) {
       capnogramType = 'hyperventilation';
       const severity = Math.min(1.0, (ventilationRatio - 1.25) / 0.75);
       const minHyperventEt = patient.baselineVitals.etco2 / Math.min(2.5, ventilationRatio);
-      targetSteadyEtCO2 = patient.baselineVitals.etco2 - (patient.baselineVitals.etco2 - minHyperventEt) * severity;
+      const metabolicBaselineEtCO2 = patient.baselineVitals.etco2 * coupling.metabolicCo2Multiplier;
+      targetSteadyEtCO2 = metabolicBaselineEtCO2 - (metabolicBaselineEtCO2 - minHyperventEt) * severity;
     } else {
       capnogramType = 'normal';
     }
@@ -310,7 +326,8 @@ export class RespiratoryGasExchangeEngine {
     const peepRecruitment = hasSealedAirway && equipment.isVentilatorActive
       ? Math.min(0.32, Math.max(0, equipment.ventilatorSettings.peepCmH2O) * 0.025)
       : 0;
-    const effectiveShuntPct = pulmonaryShuntFractionPct * (1 - peepRecruitment);
+    const persistentRecruitment = Math.max(0, alveolarRecruitment - 1) * 0.55;
+    const effectiveShuntPct = pulmonaryShuntFractionPct * (1 - peepRecruitment - persistentRecruitment);
     const shuntFraction = Math.max(0.04, effectiveShuntPct / 100.0);
     let targetPaO2 = pAO2 * (1.0 - shuntFraction * 1.8);
     targetPaO2 = Math.max(15, Math.min(480, targetPaO2));
@@ -358,7 +375,7 @@ export class RespiratoryGasExchangeEngine {
     // ----------------------------------------------------
     // 5. ACID-BASE BALANCE (HENDERSON-HASSELBALCH & LACTATE)
     // ----------------------------------------------------
-    let lactate = previousLactate;
+    let lactate = previousLactate + coupling.additionalLactateMmolLMin * dtSeconds / 60;
     const perfusionDeficit = Math.max(0, (60 - meanArterialPressure) / 40) + Math.max(0, 0.7 - cardiacOutputRatio);
     if (currentSpO2 < 75 || hypoxiaSecondsAccumulated > 20 || perfusionDeficit > 0.25) {
       // Anaerobic glycolysis lactic acid accumulation
@@ -369,12 +386,17 @@ export class RespiratoryGasExchangeEngine {
       lactate = Math.max(patient.baselineVitals.lactateMmolL, lactate - (dtSeconds / 60.0) * 0.45 * clearanceMultiplier);
     }
 
-    const bicarb = Math.min(30, 22.0 + receptors.alkalinization * 5);
+    const lactateBaseDeficit = Math.max(0, lactate - patient.baselineVitals.lactateMmolL) * 1.15;
+    // A normalized bicarbonate effect represents a clinically relevant buffer dose,
+    // not a concentration fraction. Keep the effect large enough to remain visible
+    // while the drug redistributes, but cap it to avoid non-physiologic alkalosis.
+    const bicarb = Math.max(8, Math.min(32, 24.0 - lactateBaseDeficit + receptors.alkalinization * 12));
     const paCO2Final = paCO2Estimate;
-    // pH = 6.1 + log10(HCO3 / (0.03 * PaCO2)) - metabolic base deficit
-    const respiratoryPHShift = (40.0 - paCO2Final) * 0.008;
-    const metabolicPHShift = (lactate - patient.baselineVitals.lactateMmolL) * 0.045;
-    const finalPH = Math.max(6.70, Math.min(7.65, 7.40 + respiratoryPHShift - metabolicPHShift));
+    // Henderson-Hasselbalch couples respiratory CO2 and metabolic bicarbonate.
+    const finalPH = Math.max(6.70, Math.min(
+      7.65,
+      6.1 + Math.log10(bicarb / Math.max(0.3, 0.03 * paCO2Final))
+    ));
 
     // Respiratory pattern classification
     let pattern: RespiratoryPattern = 'eupneic';
@@ -395,7 +417,11 @@ export class RespiratoryGasExchangeEngine {
     );
     const potassium = Math.max(
       2,
-      patient.baselineVitals.potassiumMeqL + receptors.potassiumLoad * 1.2 - receptors.alkalinization * 0.65
+      patient.baselineVitals.potassiumMeqL + receptors.potassiumLoad * 1.2
+        - receptors.alkalinization * 0.65
+        // Acidemia shifts K extracellularly, although this is smaller and slower
+        // than the direct modeled alkalinizing treatment effect.
+        + Math.max(0, 7.35 - finalPH) * 0.2
     );
 
     const hasAssistedVentilation = hasSealedAirway && (

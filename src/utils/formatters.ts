@@ -90,3 +90,12 @@ export function formatTemperature(
   const formatted = formatDecimal(value, 1, true);
   return includeUnit ? `${formatted}°C` : formatted;
 }
+import type { SpeciesType } from '../types/simulator';
+
+const SPECIES_LABELS: Record<SpeciesType, string> = {
+  canine: 'canino', feline: 'felino', equine: 'equino', bovine: 'bovino', rabbit: 'coelho', avian: 'ave',
+};
+
+export function formatSpecies(species: SpeciesType): string {
+  return SPECIES_LABELS[species];
+}

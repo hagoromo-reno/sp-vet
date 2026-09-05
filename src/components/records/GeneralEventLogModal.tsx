@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { LogEntry, PatientProfile } from '../../types/simulator';
+import { formatSpecies } from '../../utils/formatters';
 import {
   FileText,
   Search,
@@ -61,7 +62,7 @@ export const GeneralEventLogModal: React.FC<GeneralEventLogModalProps> = ({
   const handleExportText = () => {
     const lines = [
       `=== LOG GERAL DE ANESTESIA & CUIDADOS CRÍTICOS VETERINÁRIOS ===`,
-      `Paciente: ${patient.name} (${patient.species.toUpperCase()} - ${patient.weightKg} kg)`,
+      `Paciente: ${patient.name} (${formatSpecies(patient.species).toUpperCase()} - ${patient.weightKg} kg)`,
       `Procedimento: ${patient.surgicalProcedure}`,
       `Tempo Total de Anestesia: ${formatSimTime(totalSimTimeSeconds)}`,
       `Total de Eventos: ${eventLogs.length}`,

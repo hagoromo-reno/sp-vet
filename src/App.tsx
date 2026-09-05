@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ActiveDrugDose,
+  ActiveSurgicalProcedure,
   AnesthesiaEquipmentState,
   LogEntry,
   MonitorAlarmLimits,
   PatientProfile,
   ResuscitationState,
+  SurgicalProcedureDefinition,
   VitalRecordPoint,
   VitalSigns,
 } from './types/simulator';
@@ -21,13 +23,16 @@ import {
   validateAdministrationCommand,
 } from './engine/drugAdministration';
 import { AudioSynthesizer } from './engine/audioSynthesizer';
+import { formatSpecies } from './utils/formatters';
 import { CanvasWaveforms } from './components/monitor/CanvasWaveforms';
 import { VitalNumbers } from './components/monitor/VitalNumbers';
 import { ClinicalAlertRibbon } from './components/monitor/ClinicalAlertRibbon';
+import { ClinicalOccurrenceCenter } from './components/monitor/ClinicalOccurrenceCenter';
 import { PatientPhysicalExam } from './components/patient/PatientPhysicalExam';
 import { VaporizerMachine } from './components/anesthesia/VaporizerMachine';
 import { VentilatorAirway } from './components/airway/VentilatorAirway';
 import { DrugAdministrationModal } from './components/pharmacology/DrugAdministrationModal';
+import { CirculatingDrugsPanel } from './components/pharmacology/CirculatingDrugsPanel';
 import { FluidTherapyPanel } from './components/fluids/FluidTherapyPanel';
 import { CPCRResuscitationPanel } from './components/emergency/CPCRResuscitationPanel';
 import { AnesthesiaRecordSheet } from './components/records/AnesthesiaRecordSheet';
@@ -57,6 +62,7 @@ import {
   Brain,
   ListRestart,
   ScrollText,
+  Bell,
 } from 'lucide-react';
 
 export default function App() {
@@ -121,7 +127,7 @@ export default function App() {
   });
 
   // 5. STIMULATION & INTERACTION
-  const [isSurgicalStimulationActive, setIsSurgicalStimulationActive] = useState(false);
+  const [activeSurgicalProcedure, setActiveSurgicalProcedure] = useState<ActiveSurgicalProcedure | null>(null);
 
   // 6. VITALS STATE
   const [vitals, setVitals] = useState<VitalSigns>(() => {
@@ -145,7 +151,7 @@ export default function App() {
       simTimeSeconds: 0,
       realTimestamp: new Date().toLocaleTimeString(),
       type: 'system',
-      message: `Simulação iniciada para ${PRESET_SCENARIOS[0].name} (${PRESET_SCENARIOS[0].species.toUpperCase()})`,
+      message: `Simulação iniciada para ${PRESET_SCENARIOS[0].name} (${formatSpecies(PRESET_SCENARIOS[0].species).toUpperCase()})`,
       severity: 'normal',
     },
   ]);
@@ -174,6 +180,8 @@ export default function App() {
   const [isLaryngealReflexModalOpen, setIsLaryngealReflexModalOpen] = useState(false);
   const [pendingIntubationTubeSize, setPendingIntubationTubeSize] = useState<number>(8.5);
   const [feedbackToast, setFeedbackToast] = useState<EmergencyFeedbackItem | null>(null);
+  const [clinicalOccurrenceHistory, setClinicalOccurrenceHistory] = useState<EmergencyFeedbackItem[]>([]);
+  const [isOccurrenceCenterOpen, setIsOccurrenceCenterOpen] = useState(false);
 
   // 10. NIBP / IBP STATE
   const [isNibpMeasuring, setIsNibpMeasuring] = useState(false);
@@ -191,8 +199,8 @@ export default function App() {
   const lastNibpAutoTriggerRef = useRef<number>(0);
   const nibpMeasureStartRef = useRef<number>(0);
   const lastLogSimTimeRef = useRef<number>(0);
-  const surgicalStimulusEndSimTimeRef = useRef<number>(0);
   const oxygenFlushEndSimTimeRef = useRef<number>(0);
+  const previousClinicalAlertKeysRef = useRef<Set<string>>(new Set());
 
   // Auto-open death report on transition to dead
   useEffect(() => {
@@ -201,6 +209,62 @@ export default function App() {
     }
     prevDeadStateRef.current = vitals.isDead;
   }, [vitals.isDead]);
+
+  // Every transient feedback is also retained in the occurrence center.
+  useEffect(() => {
+    if (!feedbackToast) return;
+    const storedItem = { ...feedbackToast, simTimeSeconds: feedbackToast.simTimeSeconds ?? simTimeSeconds };
+    setClinicalOccurrenceHistory((previous) => previous.some((item) => item.id === storedItem.id)
+      ? previous
+      : [...previous, storedItem]);
+  }, [feedbackToast]);
+
+  // Convert newly-emergent interactions and physiological warnings into
+  // dismissible notifications without repeating them on every simulation tick.
+  useEffect(() => {
+    const active = new Map<string, Omit<EmergencyFeedbackItem, 'id' | 'simTimeSeconds'>>();
+    for (const interaction of vitals.activeDrugInteractions) {
+      active.set(`interacao:${interaction.title}`, {
+        title: interaction.title,
+        message: `${interaction.description} Mecanismo: ${interaction.pharmacologyMechanism}`,
+        type: interaction.severity === 'lethal' || interaction.severity === 'danger' ? 'danger' : 'drug',
+        category: 'Interação farmacológica',
+        severity: interaction.severity === 'lethal' || interaction.severity === 'danger' ? 'crítico' : interaction.severity === 'warning' ? 'atenção' : 'informação',
+      });
+    }
+    if (vitals.impendingArrestWarning) {
+      active.set(`deterioracao:${vitals.impendingArrestWarning.type}`, {
+        title: vitals.impendingArrestWarning.headline,
+        message: `${vitals.impendingArrestWarning.details} Conduta sugerida: ${vitals.impendingArrestWarning.recommendedAction}`,
+        type: 'danger', category: 'Deterioração fisiológica', severity: 'crítico',
+      });
+    }
+    if (vitals.isRespiratoryArrest) active.set('parada:respiratoria', {
+      title: 'Parada respiratória', message: vitals.respiratoryArrestCause || 'Cessação do impulso respiratório espontâneo.',
+      type: 'danger', category: 'Sistema respiratório', severity: 'crítico',
+    });
+    if (vitals.isCardiacArrest) active.set('parada:cardiaca', {
+      title: 'Parada cardiorrespiratória', message: vitals.cardiacArrestCause || 'Ausência de circulação espontânea efetiva.',
+      type: 'danger', category: 'Sistema cardiovascular', severity: 'crítico',
+    });
+    if (vitals.biologicalState.metabolic.nitroprussideToxicMetaboliteBurden > 0.2) active.set('toxicidade:nitroprussiato', {
+      title: 'Acúmulo de metabólitos do nitroprussiato',
+      message: 'A formação de cianeto/tiocianato está superando a capacidade hepatorrenal de depuração. Reavaliar taxa e duração da infusão.',
+      type: 'danger', category: 'Toxicidade metabólica', severity: 'crítico',
+    });
+
+    const newItems: EmergencyFeedbackItem[] = [];
+    for (const [key, item] of active) {
+      if (!previousClinicalAlertKeysRef.current.has(key)) {
+        newItems.push({ ...item, id: `${key}:${Math.round(simTimeSeconds * 10)}`, simTimeSeconds });
+      }
+    }
+    previousClinicalAlertKeysRef.current = new Set(active.keys());
+    if (newItems.length > 0) {
+      setClinicalOccurrenceHistory((previous) => [...previous, ...newItems.filter((item) => !previous.some((old) => old.id === item.id))]);
+      setFeedbackToast(newItems.find((item) => item.severity === 'crítico') || newItems[0]);
+    }
+  }, [vitals.activeDrugInteractions, vitals.impendingArrestWarning, vitals.isRespiratoryArrest, vitals.isCardiacArrest, vitals.biologicalState.metabolic.nitroprussideToxicMetaboliteBurden]);
 
   // SIMULATION TICK LOOP (Interval at 10 Hz)
   useEffect(() => {
@@ -236,11 +300,13 @@ export default function App() {
 
       // Check Manual Ventilation Cadence (e.g. squeeze every 6s)
       let cadenceUpdates: Partial<AnesthesiaEquipmentState> = {};
-      if (isSurgicalStimulationActive && newSimTime >= surgicalStimulusEndSimTimeRef.current) {
-        setIsSurgicalStimulationActive(false);
+      if (activeSurgicalProcedure && newSimTime >= activeSurgicalProcedure.endsAtSimTime) {
+        setActiveSurgicalProcedure(null);
       }
-      const activeSurgicalStimulus = isSurgicalStimulationActive
-        && newSimTime < surgicalStimulusEndSimTimeRef.current;
+      const activeSurgicalStimulus = activeSurgicalProcedure
+        && newSimTime < activeSurgicalProcedure.endsAtSimTime
+        ? activeSurgicalProcedure.intensity
+        : 0;
       if (equipment.isOxygenFlushActive && newSimTime >= oxygenFlushEndSimTimeRef.current) {
         cadenceUpdates.isOxygenFlushActive = false;
       }
@@ -323,6 +389,8 @@ export default function App() {
             rr: Math.round(newVitals.respiratoryRate),
             tempC: Number(newVitals.bodyTemperatureC.toFixed(1)),
             glucoseMgDl: Math.round(newVitals.arterialBloodGases.glucoseMgDl),
+            painScore: newVitals.painScore,
+            activityLevelPct: newVitals.activityLevelPct,
             vaporizerPct: equipment.vaporizerDialPct,
             depthScore: newVitals.anestheticDepthScore,
           },
@@ -339,7 +407,7 @@ export default function App() {
     activeDoses,
     equipment,
     resuscitation,
-    isSurgicalStimulationActive,
+    activeSurgicalProcedure,
     isNibpMeasuring,
     nibpAutoIntervalMin,
     vitals,
@@ -419,14 +487,15 @@ export default function App() {
     lastNibpAutoTriggerRef.current = 0;
     prevDeadStateRef.current = false;
     prevArrestStateRef.current = false;
-    surgicalStimulusEndSimTimeRef.current = 0;
     oxygenFlushEndSimTimeRef.current = 0;
-    setIsSurgicalStimulationActive(false);
+    setActiveSurgicalProcedure(null);
+    setClinicalOccurrenceHistory([]);
+    previousClinicalAlertKeysRef.current = new Set();
 
     setFeedbackToast({
       id: `reset_${Date.now()}`,
       title: 'Caso Reiniciado do Início',
-      message: `Simulação para ${targetPatient.name} (${targetPatient.species.toUpperCase()}) retornou ao estado basal (00:00).`,
+      message: `Simulação para ${targetPatient.name} (${formatSpecies(targetPatient.species).toUpperCase()}) retornou ao estado basal (00:00).`,
       type: 'airway',
     });
 
@@ -436,7 +505,7 @@ export default function App() {
         simTimeSeconds: 0,
         realTimestamp: new Date().toLocaleTimeString(),
         type: 'system',
-        message: `Simulação reiniciada para ${targetPatient.name} (${targetPatient.species.toUpperCase()})`,
+        message: `Simulação reiniciada para ${targetPatient.name} (${formatSpecies(targetPatient.species).toUpperCase()})`,
         severity: 'normal',
       },
     ]);
@@ -684,7 +753,7 @@ export default function App() {
         simTimeSeconds,
         realTimestamp: new Date().toLocaleTimeString(),
         type: 'drug',
-        message: `Infusão contínua (CRI) interrompida; concentração residual em washout.`,
+        message: `Infusão contínua (CRI) interrompida; concentração residual em fase de eliminação.`,
         severity: 'warning',
       },
     ]);
@@ -745,10 +814,13 @@ export default function App() {
     ]);
   };
 
-  // SURGICAL STIMULATION TRIGGER
-  const handleStimulateSurgical = () => {
-    surgicalStimulusEndSimTimeRef.current = simTimeSeconds + 4;
-    setIsSurgicalStimulationActive(true);
+  // GRADED SURGICAL PROCEDURE TRIGGER
+  const handleStartSurgicalProcedure = (procedure: SurgicalProcedureDefinition) => {
+    setActiveSurgicalProcedure({
+      ...procedure,
+      startedAtSimTime: simTimeSeconds,
+      endsAtSimTime: simTimeSeconds + procedure.durationSeconds,
+    });
     setEventLogs((prev) => [
       ...prev,
       {
@@ -756,11 +828,25 @@ export default function App() {
         simTimeSeconds,
         realTimestamp: new Date().toLocaleTimeString(),
         type: 'surgical',
-        message: 'Estímulo nociceptivo cirúrgico aplicado (Incisão / Tração visceral).',
+        message: `Procedimento iniciado: ${procedure.name}.`,
+        details: `${procedure.tissueLayer} · intensidade aferente ${Math.round(procedure.intensity * 100)}% · duração ${procedure.durationSeconds}s`,
         severity: vitals.anestheticDepthScore < 50 ? 'warning' : 'normal',
       },
     ]);
+  };
 
+  const handleStopSurgicalProcedure = () => {
+    if (!activeSurgicalProcedure) return;
+    const procedureName = activeSurgicalProcedure.name;
+    setActiveSurgicalProcedure(null);
+    setEventLogs((prev) => [...prev, {
+      id: `surg_stop_${Date.now()}`,
+      simTimeSeconds,
+      realTimestamp: new Date().toLocaleTimeString(),
+      type: 'surgical',
+      message: `Procedimento encerrado: ${procedureName}. Resposta neuroendócrina em recuperação.`,
+      severity: 'normal',
+    }]);
   };
 
   // FLUID BOLUS
@@ -878,7 +964,7 @@ export default function App() {
               <Dna className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
               <span className="font-bold hidden sm:inline">Biofísica</span>
               <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/30 text-indigo-300 font-mono font-bold">
-                {patient.species.toUpperCase()}
+                {formatSpecies(patient.species).toUpperCase()}
               </span>
             </button>
 
@@ -906,6 +992,18 @@ export default function App() {
               <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/30 text-cyan-200 font-mono font-bold">
                 {eventLogs.length}
               </span>
+            </button>
+
+            <button
+              onClick={() => setIsOccurrenceCenterOpen(true)}
+              className="relative flex items-center space-x-1.5 rounded-lg border border-amber-500/40 bg-amber-950/40 px-3 py-1.5 text-xs text-amber-200 shadow-md shadow-amber-950/30 transition hover:bg-amber-900/60"
+              title="Abrir histórico de alertas e interações"
+            >
+              <Bell className="h-3.5 w-3.5 text-amber-400" />
+              <span className="hidden font-bold sm:inline">Ocorrências</span>
+              {clinicalOccurrenceHistory.length > 0 && (
+                <span className="rounded bg-amber-500/25 px-1.5 text-[10px] font-bold text-amber-100">{clinicalOccurrenceHistory.length}</span>
+              )}
             </button>
           </div>
 
@@ -974,7 +1072,7 @@ export default function App() {
       </header>
 
       {/* 2. MAIN WORKSPACE */}
-      <main className="max-w-7xl mx-auto w-full p-4 flex-1 flex flex-col space-y-4">
+      <main className="max-w-[1600px] mx-auto w-full p-4 flex-1 flex flex-col space-y-4">
         {/* Real-time Non-Disruptive Clinical Alert Ribbon (PCR, Apnea, Interactions, Death) */}
         <ClinicalAlertRibbon
           vitals={vitals}
@@ -993,6 +1091,9 @@ export default function App() {
           onExtubate={handleExtubate}
           onApplyLidocaineSpray={handleApplyLidocaineSpray}
         />
+
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="min-w-0 space-y-4">
 
         {/* Top Half: Real-Time Waveform Monitor & Numeric LED Tiles */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[380px]">
@@ -1156,8 +1257,9 @@ export default function App() {
               <PatientPhysicalExam
                 patient={patient}
                 vitals={vitals}
-                onStimulateSurgical={handleStimulateSurgical}
-                isSurgicalStimulationActive={isSurgicalStimulationActive}
+                onStartSurgicalProcedure={handleStartSurgicalProcedure}
+                onStopSurgicalProcedure={handleStopSurgicalProcedure}
+                activeSurgicalProcedure={activeSurgicalProcedure}
               />
             )}
 
@@ -1190,6 +1292,15 @@ export default function App() {
               />
             )}
           </div>
+        </div>
+          </div>
+
+          <CirculatingDrugsPanel
+            patient={patient}
+            activeDoses={activeDoses}
+            equipment={equipment}
+            vitals={vitals}
+          />
         </div>
       </main>
 
@@ -1268,9 +1379,16 @@ export default function App() {
         onDismiss={() => setFeedbackToast(null)}
       />
 
+      <ClinicalOccurrenceCenter
+        isOpen={isOccurrenceCenterOpen}
+        items={clinicalOccurrenceHistory}
+        onClose={() => setIsOccurrenceCenterOpen(false)}
+        onClear={() => setClinicalOccurrenceHistory([])}
+      />
+
       {/* 11. FOOTER */}
       <footer className="border-t border-[#1a1a1a] bg-[#080808] px-4 py-2.5 text-center text-xs text-[#525252] font-mono-code">
-        Open VetSim Simulator · Modelagem Farmacocinética Multicompartimental · Diretrizes RECOVER 2024
+        Simulador Open VetSim · Modelagem farmacocinética multicompartimental · Diretrizes RECOVER 2024
       </footer>
     </div>
   );

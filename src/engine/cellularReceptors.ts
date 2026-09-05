@@ -47,6 +47,7 @@ export interface ReceptorStateSnapshot {
   // Integrated calibrated organ-level effects from the catalog
   directHeartRateEffect: number;
   directBloodPressureEffect: number;
+  directVasodilatorEffect: number;
   acuteBolusHypotension: number;
   acuteBolusRespiratoryDepression: number;
   acuteBolusBradycardia: number;
@@ -125,7 +126,8 @@ export class CellularReceptorsEngine {
     patient: PatientProfile,
     activeDoses: ActiveDrugDose[],
     inhalantCe: number,
-    _inhalantAgent: 'isoflurane' | 'sevoflurane'
+    _inhalantAgent: 'isoflurane' | 'sevoflurane',
+    receptorAdaptiveFeedback: number = 0
   ): ReceptorStateSnapshot {
     const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
     const exposures = new Map<string, AggregatedExposure>();
@@ -135,6 +137,14 @@ export class CellularReceptorsEngine {
       if (!drugDef || dose.currentCe <= 0.00001) continue;
       if (!getSpeciesDoseRange(drugDef, patient.species)) continue;
       const route = getRoutePharmacokinetics(drugDef, dose.route);
+      const isToleranceSensitive = Boolean(
+        drugDef.specialTraits?.isOpioid
+        || drugDef.specialTraits?.isAlpha2Agonist
+        || drugDef.specialTraits?.isSympathomimetic
+      );
+      const adaptiveSensitivity = isToleranceSensitive
+        ? Math.max(0.65, 1 - receptorAdaptiveFeedback * 0.35)
+        : 1;
       const current = exposures.get(drugDef.id) || {
         drugDef,
         totalCe: 0,
@@ -142,12 +152,12 @@ export class CellularReceptorsEngine {
         centralCe: 0,
         localCe: 0,
       };
-      current.totalCe += dose.currentCe;
-      current.systemicCe += dose.currentCe * route.systemicEffectFraction;
-      current.localCe += dose.currentCe * route.localNeuralEffectFraction;
+      current.totalCe += dose.currentCe * adaptiveSensitivity;
+      current.systemicCe += dose.currentCe * route.systemicEffectFraction * adaptiveSensitivity;
+      current.localCe += dose.currentCe * route.localNeuralEffectFraction * adaptiveSensitivity;
       // Neuraxial opioids retain a strong spinal effect with limited systemic exposure.
       const neuraxialOpioidFactor = dose.route === 'Epidural' && drugDef.specialTraits?.isOpioid ? 0.7 : 0;
-      current.centralCe += dose.currentCe * Math.max(route.systemicEffectFraction, neuraxialOpioidFactor);
+      current.centralCe += dose.currentCe * Math.max(route.systemicEffectFraction, neuraxialOpioidFactor) * adaptiveSensitivity;
       exposures.set(drugDef.id, current);
     }
 
@@ -199,6 +209,7 @@ export class CellularReceptorsEngine {
     let arousalDrive = 0;
     let directHeartRateEffect = 0;
     let directBloodPressureEffect = 0;
+    let directVasodilatorEffect = 0;
     let volumeExpansion = 0;
     let oxygenCarryingSupport = 0;
     let potassiumLoad = 0;
@@ -313,6 +324,9 @@ export class CellularReceptorsEngine {
 
         directHeartRateEffect += drugDef.effectHR * systemicResponse;
         directBloodPressureEffect += drugDef.effectBP * systemicResponse;
+        if (drugDef.specialTraits?.isDirectVasodilator) {
+          directVasodilatorEffect += Math.abs(drugDef.effectBP) * systemicResponse;
+        }
       }
 
       if (drugDef.id === 'fluid_lrs') volumeExpansion += systemicResponse * 0.45;
@@ -515,6 +529,7 @@ export class CellularReceptorsEngine {
       nociceptiveInhibition,
       directHeartRateEffect: clamp(directHeartRateEffect, -1.5, 1.5),
       directBloodPressureEffect: clamp(directBloodPressureEffect, -1.5, 1.5),
+      directVasodilatorEffect: clamp(directVasodilatorEffect),
       acuteBolusHypotension: clamp(acuteBolusHypotension),
       acuteBolusRespiratoryDepression: clamp(acuteBolusRespiratoryDepression),
       acuteBolusBradycardia: clamp(acuteBolusBradycardia),

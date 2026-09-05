@@ -286,7 +286,7 @@ export function stopInfusion(state: SimulationState, drugId: string): void {
 export function advanceSimulation(
   state: SimulationState,
   durationSeconds: number,
-  options: { dtSeconds?: number; surgicalStimulation?: boolean } = {}
+  options: { dtSeconds?: number; surgicalStimulation?: boolean | number } = {}
 ): SimulationState {
   const dtSeconds = options.dtSeconds ?? 1;
   const steps = Math.ceil(durationSeconds / dtSeconds);
@@ -302,7 +302,7 @@ export function advanceSimulation(
       state.doses,
       state.equipment,
       state.resuscitation,
-      Boolean(options.surgicalStimulation),
+      options.surgicalStimulation ?? false,
       state.vitals
     );
     state.vitals = result.vitals;

@@ -33,8 +33,13 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
   const hasApnea = !vitals.isDead && !vitals.isCardiacArrest && vitals.isRespiratoryArrest;
   const hasInteractions = !vitals.isDead && vitals.activeDrugInteractions && vitals.activeDrugInteractions.length > 0;
   const hasIschemia = !vitals.isDead && !vitals.isCardiacArrest && !hasImpendingDeath && (vitals.hypoxiaExposureSeconds > 25 || vitals.myocardialIschemiaScore > 0.40);
+  const hasHomeostaticFailure = !vitals.isDead && !vitals.isCardiacArrest && (
+    vitals.biologicalState.organPerfusion.cumulativeOxygenDebt > 0.25
+    || vitals.arterialBloodGases.glucoseMgDl < 55
+    || vitals.arterialBloodGases.glucoseMgDl > 280
+  );
 
-  const totalAlertsCount = (hasDead ? 1 : 0) + (hasPCR ? 1 : 0) + (hasImpendingDeath ? 1 : 0) + (hasApnea ? 1 : 0) + (hasInteractions ? vitals.activeDrugInteractions.length : 0) + (hasIschemia ? 1 : 0);
+  const totalAlertsCount = (hasDead ? 1 : 0) + (hasPCR ? 1 : 0) + (hasImpendingDeath ? 1 : 0) + (hasApnea ? 1 : 0) + (hasInteractions ? vitals.activeDrugInteractions.length : 0) + (hasIschemia ? 1 : 0) + (hasHomeostaticFailure ? 1 : 0);
 
   if (totalAlertsCount === 0) return null;
 
@@ -170,7 +175,7 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
                   <span className="font-extrabold text-xs text-red-100 uppercase tracking-wide flex items-center gap-1.5">
                     <span>🚨 PARADA CARDIORRESPIRATÓRIA (PCR)</span>
                     <span className="text-[9px] px-1.5 py-0.2 rounded bg-red-800 text-white uppercase font-sans font-bold">
-                      RECOVER CODE RED
+                      CÓDIGO VERMELHO · RECOVER
                     </span>
                   </span>
                   <span className="text-[10px] text-red-300 font-mono-code uppercase">
@@ -271,6 +276,18 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
                 <strong className="text-amber-100">SOFRIMENTO MIOCÁRDICO & ISQUEMIA ({Math.round(vitals.myocardialIschemiaScore * 100)}%):</strong>
                 <span className="text-amber-300 ml-1 font-sans">
                   Hipóxia acumulada {Math.round(vitals.hypoxiaExposureSeconds)}s. Risco iminente de Taquicardia Ventricular e Fibrilação!
+                </span>
+              </div>
+            </div>
+          )}
+
+          {hasHomeostaticFailure && (
+            <div className="p-2 rounded-lg bg-fuchsia-950/70 border border-fuchsia-500/70 text-fuchsia-200 text-xs font-mono-code flex items-center gap-2">
+              <Zap className="w-4 h-4 text-fuchsia-400 shrink-0" />
+              <div className="text-[11px]">
+                <strong className="text-fuchsia-100">FALHA HOMEOSTÁTICA:</strong>
+                <span className="ml-1 font-sans">
+                  Entrega de O₂ {vitals.biologicalState.organPerfusion.oxygenDeliveryMlKgMin.toFixed(1)} mL/kg/min · dívida celular {Math.round(vitals.biologicalState.organPerfusion.cumulativeOxygenDebt * 100)}% · glicemia {vitals.arterialBloodGases.glucoseMgDl.toFixed(0)} mg/dL.
                 </span>
               </div>
             </div>

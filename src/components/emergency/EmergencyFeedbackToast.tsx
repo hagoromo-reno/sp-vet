@@ -6,6 +6,9 @@ export interface EmergencyFeedbackItem {
   title: string;
   message: string;
   type: 'cpr' | 'drug' | 'airway' | 'rosc' | 'danger';
+  category?: string;
+  severity?: 'informação' | 'atenção' | 'crítico';
+  simTimeSeconds?: number;
 }
 
 interface EmergencyFeedbackToastProps {
@@ -51,7 +54,7 @@ export const EmergencyFeedbackToast: React.FC<EmergencyFeedbackToastProps> = ({
   );
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 max-w-md w-full animate-in slide-in-from-bottom-5 duration-300">
+    <div className="fixed right-6 top-20 z-50 max-w-md w-full animate-in slide-in-from-right-5 duration-300">
       <div
         className={`p-4 rounded-xl border shadow-2xl backdrop-blur-md flex items-start justify-between gap-3 ${borderClass}`}
       >

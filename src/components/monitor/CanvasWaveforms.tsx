@@ -813,7 +813,7 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
           }`}
           title="Alternar preenchimento sombreado sob curvas (estilo Philips/Mindray)"
         >
-          {showShading ? 'Sombra ON' : 'Sombra OFF'}
+          {showShading ? 'Sombra ativa' : 'Sombra desativada'}
         </button>
       </div>
 

@@ -21,8 +21,12 @@ import { SpeciesPhysiologyEngine, SPECIES_CELLULAR_CONFIGS } from './speciesPhys
 import { HemodynamicCircuitEngine } from './hemodynamicCircuit';
 import { RespiratoryGasExchangeEngine } from './respiratoryGasExchange';
 import { DynamicInteractionsEngine } from './dynamicInteractions';
-import { getRoutePharmacokinetics, getSpeciesDoseRange, isExtravascularRoute } from './drugAdministration';
+import { getSpeciesDoseRange } from './drugAdministration';
 import { BiologicalStateEngine } from './biologicalState';
+import { PharmacokineticModel } from './pharmacokineticModel';
+import { InhalantKineticsEngine } from './inhalantKinetics';
+import { BiotransformationEngine, resolveBiotransformationProfile } from './biotransformationEngine';
+import { PhysiologicalOrchestrator } from './physiologicalOrchestrator';
 
 export class PKPDEngine {
   /**
@@ -42,12 +46,16 @@ export class PKPDEngine {
     activeDoses: ActiveDrugDose[],
     equipment: AnesthesiaEquipmentState,
     resuscitation: ResuscitationState,
-    isSurgicalStimulationActive: boolean,
+    surgicalStimulation: boolean | number,
     previousVitals?: VitalSigns
   ): { vitals: VitalSigns; updatedDoses: ActiveDrugDose[]; equipmentUpdates: Partial<AnesthesiaEquipmentState> } {
     const speciesInfo = SPECIES_DATABASE[patient.species] || SPECIES_DATABASE.canine;
     const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
-    const dtMin = dtSeconds / 60.0;
+    const surgicalStimulusIntensity = typeof surgicalStimulation === 'number'
+      ? Math.max(0, Math.min(1, surgicalStimulation))
+      : surgicalStimulation ? 1 : 0;
+    const isSurgicalStimulationActive = surgicalStimulusIntensity > 0;
+    let biologicalState = previousVitals?.biologicalState ?? BiologicalStateEngine.initialize(patient);
 
     // Previous state accumulators
     let hypoxiaSeconds = previousVitals?.hypoxiaExposureSeconds || 0;
@@ -130,14 +138,11 @@ export class PKPDEngine {
       let deliveryElapsed = dose.deliveryElapsedSec || 0;
       const priorTransitLag = Math.max(0, dose.transitLagRemainingSec || 0);
       const transitLagRemaining = Math.max(0, priorTransitLag - dtSeconds);
-      const pharmacologicallyActiveSeconds = priorTransitLag <= 0
-        ? dtSeconds
-        : Math.max(0, dtSeconds - priorTransitLag);
       let isFullyDelivered = dose.isFullyDelivered || false;
       let isFastBolusShockTriggered = dose.isFastBolusShockTriggered || false;
       let shockMagnitude = dose.bolusShockMagnitude || 0;
       let bolusShockRemainingSec = Math.max(0, (dose.bolusShockRemainingSec || 0) - dtSeconds);
-      const routePK = getRoutePharmacokinetics(drugDef, dose.route);
+      let pkCompartments = dose.pkCompartments;
 
       // Acute Fast Bolus Hemodynamic Shock
       if (dose.administrationSpeed === 'bolus_rapid' && !isFastBolusShockTriggered && transitLagRemaining <= 0) {
@@ -152,69 +157,53 @@ export class PKPDEngine {
         }
       }
 
-      // Route-aware normalized PK + bio-phase equilibration. The normalized
-      // exposure is converted to saturable occupancy by CellularReceptorsEngine.
-      if (pharmacologicallyActiveSeconds > 0) {
-        const activeDtMin = pharmacologicallyActiveSeconds / 60;
-        const typicalDose = speciesDoseRange.typical;
-        const normalizedDose = dose.dosePerKg / typicalDose;
-
-        const metabolicClearanceFactor = ageClearanceFactor * asaClearanceFactor * (
-          glucuronidationSensitiveDrugs.has(drugDef.id)
-            ? speciesConfig.glucuronidationClearanceMultiplier
-            : 1
-        );
-        const eliminationHalfLife = Math.max(0.1, drugDef.halfLifeBeta / Math.max(0.05, metabolicClearanceFactor));
-        const kel = Math.log(2) / eliminationHalfLife;
-
-        if (dose.isCRI) {
-          const isRunning = dose.isInfusionRunning !== false && (dose.criRatePerKgMin || 0) > 0;
-          if (isRunning) {
-            // The catalog rate defines a normalized steady-state target. This keeps
-            // /min and /h prescriptions dimensionally consistent after UI conversion.
-            const typicalRatePerMin = (drugDef.criDoseUnit?.endsWith('/h') || drugDef.doseUnit.endsWith('/h'))
-              ? typicalDose / 60
-              : typicalDose;
-            const targetCp = (dose.criRatePerKgMin || 0) / Math.max(0.00001, typicalRatePerMin);
-            const approachRate = Math.max(kel, Math.log(2) / Math.max(0.25, drugDef.onsetMinutes));
-            newCp += approachRate * (targetCp - newCp) * activeDtMin;
-          } else {
-            newCp = Math.max(0, newCp - kel * newCp * activeDtMin);
-            isFullyDelivered = true;
-          }
-          deliveryElapsed += pharmacologicallyActiveSeconds;
-        } else if (isExtravascularRoute(dose.route)) {
-          const previousElapsedMin = deliveryElapsed / 60;
-          deliveryElapsed += pharmacologicallyActiveSeconds;
-          const nextElapsedMin = deliveryElapsed / 60;
-          const ka = Math.log(2) / Math.max(0.05, routePK.absorptionHalfLifeMinutes);
-          const previousAbsorbed = routePK.bioavailability * (1 - Math.exp(-ka * previousElapsedMin));
-          const nextAbsorbed = routePK.bioavailability * (1 - Math.exp(-ka * nextElapsedMin));
-          newCp += normalizedDose * Math.max(0, nextAbsorbed - previousAbsorbed);
-          isFullyDelivered = nextAbsorbed >= routePK.bioavailability * 0.995;
-
-          const distributionRate = Math.log(2) / Math.max(0.1, drugDef.halfLifeAlpha);
-          const distributionWeight = Math.exp(-nextElapsedMin / Math.max(0.1, drugDef.halfLifeAlpha));
-          const effectiveLossRate = kel + (distributionRate - kel) * distributionWeight * 0.35;
-          newCp = Math.max(0, newCp - effectiveLossRate * newCp * activeDtMin);
-        } else {
-          const deliveryDuration = Math.max(0.1, dose.deliveryDurationSec || 1);
-          const previousFraction = Math.min(1, deliveryElapsed / deliveryDuration);
-          deliveryElapsed += pharmacologicallyActiveSeconds;
-          const nextFraction = Math.min(1, deliveryElapsed / deliveryDuration);
-          newCp += normalizedDose * Math.max(0, nextFraction - previousFraction);
-          isFullyDelivered = nextFraction >= 1;
-
-          const elapsedMin = deliveryElapsed / 60;
-          const distributionRate = Math.log(2) / Math.max(0.1, drugDef.halfLifeAlpha);
-          const distributionWeight = Math.exp(-elapsedMin / Math.max(0.1, drugDef.halfLifeAlpha));
-          const effectiveLossRate = kel + (distributionRate - kel) * distributionWeight;
-          newCp = Math.max(0, newCp - effectiveLossRate * newCp * activeDtMin);
-        }
-
-        const ke0 = drugDef.ke0;
-        newCe = Math.max(0, newCe + ke0 * (newCp - newCe) * activeDtMin);
-      }
+      const baselineCardiacOutput = patient.weightKg * speciesConfig.cardiacOutputMlKgMin / 1000;
+      const priorCardiacOutputRatio = previousVitals
+        ? previousVitals.cellularState.cardiacOutputLMin / Math.max(0.05, baselineCardiacOutput)
+        : 1;
+      const priorMapRatio = (previousVitals?.meanArterialPressure ?? patient.baselineVitals.map)
+        / Math.max(20, patient.baselineVitals.map);
+      const perfusionDependentClearance = Math.max(
+        0.2,
+        Math.min(
+          1.25,
+          previousVitals?.biologicalState
+            ? previousVitals.biologicalState.organPerfusion.hepaticFraction * 0.75
+              + previousVitals.biologicalState.organPerfusion.renalFraction * 0.25
+            : priorCardiacOutputRatio * 0.6 + priorMapRatio * 0.4
+        )
+      );
+      const temperatureClearance = Math.max(
+        0.55,
+        Math.min(1.08, 1 - Math.max(0, 38 - (previousVitals?.bodyTemperatureC ?? patient.baselineVitals.tempC)) * 0.09)
+      );
+      const metabolicClearanceFactor = ageClearanceFactor * asaClearanceFactor
+        * perfusionDependentClearance * temperatureClearance
+        * (glucuronidationSensitiveDrugs.has(drugDef.id)
+          ? speciesConfig.glucuronidationClearanceMultiplier
+          : 1);
+      const transformationProfile = resolveBiotransformationProfile(drugDef);
+      const organBiotransformationCapacity = transformationProfile.hepaticClearanceFraction
+        * biologicalState.biotransformation.hepaticEnzymeCapacity
+        + transformationProfile.renalClearanceFraction
+        * biologicalState.biotransformation.renalFiltrationCapacity
+        + Math.max(0, 1 - transformationProfile.hepaticClearanceFraction - transformationProfile.renalClearanceFraction);
+      const bolusRange = getSpeciesDoseRange(drugDef, patient.species, false) || speciesDoseRange;
+      const criRange = getSpeciesDoseRange(drugDef, patient.species, true);
+      const pkStep = PharmacokineticModel.step(
+        dtSeconds,
+        patient,
+        drugDef,
+        dose,
+        bolusRange.typical,
+        criRange?.typical,
+        metabolicClearanceFactor * Math.max(0.18, organBiotransformationCapacity)
+      );
+      newCp = pkStep.currentCp;
+      newCe = pkStep.currentCe;
+      deliveryElapsed = pkStep.deliveryElapsedSec;
+      isFullyDelivered = pkStep.isFullyDelivered;
+      pkCompartments = pkStep.pkCompartments;
 
       // Species-Specific Toxicological Overdose Triggers
       const cumulativeDose = cumulativeBolusDosePerKg.get(drugDef.id) || dose.dosePerKg;
@@ -256,6 +245,9 @@ export class PKPDEngine {
         !isFullyDelivered ||
         newCp > 0.0001 ||
         newCe > 0.0001 ||
+        (pkCompartments?.rapidPeripheralAmountNormalized || 0) > 0.0001 ||
+        (pkCompartments?.deepPeripheralAmountNormalized || 0) > 0.0001 ||
+        (pkCompartments?.absorptionDepotAmountNormalized || 0) > 0.0001 ||
         transitLagRemaining > 0 ||
         priorTransitLag > 0 ||
         bolusShockRemainingSec > 0 ||
@@ -269,8 +261,13 @@ export class PKPDEngine {
           isFastBolusShockTriggered,
           bolusShockMagnitude: shockMagnitude,
           bolusShockRemainingSec,
+          previousCp: dose.currentCp,
+          previousCe: dose.currentCe,
           currentCp: newCp,
           currentCe: newCe,
+          peakObservedCp: Math.max(dose.peakObservedCp || 0, newCp),
+          peakObservedCe: Math.max(dose.peakObservedCe || 0, newCe),
+          pkCompartments,
         };
         updatedDoses.push(updatedDose);
 
@@ -285,30 +282,37 @@ export class PKPDEngine {
       }
     }
 
+    biologicalState = {
+      ...biologicalState,
+      biotransformation: BiotransformationEngine.step(
+        dtSeconds,
+        updatedDoses,
+        biologicalState.biotransformation,
+        biologicalState.organPerfusion.hepaticFraction,
+        biologicalState.organPerfusion.renalFraction
+      ),
+    };
+
     // ----------------------------------------------------
     // 2. INHALATION PHARMACOKINETICS
     // ----------------------------------------------------
-    let deliveredVaporizerPct = 0;
-    if (
-      equipment.isVaporizerOn
-      && !equipment.isOxygenFlushActive
-      && equipment.oxygenFlowLMin > 0.1
-      && (equipment.intubationStatus === 'intubated_tracheal' || equipment.intubationStatus === 'laryngeal_mask')
-    ) {
-      deliveredVaporizerPct = equipment.vaporizerDialPct;
-    }
-
-    const macSpecies = equipment.vaporizerType === 'isoflurane' ? speciesInfo.macValues.isoflurane : speciesInfo.macValues.sevoflurane;
-    const inspiredMac = deliveredVaporizerPct / macSpecies;
-    const previousInhalantCe = previousVitals?.cellularState?.volatileAnestheticMac || 0;
     const baselineMinuteVentilation = Math.max(0.1, patient.baselineVitals.rr * patient.weightKg * 0.012);
     const priorMinuteVentilation = Math.max(0.05, previousVitals?.minuteVolumeL || baselineMinuteVentilation);
     const ventilationFactor = Math.max(0.25, Math.min(2, priorMinuteVentilation / baselineMinuteVentilation));
-    const circuitFlowFactor = Math.max(0.35, Math.min(1.4, equipment.oxygenFlowLMin / Math.max(0.5, patient.weightKg * 0.05)));
-    const baseTimeConstantSec = equipment.vaporizerType === 'sevoflurane' ? 48 : 75;
-    const washTimeConstantSec = baseTimeConstantSec / Math.sqrt(ventilationFactor * circuitFlowFactor);
-    const inhalantAlpha = 1 - Math.exp(-dtSeconds / washTimeConstantSec);
-    const inhalantCe = Math.max(0, previousInhalantCe + (inspiredMac - previousInhalantCe) * inhalantAlpha);
+    const priorCardiacOutputRatioForGas = previousVitals
+      ? previousVitals.cellularState.cardiacOutputLMin
+        / Math.max(0.05, patient.weightKg * speciesConfig.cardiacOutputMlKgMin / 1000)
+      : 1;
+    const inhalantStep = InhalantKineticsEngine.step(
+      dtSeconds,
+      patient,
+      equipment,
+      biologicalState.inhalant,
+      ventilationFactor,
+      priorCardiacOutputRatioForGas
+    );
+    biologicalState = { ...biologicalState, inhalant: inhalantStep.state };
+    const inhalantCe = inhalantStep.state.vesselRichMac;
 
     // ----------------------------------------------------
     // 3. CELLULAR RECEPTOR & TRANSDUCTION ENGINE
@@ -317,7 +321,8 @@ export class PKPDEngine {
       patient,
       updatedDoses,
       inhalantCe,
-      equipment.vaporizerType
+      equipment.vaporizerType,
+      biologicalState.biotransformation.receptorAdaptiveFeedback
     );
 
     // ----------------------------------------------------
@@ -325,18 +330,52 @@ export class PKPDEngine {
     // ----------------------------------------------------
     const prevMAP = previousVitals?.meanArterialPressure ?? patient.baselineVitals.map;
     const prevHR = previousVitals?.heartRate ?? patient.baselineVitals.hr;
-    // Large animals must not acquire recumbency shunt/timpanism merely because the
-    // simulation clock is running. Deep hypnosis, dissociation or motor blockade
-    // imply recumbency; tranquilization alone usually does not.
-    const isRecumbent = receptors.hypnoticEffect > 0.30
-      || receptors.dissociativeEffect > 0.48
-      || receptors.nmOccupancy > 0.25;
-    const isAtropineActive = (activeDrugEffects['atropine']?.Ce || 0) > 0.05;
-    let biologicalState = BiologicalStateEngine.stepSlowCompartments(
+    biologicalState = BiologicalStateEngine.stepRegulatorySystems(
       dtSeconds,
       patient,
       equipment,
-      previousVitals?.biologicalState ?? BiologicalStateEngine.initialize(patient),
+      biologicalState,
+      receptors,
+      surgicalStimulusIntensity,
+      previousVitals?.arterialBloodGases.paCO2 ?? patient.baselineVitals.etco2 + 4.5,
+      previousVitals?.pulseOximetrySpO2 ?? patient.baselineVitals.spo2,
+      prevMAP
+    );
+
+    // Nitroprusside releases cyanide during biotransformation; thiocyanate is
+    // subsequently cleared by the kidneys. This slow state makes prolonged or
+    // high-rate infusions visible instead of treating toxicity as an instant flag.
+    const nitroprussideRateMcgKgMin = updatedDoses
+      .filter((dose) => dose.drugId === 'sodium_nitroprusside' && dose.isInfusionRunning !== false)
+      .reduce((sum, dose) => sum + Math.max(0, dose.criRatePerKgMin || 0), 0);
+    const previousNitroprussideBurden = biologicalState.metabolic.nitroprussideToxicMetaboliteBurden || 0;
+    const hepaticDetoxification = biologicalState.organPerfusion.hepaticFraction;
+    const renalExcretion = biologicalState.organPerfusion.renalFraction;
+    const metaboliteInputPerSecond = nitroprussideRateMcgKgMin / (16 * 3600 * 3);
+    const metaboliteClearancePerSecond = previousNitroprussideBurden
+      * (hepaticDetoxification * 0.55 + renalExcretion * 0.45) / (12 * 3600);
+    biologicalState = {
+      ...biologicalState,
+      metabolic: {
+        ...biologicalState.metabolic,
+        nitroprussideToxicMetaboliteBurden: Math.max(0, Math.min(
+          1,
+          previousNitroprussideBurden + dtSeconds * (metaboliteInputPerSecond - metaboliteClearancePerSecond)
+        )),
+      },
+    };
+    // Large animals must not acquire recumbency shunt/timpanism merely because the
+    // simulation clock is running. Deep hypnosis, dissociation or motor blockade
+    // imply recumbency; tranquilization alone usually does not.
+    const isRecumbent = biologicalState.neurological.hypnoticDepth > 0.28
+      || biologicalState.neurological.dissociativeDepth > 0.46
+      || biologicalState.neurological.motorCapacity < 0.75;
+    const isAtropineActive = (activeDrugEffects['atropine']?.Ce || 0) > 0.05;
+    biologicalState = BiologicalStateEngine.stepSlowCompartments(
+      dtSeconds,
+      patient,
+      equipment,
+      biologicalState,
       isRecumbent,
       prevMAP,
       speciesConfig.criticalMapThresholdMmHg,
@@ -358,6 +397,18 @@ export class PKPDEngine {
       biologicalState.species.ruminalBloatSeverity
     );
 
+    // Independent engines publish typed one-to-one, one-to-many and broadcast
+    // signals. The orchestrator resolves them before organ solvers run, so an
+    // interaction/toxin changes the monitor rather than existing only as text.
+    const orchestration = PhysiologicalOrchestrator.step(
+      dtSeconds,
+      patient,
+      biologicalState,
+      receptors,
+      previousVitals
+    );
+    biologicalState = orchestration.state;
+
     // ----------------------------------------------------
     // 5. HEMODYNAMIC CIRCUIT & CLOSED-LOOP BAROREFLEX
     // ----------------------------------------------------
@@ -377,7 +428,11 @@ export class PKPDEngine {
       previousCriticalTimers,
       previousVitals?.pulseOximetrySpO2 ?? patient.baselineVitals.spo2,
       previousVitals?.arterialBloodGases.lactate ?? patient.baselineVitals.lactateMmolL,
-      previousVitals?.nociceptiveStressLevel ?? 0
+      previousVitals?.nociceptiveStressLevel ?? 0,
+      biologicalState.neurological.nociceptiveInput,
+      biologicalState.autonomic.catecholamineReserve,
+      previousVitals?.biologicalState.organPerfusion.oxygenDeliveryMlKgMin ?? 20,
+      orchestration.modifiers
     );
 
     ischemiaScore = hemodynamics.myocardialIschemiaScore;
@@ -387,6 +442,8 @@ export class PKPDEngine {
     // ----------------------------------------------------
     // 6. RESPIRATORY GAS EXCHANGE & ACID-BASE ENGINE
     // ----------------------------------------------------
+    const cardiacOutputRatio = hemodynamics.cardiacOutputLMin
+      / Math.max(0.1, patient.weightKg * speciesConfig.cardiacOutputMlKgMin / 1000);
     const respiration = RespiratoryGasExchangeEngine.stepRespiration(
       dtSeconds,
       simTimeSeconds,
@@ -401,12 +458,16 @@ export class PKPDEngine {
       previousVitals?.arterialBloodGases.lactate ?? patient.baselineVitals.lactateMmolL,
       speciesEval.shuntFractionPct,
       speciesEval.ruminalBloatSeverity,
-      hemodynamics.cardiacOutputLMin / Math.max(0.1, patient.weightKg * 0.11),
+      cardiacOutputRatio,
       hemodynamics.meanArterialPressure,
       previousVitals?.respiratoryRate ?? patient.baselineVitals.rr,
       previousVitals?.etCO2 ?? patient.baselineVitals.etco2,
       hemodynamics.nociceptiveStressLevel,
-      biologicalState.fluids.currentHematocritPct
+      biologicalState.fluids.currentHematocritPct,
+      biologicalState.respiratory.centralDrive,
+      biologicalState.respiratory.neuromuscularCapacity,
+      biologicalState.respiratory.alveolarRecruitment,
+      orchestration.modifiers
     );
 
     hypoxiaSeconds = respiration.hypoxiaSecondsAccumulated;
@@ -423,7 +484,12 @@ export class PKPDEngine {
       receptors.beta1Drive,
       hemodynamics.nociceptiveStressLevel,
       respiration.pulseOximetrySpO2,
-      hemodynamics.meanArterialPressure
+      hemodynamics.meanArterialPressure,
+      cardiacOutputRatio,
+      respiration.arterialBloodGases.paO2,
+      orchestration.modifiers.cellularOxygenUtilizationFraction,
+      orchestration.modifiers.hepaticPerfusionMultiplier,
+      orchestration.modifiers.renalPerfusionMultiplier
     );
 
     // Barotrauma Check
@@ -469,6 +535,12 @@ export class PKPDEngine {
       triggeredArrestNow = true;
       arrestType = 'asystole';
       arrestCause = `Parada Cardiorrespiratória por Anóxia Miocárdica Aguda (${Math.round(hypoxiaSeconds)}s em hipóxia crítica)`;
+    }
+
+    if (biologicalState.organPerfusion.cumulativeOxygenDebt > 0.92 && !isAlreadyArrested && !isAlreadyDead) {
+      triggeredArrestNow = true;
+      arrestType = 'pea';
+      arrestCause = 'Parada por falência de entrega sistêmica de oxigênio (baixo débito/anemia/hipoxemia prolongados)';
     }
 
     if (triggeredArrestNow) {
@@ -662,16 +734,21 @@ export class PKPDEngine {
     // ----------------------------------------------------
     const gCl = receptors.gabaAChlorideConductance;
     const gabaHypnosis = Math.max(0, Math.min(1, (gCl - 0.08) / 1.25));
-    const generalHypnosis = Math.max(gabaHypnosis, receptors.hypnoticEffect);
-    const dissociation = receptors.dissociativeEffect;
-    const sedation = receptors.centralSedation;
+    const generalHypnosis = Math.max(
+      biologicalState.neurological.hypnoticDepth,
+      gabaHypnosis * 0.35
+    );
+    const dissociation = biologicalState.neurological.dissociativeDepth;
+    const sedation = biologicalState.neurological.sedativeDepth;
     let anestheticDepthScore = Math.round(Math.min(100, Math.max(
       generalHypnosis * 100,
-      dissociation * 82,
-      sedation * 68
+      gabaHypnosis * 100,
+      receptors.hypnoticEffect * 100,
+      receptors.dissociativeEffect * 82,
+      receptors.centralSedation * 68
     )));
 
-    let consciousnessScore = 100;
+    let consciousnessScore = Math.round(biologicalState.neurological.corticalArousalPct);
     let guedelStage: VitalSigns['guedelStage'] = 'Estágio I (Consciente / Alerta)';
     let eyePosition: EyePosition = 'central_light';
     let palpebralReflex: ReflexStrength = 'brisk';
@@ -806,6 +883,27 @@ export class PKPDEngine {
       palpebralReflex = receptors.nmOccupancy > 0.75 ? 'absent' : 'sluggish';
     }
 
+    if (!isAlreadyDead && !isAlreadyArrested) {
+      // Emergence is limited by the integrated cortical state, preventing an
+      // instantaneous jump to full awareness when Ce crosses a display threshold.
+      consciousnessScore = Math.round(Math.max(
+        0,
+        Math.min(consciousnessScore, biologicalState.neurological.corticalArousalPct)
+      ));
+    }
+    const painScore = Number(Math.min(
+      10,
+      biologicalState.neurological.nociceptiveInput * 8
+        + biologicalState.neurological.centralSensitization * 2
+    ).toFixed(1));
+    const activityLevelPct = Math.round(Math.max(0, Math.min(
+      140,
+      biologicalState.neurological.motorCapacity
+        * (0.05 + consciousnessScore / 100 * 0.95)
+        * (1 + biologicalState.neurological.excitationDrive * 0.55)
+        * 100
+    )));
+
     // ----------------------------------------------------
     // 10. PHYSICAL EXAM & PERFUSION
     // ----------------------------------------------------
@@ -818,7 +916,11 @@ export class PKPDEngine {
     } else if (respiration.pulseOximetrySpO2 < 78) {
       mmColor = 'cyanotic';
       crt = '> 3s (poor perfusion)';
-    } else if (hemodynamics.meanArterialPressure < 45 || patient.pathologyConditions.hypovolemiaSeverity) {
+    } else if (
+      hemodynamics.meanArterialPressure < 45
+      || respiration.arterialBloodGases.hematocritPct < 20
+      || patient.pathologyConditions.hypovolemiaSeverity
+    ) {
       mmColor = 'pale';
       crt = '> 3s (poor perfusion)';
     } else if (patient.pathologyConditions.sepsisVasodilation) {
@@ -1034,6 +1136,8 @@ export class PKPDEngine {
         glucoseMgDl: Number(biologicalState.metabolic.bloodGlucoseMgDl.toFixed(1)),
       },
       consciousnessScore,
+      activityLevelPct,
+      painScore,
       anestheticDepthScore,
       guedelStage,
       eyePosition,
@@ -1047,7 +1151,12 @@ export class PKPDEngine {
       mucousMembraneColor: mmColor,
       capillaryRefillTime: crt,
       pulseQuality,
-      perfusionIndex: Number((Math.max(0, (finalMAP / 85) * (finalSpO2 / 100))).toFixed(2)),
+      perfusionIndex: Number((Math.max(
+        0,
+        (finalMAP / 85)
+          * (finalSpO2 / 100)
+          * Math.min(1.2, respiration.arterialBloodGases.hematocritPct / Math.max(20, patient.baselineVitals.hctPct))
+      )).toFixed(2)),
 
       // Organ Failures & Arrest States
       isRespiratoryArrest: respiration.isRespiratoryArrest,
@@ -1064,6 +1173,14 @@ export class PKPDEngine {
       asystoleSecondsElapsed: Math.round(asystoleSeconds),
       cprSecondsElapsed: Math.round(cprSeconds),
       activeDrugInteractions,
+      activePhysiologicalSignals: orchestration.signals.map((signal) => ({
+        id: signal.id,
+        source: signal.source,
+        targets: signal.targets,
+        topology: signal.topology,
+        severity: signal.severity,
+        label: signal.label,
+      })),
       myocardialIschemiaScore: Number(ischemiaScore.toFixed(5)),
       hypoxiaExposureSeconds: Number(hypoxiaSeconds.toFixed(3)),
       severeAcidosisRisk: respiration.arterialBloodGases.pH < 7.15,

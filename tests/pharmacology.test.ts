@@ -10,11 +10,14 @@ import {
 import { PHARMACOLOGY_EXPECTATIONS } from '../src/validation/pharmacologyExpectations';
 import { createHealthyValidationPatient } from '../src/validation/simulationHarness';
 import { SpeciesType } from '../src/types/simulator';
+import { PharmacokineticModel } from '../src/engine/pharmacokineticModel';
+import { createActiveDose } from '../src/validation/simulationHarness';
+import { analyzeDrugExposure } from '../src/engine/exposureAnalysis';
 
 const SPECIES: SpeciesType[] = ['canine', 'feline', 'equine', 'bovine', 'rabbit', 'avian'];
 
 test('catálogo e contratos clínicos têm paridade completa e IDs únicos', () => {
-  assert.equal(VETERINARY_DRUG_DATABASE.length, 38);
+  assert.equal(VETERINARY_DRUG_DATABASE.length, 40);
   const catalogIds = VETERINARY_DRUG_DATABASE.map((drug) => drug.id);
   const contractIds = PHARMACOLOGY_EXPECTATIONS.map((item) => item.drugId);
   assert.equal(new Set(catalogIds).size, catalogIds.length);
@@ -95,4 +98,42 @@ test('administração não herda dose canina nem mistura taxa com bólus', () =>
   assert.deepEqual(validateAdministrationCommand(canine, acepromazine, {
     route: 'IV', administrationSpeed: 'bolus_rapid', isCRI: false, dosePerKg: 0.125,
   }), []);
+});
+
+test('todos os fármacos desenvolvem exposição plasmática, efeito e washout finitos', () => {
+  for (const drug of VETERINARY_DRUG_DATABASE) {
+    const species = SPECIES.find((item) => getSpeciesDoseRange(drug, item, drug.supportedRoutes[0] === 'CRI'))
+      || SPECIES.find((item) => getSpeciesDoseRange(drug, item));
+    assert.ok(species, `${drug.id}: nenhuma espécie com regime`);
+    const patient = createHealthyValidationPatient(species);
+    const dose = createActiveDose(patient, drug.id);
+    dose.transitLagRemainingSec = 0;
+
+    const bolusRange = getSpeciesDoseRange(drug, species, false) || getSpeciesDoseRange(drug, species, true);
+    const criRange = getSpeciesDoseRange(drug, species, true);
+    assert.ok(bolusRange, `${drug.id}/${species}: normalização ausente`);
+
+    let current = dose;
+    let peakCp = 0;
+    let peakCe = 0;
+    for (let minute = 0; minute < 30; minute += 1) {
+      const result = PharmacokineticModel.step(60, patient, drug, current, bolusRange.typical, criRange?.typical, 1);
+      current = { ...current, ...result, transitLagRemainingSec: 0 };
+      peakCp = Math.max(peakCp, result.currentCp);
+      peakCe = Math.max(peakCe, result.currentCe);
+    }
+    assert.ok(Number.isFinite(peakCp) && peakCp > 0, `${drug.id}: Cp não se estabeleceu`);
+    assert.ok(Number.isFinite(peakCe) && peakCe > 0, `${drug.id}: Ce não se estabeleceu`);
+
+    current = { ...current, isInfusionRunning: false, criRatePerKgMin: 0 };
+    const washoutMinutes = Math.max(120, drug.halfLifeBeta * 4);
+    for (let minute = 0; minute < washoutMinutes; minute += 1) {
+      const result = PharmacokineticModel.step(60, patient, drug, current, bolusRange.typical, criRange?.typical, 1);
+      current = { ...current, ...result, transitLagRemainingSec: 0 };
+    }
+    assert.ok(Number.isFinite(current.currentCp) && current.currentCp < peakCp, `${drug.id}: Cp não caiu no washout`);
+    assert.ok(Number.isFinite(current.currentCe) && current.currentCe < peakCe, `${drug.id}: Ce não caiu no washout`);
+    const analysis = analyzeDrugExposure({ ...current, previousCp: peakCp, previousCe: peakCe, peakObservedCp: peakCp }, drug);
+    assert.ok(['washout', 'residual'].includes(analysis.phase), `${drug.id}: fase final ${analysis.phase}`);
+  }
 });

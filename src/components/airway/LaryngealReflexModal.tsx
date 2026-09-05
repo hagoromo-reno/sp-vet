@@ -1,6 +1,7 @@
 import React from 'react';
 import { PatientProfile, VitalSigns } from '../../types/simulator';
 import { AlertTriangle, ShieldCheck, Sparkles, X, Syringe, Skull } from 'lucide-react';
+import { formatSpecies } from '../../utils/formatters';
 
 interface LaryngealReflexModalProps {
   isOpen: boolean;
@@ -60,7 +61,7 @@ export const LaryngealReflexModal: React.FC<LaryngealReflexModalProps> = ({
           {/* Clinical Alert Box */}
           <div className="p-3 rounded-xl bg-[#1c1208] border border-amber-700/60 text-amber-200">
             <p className="leading-relaxed">
-              O paciente <strong>{patient.name}</strong> ({patient.species.toUpperCase()}) apresenta{' '}
+              O paciente <strong>{patient.name}</strong> ({formatSpecies(patient.species).toUpperCase()}) apresenta{' '}
               <strong className="text-amber-100">tônus mandibular &quot;{vitals.jawTone}&quot;</strong> e escore de profundidade anestésica de{' '}
               <strong className="text-amber-100">{vitals.anestheticDepthScore}%</strong>. A introdução direta da sonda endotraqueal #{tubeSizeMm} mm sem dessensibilização causará estimulação vagal intensa e reflexo protetor de oclusão.
             </p>

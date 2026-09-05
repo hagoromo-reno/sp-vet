@@ -63,6 +63,7 @@ export type DrugCategory =
   | 'opioid_analgesic'
   | 'antagonist_reversal'
   | 'emergency_inotrope'
+  | 'antihypertensive'
   | 'antiarrhythmic'
   | 'nmba'
   | 'nmba_reversal'
@@ -74,6 +75,36 @@ export type DrugCategory =
 export type DrugRoute = 'IV' | 'IV_slow' | 'IM' | 'SC' | 'CRI' | 'Inh' | 'Epidural' | 'Local';
 
 export type AdministrationSpeed = 'bolus_rapid' | 'bolus_slow' | 'infusion_cri';
+
+export type DrugConcentrationPhase =
+  | 'transit'
+  | 'absorption'
+  | 'rising'
+  | 'plateau'
+  | 'infusion'
+  | 'washout'
+  | 'residual';
+
+export type SurgicalProcedureKind =
+  | 'skin_incision'
+  | 'muscle_dissection'
+  | 'periosteal_manipulation'
+  | 'visceral_traction'
+  | 'abdominal_closure';
+
+export interface SurgicalProcedureDefinition {
+  id: SurgicalProcedureKind;
+  name: string;
+  description: string;
+  intensity: number;
+  durationSeconds: number;
+  tissueLayer: 'cutaneous' | 'muscular' | 'periosteal' | 'visceral' | 'mixed';
+}
+
+export interface ActiveSurgicalProcedure extends SurgicalProcedureDefinition {
+  startedAtSimTime: number;
+  endsAtSimTime: number;
+}
 
 export interface FastBolusConsequences {
   apneaRisk: number; // 0 to 1
@@ -174,8 +205,8 @@ export interface DrugDefinition {
   unit: 'mg' | 'mcg' | 'g' | 'ml' | '%' | 'UI' | 'mEq';
   doseUnit: 'mg/kg' | 'mcg/kg' | 'mg/kg/h' | 'mcg/kg/min' | 'ml/kg' | 'ml/kg/h' | '%' | 'UI/kg' | 'mEq/kg' | 'mEq/kg/h';
   recommendedDose: {
-    canine: { min: number; max: number; typical: number };
-    feline: { min: number; max: number; typical: number };
+    canine?: { min: number; max: number; typical: number };
+    feline?: { min: number; max: number; typical: number };
     equine?: { min: number; max: number; typical: number };
     bovine?: { min: number; max: number; typical: number };
     rabbit?: { min: number; max: number; typical: number };
@@ -232,7 +263,10 @@ export interface DrugDefinition {
     isLipidSink?: boolean;
     isFelineToxicIV?: boolean;
     isBovineHyperSensitive?: boolean;
+    isDirectVasodilator?: boolean;
+    hasCyanideToxicityRisk?: boolean;
   };
+  biotransformation?: Partial<DrugBiotransformationProfile>;
 }
 
 export interface ActiveDrugDose {
@@ -260,6 +294,35 @@ export interface ActiveDrugDose {
   bolusShockRemainingSec?: number;
   currentCe: number; // Effect-site concentration (0 to 1 normalized)
   currentCp: number; // Plasma concentration
+  previousCe?: number;
+  previousCp?: number;
+  peakObservedCe?: number;
+  peakObservedCp?: number;
+  concentrationPhase?: DrugConcentrationPhase;
+  estimatedEffectMinutesRemaining?: number;
+  pkCompartments?: {
+    centralAmountNormalized: number;
+    rapidPeripheralAmountNormalized: number;
+    deepPeripheralAmountNormalized: number;
+    absorptionDepotAmountNormalized: number;
+    cumulativeDeliveredNormalized: number;
+    cumulativeEliminatedNormalized: number;
+    bioavailableFraction: number;
+    effectiveClearanceMultiplier: number;
+    depotWasLoaded: boolean;
+  };
+}
+
+export interface DrugBiotransformationProfile {
+  primaryPathway: 'hepatic_phase_i' | 'hepatic_phase_ii' | 'renal' | 'plasma_esterase' | 'hoffmann' | 'redistribution' | 'none';
+  pathwayLabel: string;
+  enzymeSystem?: string;
+  hepaticClearanceFraction: number;
+  renalClearanceFraction: number;
+  proteinBindingFraction: number;
+  apparentCentralVolumeLKg: number;
+  lipidSolubility: number;
+  activeMetabolite?: string;
 }
 
 export interface PatientProfile {
@@ -310,6 +373,36 @@ export interface PatientProfile {
  * ruminal bloat and metabolic stress) from being inferred from the global clock.
  */
 export interface BiologicalState {
+  inhalant: {
+    inspiredMac: number;
+    alveolarMac: number;
+    vesselRichMac: number;
+    muscleMac: number;
+    fatMac: number;
+  };
+  neurological: {
+    corticalArousalPct: number;
+    hypnoticDepth: number;
+    sedativeDepth: number;
+    dissociativeDepth: number;
+    excitationDrive: number;
+    centralSensitization: number;
+    nociceptiveInput: number;
+    motorCapacity: number;
+    unconsciousnessSeconds: number;
+  };
+  autonomic: {
+    sympatheticDrive: number;
+    parasympatheticDrive: number;
+    catecholamineReserve: number;
+  };
+  organPerfusion: {
+    cerebralFraction: number;
+    hepaticFraction: number;
+    renalFraction: number;
+    oxygenDeliveryMlKgMin: number;
+    cumulativeOxygenDebt: number;
+  };
   species: {
     recumbencySeconds: number;
     lowMapExposureSeconds: number;
@@ -330,9 +423,36 @@ export interface BiologicalState {
     bloodGlucoseMgDl: number;
     insulinActivity: number;
     counterRegulatoryDrive: number;
+    nitroprussideToxicMetaboliteBurden: number; // 0 to 1, cyanide/thiocyanate risk proxy
+  };
+  /**
+   * Persistent state shared by the independent physiological engines. Unlike an
+   * alert, every value in this compartment is consumed by at least one organ
+   * solver on the following/current tick.
+   */
+  systemicRegulation: {
+    cellularOxygenUtilizationFraction: number;
+    cellularHypoxia: number;
+    myocardialStress: number;
+    arrhythmogenicBurden: number;
+    endothelialDysfunction: number;
+    hepaticInjury: number;
+    renalInjury: number;
+    compensatoryReserve: number;
+  };
+  biotransformation: {
+    hepaticEnzymeCapacity: number;
+    hepaticEnzymeSaturation: number;
+    renalFiltrationCapacity: number;
+    renalTransportSaturation: number;
+    circulatingMetaboliteBurden: number;
+    receptorAdaptiveFeedback: number;
   };
   respiratory: {
     highAirwayPressureSeconds: number;
+    centralDrive: number;
+    neuromuscularCapacity: number;
+    alveolarRecruitment: number;
   };
   resuscitation: {
     roscReadinessSeconds: number;
@@ -367,6 +487,8 @@ export interface VitalSigns {
   };
   // Neurological & Reflex Status
   consciousnessScore: number; // 0 (comatose/anesthetized) to 100 (fully awake/alert)
+  activityLevelPct: number; // 0 immobile to 100 normal, >100 hyperactive
+  painScore: number; // synthetic multidimensional pain score, 0 to 10
   anestheticDepthScore: number; // 0 (awake) to 100 (lethal/too deep)
   guedelStage:
     | 'Estágio I (Consciente / Alerta)'
@@ -427,6 +549,15 @@ export interface VitalSigns {
     severity: 'info' | 'warning' | 'danger' | 'lethal';
     description: string;
     pharmacologyMechanism: string;
+  }[];
+  /** Causal messages exchanged between organ engines during the latest tick. */
+  activePhysiologicalSignals: {
+    id: string;
+    source: string;
+    targets: string[];
+    topology: 'one-to-one' | 'one-to-many' | 'broadcast';
+    severity: number;
+    label: string;
   }[];
   myocardialIschemiaScore: number; // 0 to 1
   hypoxiaExposureSeconds: number;
@@ -536,6 +667,8 @@ export interface VitalRecordPoint {
   rr: number;
   tempC: number;
   glucoseMgDl: number;
+  painScore: number;
+  activityLevelPct: number;
   vaporizerPct: number;
   depthScore: number;
 }

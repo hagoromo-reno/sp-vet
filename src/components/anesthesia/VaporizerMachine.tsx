@@ -136,7 +136,7 @@ export const VaporizerMachine: React.FC<VaporizerMachineProps> = ({
                   : 'text-[#525252]'
               }`}
             >
-              {equipment.isVaporizerOn ? `${equipment.vaporizerDialPct.toFixed(1)} %` : '0.0 % (OFF)'}
+              {equipment.isVaporizerOn ? `${equipment.vaporizerDialPct.toFixed(1)} %` : '0,0 % (DESLIGADO)'}
             </span>
             <span className="text-[11px] font-mono-code text-[#888888]">
               CAM Entregue: <strong className="text-[#f5f5f5]">{deliveredMacMultiplier}x MAC</strong>

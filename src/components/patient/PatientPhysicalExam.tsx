@@ -1,19 +1,22 @@
 import React, { useState } from 'react';
-import { VitalSigns, PatientProfile } from '../../types/simulator';
-import { Eye, Hand, Stethoscope, Sparkles, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ActiveSurgicalProcedure, SurgicalProcedureDefinition, VitalSigns, PatientProfile } from '../../types/simulator';
+import { SURGICAL_PROCEDURES } from '../../data/surgicalProcedures';
+import { Eye, Hand, Stethoscope, Sparkles, CheckCircle2, AlertTriangle, Scissors, Square } from 'lucide-react';
 
 interface PatientPhysicalExamProps {
   patient: PatientProfile;
   vitals: VitalSigns;
-  onStimulateSurgical: () => void;
-  isSurgicalStimulationActive: boolean;
+  onStartSurgicalProcedure: (procedure: SurgicalProcedureDefinition) => void;
+  onStopSurgicalProcedure: () => void;
+  activeSurgicalProcedure: ActiveSurgicalProcedure | null;
 }
 
 export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
   patient,
   vitals,
-  onStimulateSurgical,
-  isSurgicalStimulationActive,
+  onStartSurgicalProcedure,
+  onStopSurgicalProcedure,
+  activeSurgicalProcedure,
 }) => {
   const [activeTestMessage, setActiveTestMessage] = useState<string | null>(null);
 
@@ -77,18 +80,54 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
           </p>
         </div>
 
-        {/* Surgical Stimulation Action Button */}
-        <button
-          onClick={onStimulateSurgical}
-          className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-lg ${
-            isSurgicalStimulationActive
-              ? 'bg-rose-600 text-white animate-pulse shadow-rose-950/60'
-              : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-black/40'
-          }`}
-        >
-          <Sparkles className="w-4 h-4" />
-          <span>{isSurgicalStimulationActive ? 'ESTÍMULO CIRÚRGICO ATIVO...' : 'TESTAR ESTÍMULO CIRÚRGICO'}</span>
-        </button>
+        {activeSurgicalProcedure && (
+          <button
+            onClick={onStopSurgicalProcedure}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 text-white animate-pulse shadow-lg shadow-rose-950/60"
+          >
+            <Square className="w-3.5 h-3.5" />
+            Encerrar {activeSurgicalProcedure.name}
+          </button>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-rose-900/50 bg-rose-950/10 p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Scissors className="h-4 w-4 text-rose-400" />
+            <div>
+              <div className="text-xs font-bold text-rose-200">Procedimentos cirúrgicos graduados</div>
+              <div className="text-[10px] text-[#888888]">Cada tecido aplica intensidade e duração nociceptiva próprias.</div>
+            </div>
+          </div>
+          {activeSurgicalProcedure && (
+            <span className="rounded border border-rose-500/50 bg-rose-500/15 px-2 py-1 text-[10px] font-bold text-rose-200">
+              {Math.round(activeSurgicalProcedure.intensity * 100)}% · {activeSurgicalProcedure.tissueLayer}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+          {SURGICAL_PROCEDURES.map((procedure) => {
+            const selected = activeSurgicalProcedure?.id === procedure.id;
+            return (
+              <button
+                key={procedure.id}
+                onClick={() => onStartSurgicalProcedure(procedure)}
+                className={`rounded-lg border p-2 text-left transition ${selected
+                  ? 'border-rose-500 bg-rose-900/40 text-white'
+                  : 'border-[#2a2a2a] bg-[#141414] text-[#d4d4d4] hover:border-rose-700/70 hover:bg-[#1a1416]'}`}
+                title={procedure.description}
+              >
+                <span className="flex items-center gap-1 text-[10px] font-bold">
+                  <Sparkles className="h-3 w-3 text-rose-400" /> {procedure.name}
+                </span>
+                <span className="mt-1 block text-[9px] text-[#888888]">
+                  {Math.round(procedure.intensity * 100)}% · {procedure.durationSeconds}s
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Interactive Physical Exam Grid */}

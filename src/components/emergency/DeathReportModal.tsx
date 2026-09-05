@@ -1,6 +1,7 @@
 import React from 'react';
 import { PatientProfile, VitalSigns } from '../../types/simulator';
 import { Skull, AlertTriangle, RotateCcw, HeartPulse, FileText, CheckCircle2, X } from 'lucide-react';
+import { formatSpecies } from '../../utils/formatters';
 
 interface DeathReportModalProps {
   patient: PatientProfile;
@@ -74,7 +75,7 @@ export const DeathReportModal: React.FC<DeathReportModalProps> = ({
             <div>
               <span className="text-[#888888] block text-[11px]">Espécie / Porte:</span>
               <strong className="text-[#f5f5f5]">
-                {patient.species.toUpperCase()} · {patient.weightKg} kg
+                {formatSpecies(patient.species).toUpperCase()} · {patient.weightKg} kg
               </strong>
             </div>
             <div>

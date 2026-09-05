@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { PatientProfile, SpeciesType, ASAStatus } from '../../types/simulator';
 import { PRESET_SCENARIOS } from '../../data/scenarios';
 import { SPECIES_DATABASE } from '../../data/speciesData';
+import { formatSpecies } from '../../utils/formatters';
 import { FolderHeart, Plus, Check, X, ShieldAlert, Sparkles, Dog, Cat } from 'lucide-react';
 
 interface ScenarioSelectorModalProps {
@@ -146,7 +147,7 @@ export const ScenarioSelectorModal: React.FC<ScenarioSelectorModalProps> = ({
                       </div>
 
                       <div className="text-xs text-[#d4d4d4] font-semibold mb-1">
-                        {scenario.name} · {scenario.breed} ({scenario.weightKg} kg · {scenario.species.toUpperCase()})
+                        {scenario.name} · {scenario.breed} ({scenario.weightKg} kg · {formatSpecies(scenario.species).toUpperCase()})
                       </div>
 
                       <p className="text-xs text-[#888888] line-clamp-2 mb-2">

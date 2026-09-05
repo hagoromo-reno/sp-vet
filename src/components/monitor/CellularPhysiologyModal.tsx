@@ -1,5 +1,6 @@
 import React from 'react';
 import { PatientProfile, VitalSigns } from '../../types/simulator';
+import { formatSpecies } from '../../utils/formatters';
 import {
   Activity,
   Dna,
@@ -90,7 +91,7 @@ export const CellularPhysiologyModal: React.FC<CellularPhysiologyModalProps> = (
                   Biofísica Celular & Dinâmica de Sistemas
                 </h2>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-mono">
-                  {patient.species.toUpperCase()}
+                  {formatSpecies(patient.species).toUpperCase()}
                 </span>
               </div>
               <p className="text-xs text-[#8e8e9f]">
@@ -259,12 +260,41 @@ export const CellularPhysiologyModal: React.FC<CellularPhysiologyModalProps> = (
             </div>
           </div>
 
+          <div className="space-y-2">
+            <h3 className="text-sm font-bold text-white">Estado biológico persistente</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="p-3 rounded-xl bg-[#111118] border border-[#232330]">
+                <span className="text-[10px] text-[#8e8e9f]">SNC integrado</span>
+                <div className="mt-1 font-mono text-cyan-300">Alerta {vitals.biologicalState.neurological.corticalArousalPct.toFixed(0)}%</div>
+                <div className="text-[9px] text-[#717182]">Hipnose {Math.round(vitals.biologicalState.neurological.hypnoticDepth * 100)}% · Excitação {Math.round(vitals.biologicalState.neurological.excitationDrive * 100)}%</div>
+              </div>
+              <div className="p-3 rounded-xl bg-[#111118] border border-[#232330]">
+                <span className="text-[10px] text-[#8e8e9f]">Controle ventilatório</span>
+                <div className="mt-1 font-mono text-yellow-300">Drive {Math.round(vitals.biologicalState.respiratory.centralDrive * 100)}%</div>
+                <div className="text-[9px] text-[#717182]">Capacidade muscular {Math.round(vitals.biologicalState.respiratory.neuromuscularCapacity * 100)}%</div>
+              </div>
+              <div className="p-3 rounded-xl bg-[#111118] border border-[#232330]">
+                <span className="text-[10px] text-[#8e8e9f]">Perfusão orgânica</span>
+                <div className="mt-1 font-mono text-emerald-300">Hepática {Math.round(vitals.biologicalState.organPerfusion.hepaticFraction * 100)}%</div>
+                <div className="text-[9px] text-[#717182]">Renal {Math.round(vitals.biologicalState.organPerfusion.renalFraction * 100)}% · Cerebral {Math.round(vitals.biologicalState.organPerfusion.cerebralFraction * 100)}%</div>
+              </div>
+              <div className="p-3 rounded-xl bg-[#111118] border border-[#232330]">
+                <span className="text-[10px] text-[#8e8e9f]">Entrega de O₂</span>
+                <div className="mt-1 font-mono text-rose-300">{vitals.biologicalState.organPerfusion.oxygenDeliveryMlKgMin.toFixed(1)} mL/kg/min</div>
+                <div className="text-[9px] text-[#717182]">Dívida {Math.round(vitals.biologicalState.organPerfusion.cumulativeOxygenDebt * 100)}%</div>
+              </div>
+            </div>
+            <div className="text-[10px] text-[#717182] font-mono">
+              Inalatório (MAC): inspirado {vitals.biologicalState.inhalant.inspiredMac.toFixed(2)} · alveolar {vitals.biologicalState.inhalant.alveolarMac.toFixed(2)} · órgão-alvo {vitals.biologicalState.inhalant.vesselRichMac.toFixed(2)} · músculo {vitals.biologicalState.inhalant.muscleMac.toFixed(2)} · gordura {vitals.biologicalState.inhalant.fatMac.toFixed(2)}
+            </div>
+          </div>
+
           {/* Section: Species Specific Particularities Panel */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 text-amber-400" />
-                <span>Particularidades Biológicas da Espécie ({patient.species.toUpperCase()})</span>
+                <span>Particularidades Biológicas da Espécie ({formatSpecies(patient.species).toUpperCase()})</span>
               </h3>
               <span className="text-[11px] text-[#8e8e9f]">
                 Shunt V/Q Atual: <strong className="text-white font-mono">{cellular?.pulmonaryShuntFractionPct ?? 5}%</strong>

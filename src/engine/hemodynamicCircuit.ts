@@ -7,6 +7,10 @@ import {
 import { SPECIES_DATABASE } from '../data/speciesData';
 import { ReceptorStateSnapshot } from './cellularReceptors';
 import { SPECIES_CELLULAR_CONFIGS } from './speciesPhysiology';
+import {
+  NEUTRAL_PHYSIOLOGICAL_MODIFIERS,
+  type PhysiologicalModifiers,
+} from './systemCoupling';
 
 export interface HemodynamicOutputs {
   heartRate: number; // bpm
@@ -61,7 +65,11 @@ export class HemodynamicCircuitEngine {
     },
     previousSpO2: number = 98,
     previousLactate: number = 1,
-    previousNociceptiveStress: number = 0
+    previousNociceptiveStress: number = 0,
+    integratedNociceptiveInput: number = 0,
+    catecholamineReserve: number = 1,
+    previousOxygenDeliveryMlKgMin: number = 20,
+    coupling: PhysiologicalModifiers = NEUTRAL_PHYSIOLOGICAL_MODIFIERS
   ): HemodynamicOutputs {
     const speciesInfo = SPECIES_DATABASE[patient.species] || SPECIES_DATABASE.canine;
     const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
@@ -86,6 +94,7 @@ export class HemodynamicCircuitEngine {
     const volatileVasodilation = Math.min(0.68, Math.max(0, receptors.volatileMacExposure) * 0.18);
     const beta2Dilation = Math.max(0, receptors.beta2Drive) * 0.25;
     const calibratedPressureDilation = Math.max(0, -receptors.directBloodPressureEffect) * 0.10;
+    const titratableDirectVasodilation = receptors.directVasodilatorEffect * 0.52;
     const calibratedPressureSupport = Math.max(0, receptors.directBloodPressureEffect) * 0.16;
     const acuteVasodilation = receptors.acuteBolusHypotension * 0.28 + receptors.histamineRelease * 0.22;
 
@@ -106,9 +115,15 @@ export class HemodynamicCircuitEngine {
     const sedativeProt = Math.min(1.0, receptors.centralSedation * 0.85 + Math.max(0, receptors.alpha2Drive) * 0.90);
     const dissociativeProt = receptors.dissociativeEffect;
 
-    const targetBreakthrough = isSurgicalStimulationActive
-      ? Math.max(0, Math.min(1.0, (1 - analgesiaProt) * (1 - Math.min(0.92, hypnoticProt * 0.88)) * (1 - Math.min(0.92, sedativeProt * 0.82)) * (1 - Math.min(0.85, dissociativeProt * 0.70))))
-      : 0;
+    const afferentStimulus = integratedNociceptiveInput > 0
+      ? integratedNociceptiveInput
+      : (isSurgicalStimulationActive ? 1 - analgesiaProt : 0);
+    const targetBreakthrough = Math.max(0, Math.min(
+      1.0,
+      afferentStimulus * (1 - Math.min(0.92, hypnoticProt * 0.88))
+        * (1 - Math.min(0.92, sedativeProt * 0.82))
+        * (1 - Math.min(0.85, dissociativeProt * 0.70))
+    ));
 
     // Physiological neuro-endocrine wash-in and wash-out kinetics:
     // Acute pain triggers catecholamine secretion with realistic onset latency (tau = 4.5s)
@@ -122,13 +137,13 @@ export class HemodynamicCircuitEngine {
       currentStress = currentStress + (targetBreakthrough - currentStress) * decayAlpha;
     }
     const nociceptiveStressLevel = Number(Math.max(0, Math.min(1.0, currentStress)).toFixed(4));
-    const surgicalVasoconstriction = nociceptiveStressLevel * 0.28;
+    const surgicalVasoconstriction = nociceptiveStressLevel * 0.28 * Math.max(0.25, catecholamineReserve);
 
     const netVascularResistanceFactor = Math.max(
       0.35,
-      1.0 + alpha1Constriction + alpha2Constriction + calibratedPressureSupport + surgicalVasoconstriction
+      (1.0 + alpha1Constriction + alpha2Constriction + calibratedPressureSupport + surgicalVasoconstriction
         - alpha1Blockade - volatileVasodilation - beta2Dilation - calibratedPressureDilation
-        - acuteVasodilation
+        - acuteVasodilation - titratableDirectVasodilation) * coupling.vascularResistanceMultiplier
     );
     const SVR = Math.round(baselineSVR * netVascularResistanceFactor);
 
@@ -200,7 +215,7 @@ export class HemodynamicCircuitEngine {
       asaBaroreflexFactor = 0.40;
     }
 
-    inotropyFactor *= asaReserveFactor;
+    inotropyFactor *= asaReserveFactor * coupling.contractilityMultiplier;
 
     // Volatile myocardial depression is driven by MAC multiples, not by the
     // saturable receptor occupancy (which can never exceed 1).
@@ -257,6 +272,7 @@ export class HemodynamicCircuitEngine {
     autonomicHRMultiplier += receptors.directHeartRateEffect * 0.32;
     autonomicHRMultiplier -= receptors.acuteBolusBradycardia * 0.28;
     autonomicHRMultiplier -= receptors.hyperkalemicCardiotoxicity * 0.30;
+    autonomicHRMultiplier *= coupling.heartRateMultiplier;
 
     // Baroreceptor feedback contribution (smoothly bounded)
     autonomicHRMultiplier += baroreceptorEffector;
@@ -266,7 +282,8 @@ export class HemodynamicCircuitEngine {
     // attenuating chronotropic breakthrough during painful stimuli
     if (nociceptiveStressLevel > 0.01) {
       const nodalSympatholyticBraking = Math.max(0.35, 1.0 - Math.max(0, receptors.alpha2Drive) * 0.75);
-      autonomicHRMultiplier += nociceptiveStressLevel * 0.36 * nodalSympatholyticBraking;
+      autonomicHRMultiplier += nociceptiveStressLevel * 0.36 * nodalSympatholyticBraking
+        * Math.max(0.25, catecholamineReserve);
     }
 
     let targetHR = baseHR * autonomicHRMultiplier;
@@ -361,11 +378,17 @@ export class HemodynamicCircuitEngine {
     }
 
     if (previousSpO2 < 80) ischemRatePerMinute += 0.12 * ((80 - previousSpO2) / 20);
+    if (previousOxygenDeliveryMlKgMin < 8) {
+      ischemRatePerMinute += 0.10 * ((8 - previousOxygenDeliveryMlKgMin) / 8);
+    }
     if (previousLactate > 5) ischemRatePerMinute += 0.06 * ((previousLactate - 5) / 5);
+    ischemRatePerMinute += coupling.myocardialIschemiaRatePerMinute;
 
     const myocardialIschemiaScore = Math.min(1.0, Math.max(
       0,
-      previousIschemiaScore + ischemRatePerMinute * (dtSeconds / 60) + receptors.acuteBolusArrhythmia * 0.0015 * dtSeconds
+      previousIschemiaScore + ischemRatePerMinute * (dtSeconds / 60)
+        + receptors.acuteBolusArrhythmia * 0.0015 * dtSeconds
+        + coupling.arrhythmogenicBurden * 0.0012 * dtSeconds
     ));
 
     // ----------------------------------------------------
@@ -383,9 +406,9 @@ export class HemodynamicCircuitEngine {
       arrestType = 'ventricular_fibrillation';
       arrestCause = 'Parada Cardíaca por Fibrilação Ventricular (Isquemia Miocárdica Transmural Crítica por Descasamento MVO2 / Coronariano)';
       rhythm = 'ventricular_fibrillation';
-    } else if (myocardialIschemiaScore > 0.40 && !hasAntiarrhythmicProtection) {
+    } else if ((myocardialIschemiaScore > 0.40 || coupling.arrhythmogenicBurden > 0.78) && !hasAntiarrhythmicProtection) {
       rhythm = 'ventricular_tachycardia';
-    } else if ((myocardialIschemiaScore > 0.20 || receptors.acuteBolusArrhythmia > 0.55 || patient.pathologyConditions.gastricDilatationVolvulus) && !hasAntiarrhythmicProtection) {
+    } else if ((myocardialIschemiaScore > 0.20 || receptors.acuteBolusArrhythmia > 0.55 || coupling.arrhythmogenicBurden > 0.28 || patient.pathologyConditions.gastricDilatationVolvulus) && !hasAntiarrhythmicProtection) {
       rhythm = 'ventricular_premature_complexes';
     } else if (receptors.hyperkalemicCardiotoxicity > 0.72) {
       rhythm = 'av_block_3rd_degree';

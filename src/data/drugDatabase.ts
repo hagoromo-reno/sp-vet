@@ -1704,7 +1704,90 @@ export const VETERINARY_DRUG_DATABASE: DrugDefinition[] = [
   },
 
   // ==========================================
-  // 8. FLUID THERAPY & BLOOD
+  // 8. ACUTE SYSTEMIC ANTIHYPERTENSIVES
+  // ==========================================
+  {
+    id: 'sodium_nitroprusside',
+    name: 'Nitroprussiato de Sódio (CRI)',
+    brandName: 'Nipride',
+    category: 'antihypertensive',
+    description: 'Vasodilatador arterial e venoso ultracurto, doador de óxido nítrico. Uso titulado em emergência hipertensiva e redução aguda de pré/pós-carga, sempre com pressão arterial contínua.',
+    defaultConcentrationMgMl: 0.2,
+    unit: 'mcg',
+    doseUnit: 'mcg/kg/min',
+    recommendedDose: {
+      canine: { min: 0.5, max: 10.0, typical: 1.0 },
+      feline: { min: 0.5, max: 3.0, typical: 1.0 },
+    },
+    supportedRoutes: ['CRI'],
+    onsetMinutes: 0.25,
+    durationMinutes: 2,
+    transitLagSecondsIV: 10,
+    ke0: 3.5,
+    halfLifeAlpha: 0.5,
+    halfLifeBeta: 2,
+    fastBolusRisk: {
+      apneaRisk: 0.05,
+      hypotensionSeverity: 0.95,
+      reflexBradycardiaRisk: 0.05,
+      arrhythmiaRisk: 0.25,
+      histamineRelease: false,
+      lethalityRiskScore: 0.8,
+      warningDescription: 'Nunca administrar em bólus. Queda abrupta da perfusão e acúmulo de cianeto/tiocianato podem ocorrer com taxas altas ou infusão prolongada.',
+    },
+    effectHR: 0.22,
+    effectBP: -0.95,
+    effectRR: 0.05,
+    effectDepth: 0,
+    effectAnalgesia: 0,
+    macReductionPct: 0,
+    muscleRelaxation: 0,
+    specialTraits: { isDirectVasodilator: true, hasCyanideToxicityRisk: true },
+  },
+  {
+    id: 'hydralazine',
+    name: 'Hidralazina Injetável',
+    brandName: 'Apresolina',
+    category: 'antihypertensive',
+    description: 'Vasodilatador arteriolar direto para redução aguda de pós-carga ou hipertensão grave. Resposta menos previsível e mais longa que o nitroprussiato; requer titulação e monitorização.',
+    defaultConcentrationMgMl: 20,
+    unit: 'mg',
+    doseUnit: 'mg/kg',
+    recommendedDose: {
+      canine: { min: 0.05, max: 0.2, typical: 0.1 },
+    },
+    recommendedCriDose: {
+      canine: { min: 1.5, max: 5.0, typical: 2.0 },
+    },
+    criDoseUnit: 'mcg/kg/min',
+    supportedRoutes: ['IV_slow', 'CRI'],
+    onsetMinutes: 8,
+    durationMinutes: 180,
+    transitLagSecondsIV: 20,
+    ke0: 0.45,
+    halfLifeAlpha: 8,
+    halfLifeBeta: 180,
+    fastBolusRisk: {
+      apneaRisk: 0,
+      hypotensionSeverity: 0.75,
+      reflexBradycardiaRisk: 0,
+      arrhythmiaRisk: 0.35,
+      histamineRelease: false,
+      lethalityRiskScore: 0.45,
+      warningDescription: 'Redução imprevisível e prolongada da pressão, com hipotensão e taquicardia reflexa se administrada rapidamente.',
+    },
+    effectHR: 0.3,
+    effectBP: -0.72,
+    effectRR: 0,
+    effectDepth: 0,
+    effectAnalgesia: 0,
+    macReductionPct: 0,
+    muscleRelaxation: 0,
+    specialTraits: { isDirectVasodilator: true },
+  },
+
+  // ==========================================
+  // 9. FLUID THERAPY & BLOOD
   // ==========================================
   {
     id: 'fluid_lrs',

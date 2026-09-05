@@ -127,7 +127,7 @@ export const FluidTherapyPanel: React.FC<FluidTherapyPanelProps> = ({
               }`}
             >
               <Flame className="w-3 h-3" />
-              <span>{equipment.warmingBlanketActive ? 'AQUECEDOR ON' : 'DESLIGADO'}</span>
+              <span>{equipment.warmingBlanketActive ? 'AQUECEDOR ATIVO' : 'DESLIGADO'}</span>
             </button>
           </div>
 

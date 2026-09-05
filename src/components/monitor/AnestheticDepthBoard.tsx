@@ -1,5 +1,6 @@
 import React from 'react';
 import { VitalSigns, PatientProfile } from '../../types/simulator';
+import { formatSpecies } from '../../utils/formatters';
 import {
   Activity,
   Eye,
@@ -69,7 +70,7 @@ export const AnestheticDepthBoard: React.FC<AnestheticDepthBoardProps> = ({
                   Quadro de Profundidade Anestésica & Consciência
                 </h2>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono">
-                  {patient.species.toUpperCase()}
+                  {formatSpecies(patient.species).toUpperCase()}
                 </span>
               </div>
               <p className="text-xs text-[#8e8e9f]">
@@ -107,6 +108,18 @@ export const AnestheticDepthBoard: React.FC<AnestheticDepthBoardProps> = ({
                 <span className="text-[10px] text-[#8e8e9f] block">Tolerância à Incisão:</span>
                 <span className="text-2xl font-bold font-mono text-emerald-400">
                   {tolerance}%
+                </span>
+              </div>
+              <div className="text-right border-l border-[#333344] pl-3">
+                <span className="text-[10px] text-[#8e8e9f] block">Dor sintética:</span>
+                <span className={`text-lg font-bold font-mono ${vitals.painScore >= 5 ? 'text-rose-400' : 'text-cyan-300'}`}>
+                  {vitals.painScore.toFixed(1)}/10
+                </span>
+              </div>
+              <div className="text-right border-l border-[#333344] pl-3">
+                <span className="text-[10px] text-[#8e8e9f] block">Atividade:</span>
+                <span className={`text-lg font-bold font-mono ${vitals.activityLevelPct > 105 ? 'text-amber-300' : 'text-indigo-300'}`}>
+                  {vitals.activityLevelPct}%
                 </span>
               </div>
             </div>
