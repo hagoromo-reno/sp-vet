@@ -90,7 +90,9 @@ version: "3.7"
 
 services:
   sp_vet:
-    image: ghcr.io/kiryuureno/sp-vet:latest
+    image: ghcr.io/hagoromo-reno/sp-vet:latest
+    healthcheck:
+      disable: true
     networks:
       - PetSoftNet
     environment:
@@ -116,7 +118,7 @@ services:
           memory: 1024M
       labels:
         - traefik.enable=true
-        - traefik.http.routers.sp_vet.rule=Host(`anest.soppet.app`) || Host(`anest.sopet.app`)
+        - traefik.http.routers.sp_vet.rule=Host(`anest.sopet.app`)
         - traefik.http.routers.sp_vet.entrypoints=websecure
         - traefik.http.routers.sp_vet.tls.certresolver=letsencryptresolver
         - traefik.http.routers.sp_vet.priority=1
