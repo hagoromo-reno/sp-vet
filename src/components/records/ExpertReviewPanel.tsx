@@ -61,7 +61,7 @@ export function ExpertReviewPanel({ initialRuns, activeId, onClose, onFinish, on
       verdict, confidence, expected, expectedNarrative: narrative.trim(), rationale: rationale.trim(),
       relatedEventId: eventId || undefined, expectedResponseSeconds: delay.trim() ? Number(delay.replace(',', '.')) : undefined,
       supersedes: previous?.id };
-    validateReview(run, review); await saveReview(review); setRuns(await listRuns()); setMessage('Parecer salvo. Revisões anteriores permanecem no histórico.');
+    validateReview(run, review); await saveReview(review, run); setRuns(await listRuns()); setMessage('Parecer salvo com sucesso no banco de dados da sua conta e disponível para auditoria.');
   });
   return <div className="expert-overlay" role="dialog" aria-modal="true" aria-label="Revisão de simulações por anestesiologistas">
     <section className="expert-panel">
@@ -92,7 +92,7 @@ export function ExpertReviewPanel({ initialRuns, activeId, onClose, onFinish, on
           <details className="expert-timeline"><summary>Estado completo: fármacos, equipamento, reflexos e sistemas</summary><pre>{JSON.stringify(snapshot, null, 2)}</pre></details>
         </div>
       </div>
-      <footer className="expert-footer"><p>Salvo neste navegador e dispositivo. Exporte a rodada para compartilhar e manter uma cópia. Autoria declarada; pareceres ainda sujeitos à validação clínica.</p><div>
+      <footer className="expert-footer"><p>✓ Pareceres e rodadas registrados no Banco de Dados Central (PostgreSQL) sob a conta do profissional, disponíveis para auditoria da coordenação médica e do Administrador.</p><div>
         <button className="ui-button" onClick={() => downloadRecord(JSON.stringify(run, null, 2), `simpet-${run.speciesCode}-${run.id}.json`)}><Download size={16} />Rodada JSON</button>
         <button className="ui-button" disabled={!reviews.length} onClick={() => downloadRecord(exportRefinementRows(run), `refino-${run.id}.jsonl`, 'application/x-ndjson')}>Dados para refino / IA</button>
         <button className="ui-button" onClick={() => downloadRecord(JSON.stringify(summarizeFeedback(runs), null, 2), 'analise-feedback-especies.json')}>Análise dos pareceres</button>

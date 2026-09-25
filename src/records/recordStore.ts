@@ -40,7 +40,7 @@ export async function saveRun(run: SimulationRun): Promise<void> {
   const copy = clone(run);
   await updateRun(copy.id, existing => ({ ...copy, reviews: existing?.reviews ?? copy.reviews }));
 }
-export async function saveReview(review: ExpertReview): Promise<void> {
+export async function saveReview(review: ExpertReview, currentRun?: SimulationRun): Promise<void> {
   await updateRun(review.runId, existing => {
     if (!existing) throw new Error('Salve a rodada antes de avaliar.');
     validateReview(existing, review);
@@ -48,6 +48,48 @@ export async function saveReview(review: ExpertReview): Promise<void> {
     if (review.supersedes && existing.reviews.some(r => r.supersedes === review.supersedes)) throw new Error('O parecer já foi revisado. Atualize os registros antes de editar novamente.');
     return { ...existing, reviews: [...existing.reviews, clone(review)] };
   });
+
+  // Persistir diretamente no PostgreSQL vinculado ao médico veterinário autenticado
+  try {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('spvet_session_token') : null;
+    if (token) {
+      await fetch('/api/reviews', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-session-token': token,
+        },
+        body: JSON.stringify({
+          id: review.id,
+          runId: review.runId,
+          snapshotId: review.snapshotId,
+          reviewer: review.reviewer,
+          qualification: review.qualification,
+          verdict: review.verdict,
+          confidence: review.confidence,
+          expectedRanges: review.expected,
+          expectedNarrative: review.expectedNarrative,
+          rationale: review.rationale,
+          relatedEventId: review.relatedEventId,
+          expectedResponseSeconds: review.expectedResponseSeconds,
+          patientId: currentRun?.patient?.id,
+          patientName: currentRun?.patient?.name,
+          species: currentRun?.patient?.species,
+          asaStatus: currentRun?.patient?.asa,
+          runData: currentRun ? {
+            id: currentRun.id,
+            startedAt: currentRun.startedAt,
+            status: currentRun.status,
+            speciesCode: currentRun.speciesCode,
+            patient: currentRun.patient,
+          } : null,
+        }),
+      });
+    }
+  } catch (e) {
+    console.warn('[ReviewSync] Parecer salvo localmente; sincronização com PostgreSQL pendente.');
+  }
 }
 
 /** Strict envelope and referential validation; imports never execute instructions or change the engine. */

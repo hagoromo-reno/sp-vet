@@ -96,6 +96,69 @@ export const ScenarioSelectorModal: React.FC<ScenarioSelectorModalProps> = ({
   const [overrideHepaticPct, setOverrideHepaticPct] = useState<number | null>(null);
   const [overrideRenalPct, setOverrideRenalPct] = useState<number | null>(null);
 
+  // PostgreSQL Patients State
+  const [serverPatients, setServerPatients] = useState<any[]>([]);
+  const [isLoadingPatients, setIsLoadingPatients] = useState(false);
+
+  const loadPatientsFromServer = async () => {
+    setIsLoadingPatients(true);
+    try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('spvet_session_token') : null;
+      const res = await fetch('/api/patients', {
+        headers: token ? { 'Authorization': `Bearer ${token}`, 'x-session-token': token } : {}
+      });
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.patients)) {
+        setServerPatients(data.patients);
+      }
+    } catch (e) {
+      console.warn('[Patients] Falha ao carregar pacientes do servidor:', e);
+    } finally {
+      setIsLoadingPatients(false);
+    }
+  };
+
+  React.useEffect(() => {
+    loadPatientsFromServer();
+  }, []);
+
+  const handleDeletePatient = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Deseja excluir este paciente personalizado do banco de dados?')) return;
+    try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('spvet_session_token') : null;
+      await fetch(`/api/patients/${id}`, {
+        method: 'DELETE',
+        headers: token ? { 'Authorization': `Bearer ${token}`, 'x-session-token': token } : {}
+      });
+    } catch (err) {
+      alert('Erro ao excluir paciente.');
+    }
+  };
+
+  const customPatientsList: any[] = useMemo(() => {
+    return serverPatients
+      .filter((p) => !p.is_default)
+      .map((p) => {
+        const parsed = typeof p.profile_data === 'string' ? JSON.parse(p.profile_data) : p.profile_data;
+        return {
+          ...parsed,
+          id: p.id,
+          name: p.name,
+          species: p.species,
+          breed: p.breed || parsed?.breed,
+          gender: p.gender || parsed?.gender,
+          weightKg: Number(p.weight_kg || parsed?.weightKg),
+          asa: p.asa || parsed?.asa,
+          scenarioTitle: p.scenario_title || parsed?.scenarioTitle || p.name,
+          scenarioDescription: p.scenario_description || parsed?.scenarioDescription || '',
+          _authorName: p.author_name,
+          _authorEmail: p.author_email,
+          _isCustom: true,
+        };
+      });
+  }, [serverPatients]);
+
   // -------------------------------------------------------------------------
   // Calculations & Physiological Derivations
   // -------------------------------------------------------------------------
@@ -234,7 +297,7 @@ export const ScenarioSelectorModal: React.FC<ScenarioSelectorModalProps> = ({
   };
 
   // Launch created custom patient
-  const handleLaunchCustomPatient = () => {
+  const handleLaunchCustomPatient = async () => {
     const speciesInfo = SPECIES_DATABASE[species];
     const sexRef = getSexBiochemicalReference(species, gender);
 
@@ -338,6 +401,39 @@ export const ScenarioSelectorModal: React.FC<ScenarioSelectorModalProps> = ({
         ptStatus,
       },
     };
+
+    // Salvar paciente no PostgreSQL vinculado ao médico veterinário autenticado
+    try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('spvet_session_token') : null;
+      if (token) {
+        await fetch('/api/patients', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'x-session-token': token,
+          },
+          body: JSON.stringify({
+            id: newPatient.id,
+            name: newPatient.name,
+            species: newPatient.species,
+            breed: newPatient.breed,
+            gender: newPatient.gender,
+            ageYears: newPatient.ageYears,
+            ageMonths: newPatient.ageMonths,
+            weightKg: newPatient.weightKg,
+            asa: newPatient.asa,
+            scenarioTitle: newPatient.scenarioTitle,
+            scenarioDescription: newPatient.scenarioDescription,
+            clinicalHistory: newPatient.clinicalHistory,
+            surgicalProcedure: newPatient.surgicalProcedure,
+            profileData: newPatient,
+          }),
+        });
+      }
+    } catch (e) {
+      console.warn('[PatientSync] Paciente iniciado em sessão; persistência no banco pendente:', e);
+    }
 
     onSelectScenario(newPatient);
   };
@@ -450,6 +546,98 @@ export const ScenarioSelectorModal: React.FC<ScenarioSelectorModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* 1.5 CUSTOM PATIENTS SAVED IN POSTGRESQL */}
+              {customPatientsList.length > 0 && (
+                <div className="rounded-xl border border-cyan-500/30 bg-[#0a0f18] p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-cyan-900/30 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-cyan-400" />
+                      <h4 className="text-xs font-black font-mono-code text-cyan-300 uppercase tracking-wider">
+                        Meus Pacientes Personalizados no Banco de Dados ({customPatientsList.length})
+                      </h4>
+                    </div>
+                    <span className="text-[11px] text-cyan-400/80 font-mono">
+                      ✓ Salvos no PostgreSQL da sua assinatura
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {customPatientsList.map((scenario: any) => {
+                      const isCurrent = scenario.id === currentPatientId;
+                      return (
+                        <div
+                          key={scenario.id}
+                          className={`p-3.5 rounded-xl border transition flex flex-col justify-between group ${
+                            isCurrent
+                              ? 'bg-[#0f2415] border-emerald-500 shadow-md shadow-emerald-950/40'
+                              : 'bg-[#10131d] border-cyan-900/40 hover:border-cyan-500/60'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-xs font-bold text-white group-hover:text-cyan-300 transition">
+                                {scenario.scenarioTitle || scenario.name}
+                              </span>
+                              <span className="text-[10px] font-bold font-mono-code px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/40">
+                                ASA {scenario.asa}
+                              </span>
+                            </div>
+
+                            <div className="text-xs text-zinc-300 font-semibold mb-1">
+                              {scenario.name} · {scenario.breed} ({scenario.weightKg} kg · {scenario.gender} · {formatSpecies(scenario.species).toUpperCase()})
+                            </div>
+
+                            {scenario._authorName && (
+                              <div className="text-[10px] text-cyan-400/80 font-mono mb-1">
+                                Cadastrado por: {scenario._authorName} ({scenario._authorEmail})
+                              </div>
+                            )}
+
+                            <p className="text-xs text-zinc-400 line-clamp-2 mb-2">
+                              {scenario.scenarioDescription}
+                            </p>
+                          </div>
+
+                          <div className="pt-2 border-t border-[#1c1d29] flex items-center justify-between text-[11px] font-mono-code">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleLoadTemplateIntoCustomizer(scenario)}
+                                className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 cursor-pointer transition"
+                              >
+                                <Sliders className="w-3 h-3" />
+                                Editar
+                              </button>
+                              <button
+                                onClick={(e) => handleDeletePatient(scenario.id, e)}
+                                className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 cursor-pointer transition ml-2"
+                              >
+                                <X className="w-3 h-3" />
+                                Excluir
+                              </button>
+                            </div>
+
+                            <button
+                              onClick={() => onSelectScenario(scenario)}
+                              className={`font-bold flex items-center gap-1 cursor-pointer transition ${
+                                isCurrent ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
+                              }`}
+                            >
+                              {isCurrent ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5" /> Ativo
+                                </>
+                              ) : (
+                                <>Iniciar Simulação →</>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* 2. OTHER SCENARIOS AVAILABLE FOR DIRECT USE OR CUSTOMIZATION */}
               <div>

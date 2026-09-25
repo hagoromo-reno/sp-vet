@@ -22,6 +22,8 @@ import {
   Calendar,
   Sparkles,
   Zap,
+  MessageSquare,
+  FolderHeart,
 } from 'lucide-react';
 
 interface AdminManagementModalProps {
@@ -31,7 +33,7 @@ interface AdminManagementModalProps {
 
 export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOpen, onClose }) => {
   const { token, user: currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'users' | 'sessions' | 'perspectives' | 'metrics'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'sessions' | 'perspectives' | 'reviews' | 'patients' | 'metrics'>('users');
 
   // Metrics
   const [metrics, setMetrics] = useState<any>({
@@ -54,6 +56,12 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOp
 
   // Perspectives list
   const [perspectives, setPerspectives] = useState<any[]>([]);
+
+  // Reviews list (Revisão por Anestesiologista)
+  const [reviews, setReviews] = useState<any[]>([]);
+
+  // Admin Patients list (Pacientes criados pelos Vets)
+  const [adminPatients, setAdminPatients] = useState<any[]>([]);
 
   // Create User Modal/Form state
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -127,14 +135,70 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOp
     } catch (e) {}
   }, [token]);
 
+  // Load reviews
+  const loadReviews = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/reviews', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReviews(data.reviews || []);
+      }
+    } catch (e) {}
+  }, [token]);
+
+  // Load admin patients
+  const loadAdminPatients = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/patients', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAdminPatients(data.patients || []);
+      }
+    } catch (e) {}
+  }, [token]);
+
+  const handleDeleteReview = async (id: string) => {
+    if (!confirm('Deseja excluir esta revisão clínica do banco de dados?')) return;
+    try {
+      await fetch(`/api/reviews/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      loadReviews();
+    } catch (e) {
+      alert('Erro ao excluir revisão.');
+    }
+  };
+
+  const handleDeleteAdminPatient = async (id: string) => {
+    if (!confirm('Deseja excluir este paciente do banco de dados?')) return;
+    try {
+      await fetch(`/api/patients/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      loadAdminPatients();
+    } catch (e) {
+      alert('Erro ao excluir paciente.');
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       loadMetrics();
       loadUsers();
       loadSessions();
       loadPerspectives();
+      loadReviews();
+      loadAdminPatients();
     }
-  }, [isOpen, loadMetrics, loadUsers, loadSessions, loadPerspectives]);
+  }, [isOpen, loadMetrics, loadUsers, loadSessions, loadPerspectives, loadReviews, loadAdminPatients]);
 
   if (!isOpen) return null;
 
@@ -339,7 +403,31 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOp
             }`}
           >
             <FileText className="w-4 h-4" />
-            <span>PERSPECTIVAS DOS PROFISSIONAIS ({perspectives.length})</span>
+            <span>PERSPECTIVAS ({perspectives.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('reviews')}
+            className={`py-3 px-4 text-xs font-bold font-mono transition border-b-2 flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'reviews'
+                ? 'border-cyan-500 text-cyan-400'
+                : 'border-transparent text-zinc-400 hover:text-white'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>REVISÕES DE ANESTESISTAS ({reviews.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('patients')}
+            className={`py-3 px-4 text-xs font-bold font-mono transition border-b-2 flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'patients'
+                ? 'border-amber-500 text-amber-400'
+                : 'border-transparent text-zinc-400 hover:text-white'
+            }`}
+          >
+            <FolderHeart className="w-4 h-4" />
+            <span>PACIENTES DOS VETS ({adminPatients.length})</span>
           </button>
         </div>
 
@@ -764,6 +852,189 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOp
                           <p className="text-xs text-zinc-400 italic bg-[#131522] p-2.5 rounded-lg border border-[#222436]">
                             &quot;{p.clinical_notes}&quot;
                           </p>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: EXPERT REVIEWS FROM ANESTHESIOLOGISTS */}
+          {activeTab === 'reviews' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0d0f18] p-3 rounded-xl border border-[#232538]">
+                <div>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wide flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-cyan-400" />
+                    Revisões e Pareceres Clínicos de Especialistas ({reviews.length})
+                  </h4>
+                  <p className="text-xs text-zinc-400">
+                    Pareceres emitidos pelos anestesiologistas cadastrados, salvos centralmente no PostgreSQL.
+                  </p>
+                </div>
+                <button
+                  onClick={loadReviews}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#12141f] border border-[#232538] text-zinc-300 hover:text-white text-xs cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Atualizar
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {reviews.length === 0 ? (
+                  <div className="p-8 text-center text-zinc-500 bg-[#0e1018] rounded-xl border border-[#232538]">
+                    Nenhuma revisão por anestesiologista registrada ainda. Os médicos veterinários podem submeter pareceres através do painel de Revisão por Anestesiologista.
+                  </div>
+                ) : (
+                  reviews.map((r) => (
+                    <div
+                      key={r.id}
+                      className="p-4 rounded-xl border border-[#232538] bg-[#0e1018] space-y-2 hover:border-[#33364f] transition"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1c1e2d] pb-2">
+                        <div className="flex items-center gap-2">
+                          <strong className="text-white text-sm">{r.reviewer}</strong>
+                          <span className="text-zinc-400 text-xs">({r.qualification})</span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                              r.verdict === 'plausible'
+                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                : r.verdict === 'adjust'
+                                ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                                : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
+                            }`}
+                          >
+                            {r.verdict === 'plausible' ? 'Plausível' : r.verdict === 'adjust' ? 'Precisa de Ajuste' : 'Inconclusivo'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-[11px] text-zinc-400">
+                            Autor da conta: <strong className="text-zinc-200">{r.user_name || r.user_email || 'Veterinário'}</strong> · {new Date(r.created_at).toLocaleString('pt-BR')}
+                          </div>
+                          <button
+                            onClick={() => handleDeleteReview(r.id)}
+                            className="p-1 rounded text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 transition cursor-pointer"
+                            title="Excluir revisão"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-zinc-400">
+                        Paciente: <strong className="text-zinc-200">{r.patient_name || 'Paciente'}</strong> · Espécie: <strong className="text-zinc-200">{r.species || 'Canina'}</strong> · Classificação: <strong className="text-emerald-400">ASA {r.asa_status || 'I'}</strong>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] text-zinc-500 uppercase block font-bold">Evolução Esperada Declarada:</span>
+                        <p className="text-xs text-zinc-300 leading-relaxed bg-[#121422] p-2 rounded-lg border border-[#202235]">
+                          {r.expected_narrative}
+                        </p>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] text-zinc-500 uppercase block font-bold">Justificativa & Proposta de Ajuste:</span>
+                        <p className="text-xs text-cyan-200/90 leading-relaxed bg-[#0d1522] p-2 rounded-lg border border-[#1b283d]">
+                          {r.rationale}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: VETERINARIAN CUSTOM PATIENTS */}
+          {activeTab === 'patients' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0d0f18] p-3 rounded-xl border border-[#232538]">
+                <div>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wide flex items-center gap-2">
+                    <FolderHeart className="w-4 h-4 text-amber-400" />
+                    Pacientes & Casos Cadastrados no Banco de Dados ({adminPatients.length})
+                  </h4>
+                  <p className="text-xs text-zinc-400">
+                    Acompanhamento central de todos os pacientes padrão do sistema e personalizados criados pelos médicos veterinários.
+                  </p>
+                </div>
+                <button
+                  onClick={loadAdminPatients}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#12141f] border border-[#232538] text-zinc-300 hover:text-white text-xs cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Atualizar
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {adminPatients.length === 0 ? (
+                  <div className="p-8 text-center text-zinc-500 bg-[#0e1018] rounded-xl border border-[#232538]">
+                    Nenhum paciente carregado.
+                  </div>
+                ) : (
+                  adminPatients.map((p) => (
+                    <div
+                      key={p.id}
+                      className="p-4 rounded-xl border border-[#232538] bg-[#0e1018] space-y-2 hover:border-[#33364f] transition"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1c1e2d] pb-2">
+                        <div className="flex items-center gap-2">
+                          <strong className="text-white text-sm">{p.name}</strong>
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
+                            ASA {p.asa}
+                          </span>
+                          <span className="text-zinc-400 text-xs">
+                            · {p.species} · {p.breed || 'SRD'} ({p.weight_kg} kg · {p.gender || 'Não informado'})
+                          </span>
+                          {p.is_default ? (
+                            <span className="text-[9px] px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 font-mono">
+                              Padrão do Sistema
+                            </span>
+                          ) : (
+                            <span className="text-[9px] px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 font-mono">
+                              Customizado por Vet
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="text-[11px] text-zinc-400">
+                            {p.author_name ? (
+                              <>Criado por: <strong className="text-zinc-200">{p.author_name}</strong> ({p.author_email})</>
+                            ) : (
+                              <span className="text-zinc-500">Sistema SP-VET</span>
+                            )}
+                          </div>
+                          {!p.is_default && (
+                            <button
+                              onClick={() => handleDeleteAdminPatient(p.id)}
+                              className="p-1 rounded text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 transition cursor-pointer"
+                              title="Excluir paciente"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {p.surgical_procedure && (
+                        <div className="text-xs text-zinc-300">
+                          <span className="text-zinc-500 font-bold">Procedimento Proposto:</span> {p.surgical_procedure}
+                        </div>
+                      )}
+
+                      {p.scenario_description && (
+                        <p className="text-xs text-zinc-400 leading-relaxed">
+                          {p.scenario_description}
+                        </p>
+                      )}
+
+                      {p.clinical_history && (
+                        <div className="text-xs text-zinc-400 bg-[#121422] p-2 rounded-lg border border-[#202235]">
+                          <span className="text-zinc-500 font-bold block mb-0.5">Histórico Clínico:</span>
+                          {p.clinical_history}
                         </div>
                       )}
                     </div>

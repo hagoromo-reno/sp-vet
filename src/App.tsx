@@ -69,9 +69,17 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isSavePerspectiveModalOpen, setIsSavePerspectiveModalOpen] = useState(false);
+
+  // Guard Audio and Alarms against unauthenticated state
+  useEffect(() => {
+    AudioSynthesizer.setAuthenticated(isAuthenticated);
+    if (!isAuthenticated) {
+      AudioSynthesizer.stopAlarmPlayback();
+    }
+  }, [isAuthenticated]);
 
   // 1. ACTIVE PATIENT & SCENARIO
   const [patient, setPatient] = useState<PatientProfile>(PRESET_SCENARIOS[0]);
@@ -81,9 +89,9 @@ export default function App() {
   // 2. SIMULATION CLOCK & CONTROLS
   const [isSimPaused, setIsSimPaused] = useState(false);
   useEffect(() => {
-    if (isSimPaused) AudioSynthesizer.stopAlarmPlayback();
+    if (isSimPaused || !isAuthenticated) AudioSynthesizer.stopAlarmPlayback();
     return () => AudioSynthesizer.stopAlarmPlayback();
-  }, [isSimPaused]);
+  }, [isSimPaused, isAuthenticated]);
   const [simSpeed, setSimSpeed] = useState<number>(1.0); // 1x, 2x, 5x
   const [simTimeSeconds, setSimTimeSeconds] = useState<number>(0);
 
@@ -295,7 +303,7 @@ export default function App() {
   // SIMULATION TICK LOOP (Interval at 10 Hz)
   useEffect(() => {
     const timer = setInterval(() => {
-      if (isSimPaused) return;
+      if (!isAuthenticated || isSimPaused) return;
 
       const { dt, newSimTime } = nextSimulationStep(simTimeSeconds, simSpeed);
       setSimTimeSeconds(newSimTime);
@@ -440,6 +448,7 @@ export default function App() {
 
     return () => clearInterval(timer);
   }, [
+    isAuthenticated,
     isSimPaused,
     simSpeed,
     simTimeSeconds,
@@ -976,6 +985,23 @@ export default function App() {
     const secs = Math.floor(seconds % 60);
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#07080c] flex flex-col items-center justify-center text-zinc-400 gap-3 font-mono">
+        <div className="w-10 h-10 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+        <p className="text-xs uppercase tracking-widest text-zinc-500">Iniciando ambiente seguro SP-VET...</p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#06070a] flex items-center justify-center p-4">
+        <LoginModal isOpen={true} />
+      </div>
+    );
+  }
 
   return (
     <div className="vetsim-app min-h-screen flex flex-col">

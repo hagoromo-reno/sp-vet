@@ -24,6 +24,7 @@ export interface ActiveAlarmStatus {
 export class AudioSynthesizer {
   private static audioCtx: AudioContext | null = null;
   private static soundProfile: SoundProfile = 'mindray';
+  private static isGloballyMuted = true; // Muted by default until login
   private static isPulseMuted = false;
   private static isAlarmsMuted = false;
   private static silenceRemainingSec = 0;
@@ -31,6 +32,17 @@ export class AudioSynthesizer {
   private static lastPriority: AlarmPriority | 'normal' = 'normal';
   private static alarmProfile: AlarmProfile = 'iec';
   private static isAlarmPreview = false;
+
+  public static setAuthenticated(auth: boolean) {
+    this.isGloballyMuted = !auth;
+    if (!auth) {
+      this.stopAlarmPlayback();
+    }
+  }
+
+  public static getIsAuthenticated() {
+    return !this.isGloballyMuted;
+  }
 
   public static stopAlarmPreview() {
     if (this.isAlarmPreview) this.stopAlarmPlayback();
@@ -176,7 +188,7 @@ export class AudioSynthesizer {
    * Short 50ms duration, instant digital onset, bandpass aperture resonance.
    */
   public static playPulseBeep(spo2Pct: number, isPvc: boolean = false) {
-    if (this.isPulseMuted || this.masterVolume <= 0 || this.pulseVolume <= 0) return;
+    if (this.isGloballyMuted || this.isPulseMuted || this.masterVolume <= 0 || this.pulseVolume <= 0) return;
 
     try {
       const ctx = this.getContext();

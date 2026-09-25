@@ -169,6 +169,164 @@ app.get('/api/perspectives', authenticateSession, async (req: Request, res: Resp
 });
 
 // ---------------------------------------------------------------------------
+// 2.5 REVISÕES POR ANESTESIOLOGISTA (PostgreSQL)
+// ---------------------------------------------------------------------------
+
+app.post('/api/reviews', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  const {
+    id,
+    runId,
+    snapshotId,
+    reviewer,
+    qualification,
+    verdict,
+    confidence,
+    expectedRanges,
+    expectedNarrative,
+    rationale,
+    relatedEventId,
+    expectedResponseSeconds,
+    patientId,
+    patientName,
+    species,
+    asaStatus,
+    runData,
+  } = req.body;
+
+  if (!runId || !snapshotId || !reviewer || !verdict || !expectedNarrative || !rationale) {
+    res.status(400).json({ error: 'MISSING_FIELDS', message: 'Campos obrigatórios de revisão ausentes.' });
+    return;
+  }
+
+  try {
+    const saved = await AdminService.saveReview({
+      id,
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      runId,
+      snapshotId,
+      reviewer,
+      qualification: qualification || user.name,
+      verdict,
+      confidence: confidence || 'medium',
+      expectedRanges,
+      expectedNarrative,
+      rationale,
+      relatedEventId,
+      expectedResponseSeconds,
+      patientId,
+      patientName,
+      species,
+      asaStatus,
+      runData,
+    });
+    res.json({ ok: true, review: saved });
+  } catch (error: any) {
+    res.status(500).json({ error: 'SAVE_REVIEW_ERROR', message: error.message });
+  }
+});
+
+app.get('/api/reviews', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  try {
+    const reviews = await AdminService.listReviews({
+      userId: user.id,
+      isAdmin: user.role === 'admin',
+    });
+    res.json({ ok: true, reviews });
+  } catch (error: any) {
+    res.status(500).json({ error: 'LIST_REVIEWS_ERROR', message: error.message });
+  }
+});
+
+app.delete('/api/reviews/:id', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  try {
+    await AdminService.deleteReview(req.params.id, user.id, user.role === 'admin');
+    res.json({ ok: true });
+  } catch (error: any) {
+    res.status(500).json({ error: 'DELETE_REVIEW_ERROR', message: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 2.6 GESTÃO DE PACIENTES (Padrão & Personalizados no PostgreSQL)
+// ---------------------------------------------------------------------------
+
+app.get('/api/patients', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  try {
+    const patients = await AdminService.listPatients({
+      userId: user.id,
+      isAdmin: user.role === 'admin',
+    });
+    res.json({ ok: true, patients });
+  } catch (error: any) {
+    res.status(500).json({ error: 'LIST_PATIENTS_ERROR', message: error.message });
+  }
+});
+
+app.post('/api/patients', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  const {
+    id,
+    name,
+    species,
+    breed,
+    gender,
+    ageYears,
+    ageMonths,
+    weightKg,
+    asa,
+    scenarioTitle,
+    scenarioDescription,
+    clinicalHistory,
+    surgicalProcedure,
+    profileData,
+  } = req.body;
+
+  if (!name || !species || weightKg === undefined || !asa || !profileData) {
+    res.status(400).json({ error: 'MISSING_FIELDS', message: 'Dados essenciais do paciente ausentes.' });
+    return;
+  }
+
+  try {
+    const saved = await AdminService.savePatient({
+      id,
+      userId: user.id,
+      name,
+      species,
+      breed,
+      gender,
+      ageYears,
+      ageMonths,
+      weightKg: Number(weightKg),
+      asa,
+      scenarioTitle,
+      scenarioDescription,
+      clinicalHistory,
+      surgicalProcedure,
+      profileData,
+    });
+    res.json({ ok: true, patient: saved });
+  } catch (error: any) {
+    res.status(500).json({ error: 'SAVE_PATIENT_ERROR', message: error.message });
+  }
+});
+
+app.delete('/api/patients/:id', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  try {
+    await AdminService.deletePatient(req.params.id, user.id, user.role === 'admin');
+    res.json({ ok: true });
+  } catch (error: any) {
+    res.status(500).json({ error: 'DELETE_PATIENT_ERROR', message: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 3. ADMIN MANAGEMENT ROUTES
 // ---------------------------------------------------------------------------
 

@@ -108,3 +108,92 @@ test('Assinatura & Trial: regras de bloqueio para planos inativos ou expirados',
     (err: any) => err.code === 'TRIAL_EXPIRED'
   );
 });
+
+test('Revisões de Anestesiologistas: persistência no banco atrelada ao usuário e auditoria admin', async () => {
+  const { AdminService } = await import('../server/admin/adminService');
+
+  // 1. Veterinário submete parecer clínico da simulação
+  const reviewVet1 = await AdminService.saveReview({
+    userId: 'user-vet-1',
+    userName: 'Dra. Maria (Anestesiologista)',
+    userEmail: 'maria@spvet.com',
+    runId: 'run-101',
+    snapshotId: 'snap-5',
+    reviewer: 'Dra. Maria',
+    qualification: 'CRMV-SP 12345 / Residência Anestesiologia',
+    verdict: 'plausible',
+    confidence: 'high',
+    expectedNarrative: 'Manutenção adequada do plano com Isoflurano 1.2% e infusão de Fentanil.',
+    rationale: 'Evolução compatível com paciente canino saudável submetido a procedimento cirúrgico limpo.',
+    patientId: 'patient-canine-1',
+    patientName: 'Thor',
+    species: 'canine',
+    asaStatus: 'I',
+  });
+
+  assert.ok(reviewVet1.id);
+
+  // 2. O próprio veterinário lista suas revisões
+  const vetList = await AdminService.listReviews({ userId: 'user-vet-1', isAdmin: false });
+  assert.ok(vetList.some((r) => r.id === reviewVet1.id));
+
+  // 3. Outro veterinário NÃO deve ver a revisão privada da Dra. Maria
+  const vet2List = await AdminService.listReviews({ userId: 'user-vet-2', isAdmin: false });
+  assert.equal(vet2List.some((r) => r.id === reviewVet1.id), false);
+
+  // 4. O Administrador tem visibilidade completa de todas as revisões
+  const adminList = await AdminService.listReviews({ isAdmin: true });
+  assert.ok(adminList.some((r) => r.id === reviewVet1.id));
+});
+
+test('Gestão de Pacientes: criação por veterinário, isolamento por conta e supervisão admin', async () => {
+  const { AdminService } = await import('../server/admin/adminService');
+
+  // 1. Vet cadastra paciente personalizado no banco
+  const createdPatient = await AdminService.savePatient({
+    id: 'custom_dog_breno',
+    userId: 'user-vet-breno',
+    name: 'Rex - Cardiopata Compensado',
+    species: 'canine',
+    breed: 'Boxer',
+    weightKg: 28.5,
+    asa: 'III',
+    scenarioTitle: 'Caso Rex (Boxer ASA III)',
+    profileData: {
+      name: 'Rex',
+      species: 'canine',
+      weightKg: 28.5,
+      asa: 'III',
+    },
+  });
+
+  assert.equal(createdPatient.id, 'custom_dog_breno');
+
+  // 2. O criador (Breno) lista os pacientes e vê seu caso personalizado
+  const brenoList = await AdminService.listPatients({ userId: 'user-vet-breno', isAdmin: false });
+  assert.ok(brenoList.some((p) => p.id === 'custom_dog_breno'));
+
+  // 3. Outro veterinário (Carlos) NÃO vê o paciente customizado de Breno
+  const carlosList = await AdminService.listPatients({ userId: 'user-vet-carlos', isAdmin: false });
+  assert.equal(carlosList.some((p) => p.id === 'custom_dog_breno'), false);
+
+  // 4. Administrador enxerga todos os pacientes de todos os veterinários
+  const adminPatientList = await AdminService.listPatients({ isAdmin: true });
+  assert.ok(adminPatientList.some((p) => p.id === 'custom_dog_breno'));
+});
+
+test('Segurança Acústica: AudioSynthesizer silencia o monitor antes da autenticação', async () => {
+  const { AudioSynthesizer } = await import('../src/engine/audioSynthesizer');
+
+  // Na tela de login (desautenticado): deve estar mudo
+  AudioSynthesizer.setAuthenticated(false);
+  assert.equal(AudioSynthesizer.getIsAuthenticated(), false);
+
+  // Após autenticação: som liberado
+  AudioSynthesizer.setAuthenticated(true);
+  assert.equal(AudioSynthesizer.getIsAuthenticated(), true);
+
+  // Logout volta a mutar
+  AudioSynthesizer.setAuthenticated(false);
+  assert.equal(AudioSynthesizer.getIsAuthenticated(), false);
+});
