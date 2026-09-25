@@ -54,6 +54,10 @@ import { useSimulationRecording } from './records/useSimulationRecording';
 import type { SimulationRun } from './records/simulationRecord';
 import { speciesAlarmLimits } from './data/monitorDefaults';
 import { nextSimulationStep } from './engine/simulationClock';
+import { useAuth } from './context/AuthContext';
+import { LoginModal } from './components/auth/LoginModal';
+import { AdminManagementModal } from './components/admin/AdminManagementModal';
+import { SavePerspectiveModal } from './components/records/SavePerspectiveModal';
 import {
   Activity,
   Syringe,
@@ -65,6 +69,10 @@ import {
 } from 'lucide-react';
 
 export default function App() {
+  const { isAuthenticated } = useAuth();
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [isSavePerspectiveModalOpen, setIsSavePerspectiveModalOpen] = useState(false);
+
   // 1. ACTIVE PATIENT & SCENARIO
   const [patient, setPatient] = useState<PatientProfile>(PRESET_SCENARIOS[0]);
   const [isScenarioModalOpen, setIsScenarioModalOpen] = useState(false);
@@ -979,6 +987,8 @@ export default function App() {
         onPatient={() => setIsScenarioModalOpen(true)} onBiophysics={() => setIsCellularModalOpen(true)}
         onConsciousness={() => setIsDepthBoardOpen(true)} onEvents={() => setIsGeneralLogOpen(true)}
         onOccurrences={() => setIsOccurrenceCenterOpen(true)} onEmergency={() => selectWorkstation('emergency_cpr')}
+        onAdminPanel={() => setIsAdminPanelOpen(true)}
+        onSavePerspective={() => setIsSavePerspectiveModalOpen(true)}
       />
 
       <div className="review-access"><button className="ui-button" onClick={openExpertReview}>Revisão por anestesiologista</button><span>{recording.storageError || (recording.savedAt ? `Rodada salva neste dispositivo às ${recording.savedAt}` : 'Preparando registro da rodada…')}</span>{recording.storageError && <button className="ui-button" onClick={() => downloadRecord(JSON.stringify(recording.recorder.current!.run, null, 2), `resgate-${recording.recorder.current!.run.id}.json`)}>Exportar cópia agora</button>}</div>
@@ -1280,12 +1290,27 @@ export default function App() {
         }}
       />
 
-      <ClinicalOccurrenceCenter
-        isOpen={isOccurrenceCenterOpen}
-        items={clinicalOccurrenceHistory}
-        onClose={() => setIsOccurrenceCenterOpen(false)}
-        onClear={() => setClinicalOccurrenceHistory([])}
-      />
+      {/* 11. AUTHENTICATION & SINGLE-SESSION ACCESS MODAL */}
+      <LoginModal isOpen={!isAuthenticated} />
+
+      {/* 12. ADMIN MANAGEMENT DASHBOARD */}
+      {isAdminPanelOpen && (
+        <AdminManagementModal
+          isOpen={isAdminPanelOpen}
+          onClose={() => setIsAdminPanelOpen(false)}
+        />
+      )}
+
+      {/* 13. PROFESSIONAL CLINICAL PERSPECTIVE MODAL */}
+      {isSavePerspectiveModalOpen && (
+        <SavePerspectiveModal
+          isOpen={isSavePerspectiveModalOpen}
+          onClose={() => setIsSavePerspectiveModalOpen(false)}
+          patient={patient}
+          vitals={vitals}
+          simTimeSeconds={simTimeSeconds}
+        />
+      )}
 
       {/* 11. FOOTER */}
       <footer className="border-t border-[#1a1a1a] bg-[#080808] px-4 py-2.5 text-center text-xs text-[#525252] font-mono-code">

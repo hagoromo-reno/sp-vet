@@ -1,0 +1,47 @@
+version: "3.7"
+
+services:
+  sp_vet:
+    # Imagem construída e publicada automaticamente via GitHub Actions no GHCR
+    # Ajuste 'kiryuureno/sp-vet' se o nome do seu repositório GitHub for diferente
+    image: ghcr.io/kiryuureno/sp-vet:latest
+    networks:
+      - PetSoftNet
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+
+      # 1. Conexão para o dia a dia do app (via PgBouncer na porta 6432 com pool de conexões)
+      - DATABASE_URL=postgresql://postgres:19dd7b730f9dd8a558ceb1d94dce7e8b@pgbouncer:6432/postgres?schema=public&pgbouncer=true
+
+      # 2. Conexão direta para DDL/migrações automáticas de tabelas (direto no Postgres na porta 5432)
+      - DIRECT_URL=postgresql://postgres:19dd7b730f9dd8a558ceb1d94dce7e8b@postgres:5432/postgres?schema=public
+
+      # Parâmetros de segurança e sessão única
+      - SESSION_SECRET=c29wZXQtc3AtdmV0LWV4Y2x1c2l2by0yMDI2
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.sp_vet.rule=Host(`anest.soppet.app`) || Host(`anest.sopet.app`)
+        - traefik.http.routers.sp_vet.entrypoints=websecure
+        - traefik.http.routers.sp_vet.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.sp_vet.priority=1
+        - traefik.http.routers.sp_vet.service=sp_vet
+        - traefik.http.services.sp_vet.loadbalancer.server.port=3000
+        - traefik.http.services.sp_vet.loadbalancer.passHostHeader=true
+        - traefik.docker.network=PetSoftNet
+    restart: unless-stopped
+
+networks:
+  PetSoftNet:
+    external: true
+    name: PetSoftNet
