@@ -13,11 +13,20 @@ const approach = (current: number, target: number, dt: number, tau: number): num
   current + (target - current) * (1 - Math.exp(-dt / Math.max(0.1, tau)));
 
 const PROFILE_OVERRIDES: Record<string, Partial<DrugBiotransformationProfile>> = {
-  propofol: { primaryPathway: 'hepatic_phase_ii', pathwayLabel: 'Conjugação hepática e extra-hepática', enzymeSystem: 'UGT', hepaticClearanceFraction: 0.82, renalClearanceFraction: 0.18, proteinBindingFraction: 0.98, apparentCentralVolumeLKg: 0.35, lipidSolubility: 0.95 },
-  morphine: { primaryPathway: 'hepatic_phase_ii', pathwayLabel: 'Glucuronidação hepática', enzymeSystem: 'UGT2B', hepaticClearanceFraction: 0.78, renalClearanceFraction: 0.22, proteinBindingFraction: 0.35, apparentCentralVolumeLKg: 0.5, lipidSolubility: 0.55, activeMetabolite: 'metabólitos glucuronídeos' },
-  fentanyl: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Oxidação hepática', enzymeSystem: 'CYP3A', hepaticClearanceFraction: 0.9, renalClearanceFraction: 0.1, proteinBindingFraction: 0.84, apparentCentralVolumeLKg: 0.55, lipidSolubility: 0.98 },
+  acepromazine: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Oxidação e conjugação hepática (CYP1A2/CYP2D)', enzymeSystem: 'CYP1A2/CYP2D', hepaticClearanceFraction: 0.90, renalClearanceFraction: 0.10, proteinBindingFraction: 0.92, apparentCentralVolumeLKg: 0.65, lipidSolubility: 0.85 },
+  dexmedetomidine: { primaryPathway: 'hepatic_phase_ii', pathwayLabel: 'Glucuronidação direta e oxidação hepática (UGT/CYP2A6)', enzymeSystem: 'UGT/CYP2A6', hepaticClearanceFraction: 0.85, renalClearanceFraction: 0.15, proteinBindingFraction: 0.94, apparentCentralVolumeLKg: 0.50, lipidSolubility: 0.78 },
+  xylazine: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Metabolização microssomal hepática (CYP)', enzymeSystem: 'CYP', hepaticClearanceFraction: 0.88, renalClearanceFraction: 0.12, proteinBindingFraction: 0.70, apparentCentralVolumeLKg: 0.55, lipidSolubility: 0.72 },
+  detomidine: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Oxidação e hidroxilação hepática (CYP)', enzymeSystem: 'CYP', hepaticClearanceFraction: 0.90, renalClearanceFraction: 0.10, proteinBindingFraction: 0.85, apparentCentralVolumeLKg: 0.48, lipidSolubility: 0.75 },
+  midazolam: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Hidroxilação hepática (CYP3A)', enzymeSystem: 'CYP3A', hepaticClearanceFraction: 0.86, renalClearanceFraction: 0.14, proteinBindingFraction: 0.95, apparentCentralVolumeLKg: 0.45, lipidSolubility: 0.82 },
+  diazepam: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Desmetilação e hidroxilação hepática com metabólitos ativos (CYP3A/CYP2C)', enzymeSystem: 'CYP3A/CYP2C', hepaticClearanceFraction: 0.95, renalClearanceFraction: 0.05, proteinBindingFraction: 0.98, apparentCentralVolumeLKg: 0.40, lipidSolubility: 0.92, activeMetabolite: 'nordiazepam e oxazepam' },
+  propofol: { primaryPathway: 'hepatic_phase_ii', pathwayLabel: 'Conjugação hepática e extra-hepática (pulmão/rim)', enzymeSystem: 'UGT', hepaticClearanceFraction: 0.65, renalClearanceFraction: 0.15, proteinBindingFraction: 0.98, apparentCentralVolumeLKg: 0.35, lipidSolubility: 0.95, extrahepaticClearanceFraction: 0.20 },
+  morphine: { primaryPathway: 'hepatic_phase_ii', pathwayLabel: 'Glucuronidação hepática (UGT2B)', enzymeSystem: 'UGT2B', hepaticClearanceFraction: 0.78, renalClearanceFraction: 0.22, proteinBindingFraction: 0.35, apparentCentralVolumeLKg: 0.5, lipidSolubility: 0.55, activeMetabolite: 'metabólitos glucuronídeos' },
+  methadone: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'N-desmetilação hepática (CYP3A/CYP2B)', enzymeSystem: 'CYP3A/CYP2B', hepaticClearanceFraction: 0.85, renalClearanceFraction: 0.15, proteinBindingFraction: 0.88, apparentCentralVolumeLKg: 0.65, lipidSolubility: 0.85, activeMetabolite: 'EDDP (inativo)' },
+  fentanyl: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Oxidação hepática (CYP3A)', enzymeSystem: 'CYP3A', hepaticClearanceFraction: 0.90, renalClearanceFraction: 0.10, proteinBindingFraction: 0.84, apparentCentralVolumeLKg: 0.55, lipidSolubility: 0.98 },
+  butorphanol: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Hidroxilação hepática (CYP)', enzymeSystem: 'CYP', hepaticClearanceFraction: 0.85, renalClearanceFraction: 0.15, proteinBindingFraction: 0.80, apparentCentralVolumeLKg: 0.60, lipidSolubility: 0.70 },
+  buprenorphine: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'N-desalquilação hepática (CYP3A) e glucuronidação', enzymeSystem: 'CYP3A/UGT', hepaticClearanceFraction: 0.88, renalClearanceFraction: 0.12, proteinBindingFraction: 0.96, apparentCentralVolumeLKg: 0.55, lipidSolubility: 0.88, activeMetabolite: 'norbuprenorfina' },
+  tramadol: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'O-desmetilação (CYP2D) e N-desmetilação (CYP3A)', enzymeSystem: 'CYP2D/CYP3A', hepaticClearanceFraction: 0.82, renalClearanceFraction: 0.18, proteinBindingFraction: 0.20, apparentCentralVolumeLKg: 0.70, lipidSolubility: 0.60, activeMetabolite: 'O-desmetiltramadol (M1)' },
   ketamine: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'N-desmetilação hepática', enzymeSystem: 'CYP', hepaticClearanceFraction: 0.82, renalClearanceFraction: 0.18, proteinBindingFraction: 0.28, apparentCentralVolumeLKg: 0.65, lipidSolubility: 0.78, activeMetabolite: 'norcetamina' },
-  midazolam: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Hidroxilação hepática', enzymeSystem: 'CYP3A', hepaticClearanceFraction: 0.86, renalClearanceFraction: 0.14, proteinBindingFraction: 0.95, apparentCentralVolumeLKg: 0.45, lipidSolubility: 0.82 },
   lidocaine_2pct: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Desalquilação hepática', enzymeSystem: 'CYP', hepaticClearanceFraction: 0.88, renalClearanceFraction: 0.12, proteinBindingFraction: 0.65, apparentCentralVolumeLKg: 0.7, lipidSolubility: 0.72, activeMetabolite: 'MEGX/GX' },
   atracurium: { primaryPathway: 'hoffmann', pathwayLabel: 'Eliminação de Hofmann e hidrólise esterásica', hepaticClearanceFraction: 0.08, renalClearanceFraction: 0.08, proteinBindingFraction: 0.82, apparentCentralVolumeLKg: 0.18, lipidSolubility: 0.15, activeMetabolite: 'laudanosina' },
   remifentanil: { primaryPathway: 'plasma_esterase', pathwayLabel: 'Hidrólise por esterases plasmáticas', hepaticClearanceFraction: 0.05, renalClearanceFraction: 0.05, proteinBindingFraction: 0.7, apparentCentralVolumeLKg: 0.25, lipidSolubility: 0.7 },
@@ -25,6 +34,9 @@ const PROFILE_OVERRIDES: Record<string, Partial<DrugBiotransformationProfile>> =
   hydralazine: { primaryPathway: 'hepatic_phase_ii', pathwayLabel: 'Acetilação e hidroxilação hepática', enzymeSystem: 'NAT', hepaticClearanceFraction: 0.78, renalClearanceFraction: 0.22, proteinBindingFraction: 0.9, apparentCentralVolumeLKg: 0.45, lipidSolubility: 0.4 },
   neostigmine: { primaryPathway: 'renal', pathwayLabel: 'Excreção renal e hidrólise', hepaticClearanceFraction: 0.25, renalClearanceFraction: 0.75, proteinBindingFraction: 0.2, apparentCentralVolumeLKg: 0.25, lipidSolubility: 0.05 },
   sugammadex: { primaryPathway: 'renal', pathwayLabel: 'Excreção renal do complexo encapsulado', hepaticClearanceFraction: 0.02, renalClearanceFraction: 0.98, proteinBindingFraction: 0.02, apparentCentralVolumeLKg: 0.2, lipidSolubility: 0.02 },
+  naloxone: { primaryPathway: 'hepatic_phase_ii', pathwayLabel: 'Glucuronidação hepática rápida (UGT)', enzymeSystem: 'UGT', hepaticClearanceFraction: 0.85, renalClearanceFraction: 0.15, proteinBindingFraction: 0.45, apparentCentralVolumeLKg: 0.50, lipidSolubility: 0.65 },
+  atipamezole: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Oxidação e hidroxilação hepática', enzymeSystem: 'CYP', hepaticClearanceFraction: 0.88, renalClearanceFraction: 0.12, proteinBindingFraction: 0.85, apparentCentralVolumeLKg: 0.40, lipidSolubility: 0.70 },
+  flumazenil: { primaryPathway: 'hepatic_phase_i', pathwayLabel: 'Desalquilação hepática rápida', enzymeSystem: 'CYP', hepaticClearanceFraction: 0.90, renalClearanceFraction: 0.10, proteinBindingFraction: 0.50, apparentCentralVolumeLKg: 0.35, lipidSolubility: 0.60 },
 };
 
 export const resolveBiotransformationProfile = (drug: DrugDefinition): DrugBiotransformationProfile => {
@@ -64,7 +76,7 @@ export interface PatientDrugKinetics {
   feedbackExplanation: string;
 }
 
-export const analyzePatientDrugKinetics = (patient: PatientProfile, dose: ActiveDrugDose, biological: BiologicalState): PatientDrugKinetics | undefined => {
+export const analyzePatientDrugKinetics = (patient: PatientProfile, dose: ActiveDrugDose, biological?: BiologicalState): PatientDrugKinetics | undefined => {
   const drug = VETERINARY_DRUG_DATABASE.find((item) => item.id === dose.drugId);
   if (!drug) return undefined;
   const profile = resolveBiotransformationProfile(drug);
@@ -92,8 +104,8 @@ export const analyzePatientDrugKinetics = (patient: PatientProfile, dose: Active
       : normalizingMg;
     estimatedPlasmaConcentration = dose.currentCp * doseEquivalentMgKg / Math.max(0.05, profile.apparentCentralVolumeLKg);
   }
-  const hepaticCapacity = biological.biotransformation.hepaticEnzymeCapacity;
-  const renalCapacity = biological.biotransformation.renalFiltrationCapacity;
+  const hepaticCapacity = biological?.biotransformation?.hepaticEnzymeCapacity ?? 1.0;
+  const renalCapacity = biological?.biotransformation?.renalFiltrationCapacity ?? 1.0;
   const effectiveClearance = profile.hepaticClearanceFraction * hepaticCapacity
     + profile.renalClearanceFraction * renalCapacity
     + Math.max(0, 1 - profile.hepaticClearanceFraction - profile.renalClearanceFraction);
@@ -114,7 +126,7 @@ export const analyzePatientDrugKinetics = (patient: PatientProfile, dose: Active
     effectiveClearance,
     feedbackExplanation: effectiveClearance < 0.65
       ? 'Depuração limitada pela perfusão/capacidade orgânica; maior tendência à acumulação.'
-      : biological.biotransformation.receptorAdaptiveFeedback > 0.2
+      : (biological?.biotransformation?.receptorAdaptiveFeedback ?? 0) > 0.2
         ? 'Exposição sustentada induz adaptação receptorial e menor resposta por unidade de concentração.'
         : 'Entrada, distribuição e depuração permanecem em equilíbrio fisiológico compensado.',
   };

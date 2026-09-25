@@ -1,5 +1,7 @@
-import type { PatientProfile, VitalSigns, ActiveDrugDose, AnesthesiaEquipmentState } from '../types/simulator';
+import type { PatientProfile, VitalSigns, ActiveDrugDose, AnesthesiaEquipmentState, ActiveSurgicalProcedure } from '../types/simulator';
 import { createCaninePatientConfiguration } from './canineReferenceModel';
+import { mapDoseToPulseAction } from './pulseActionMapping';
+import { buildHybridPharmacologyInput } from './pulseHybridBridge';
 import {
   PHYSIOLOGY_PROTOCOL_VERSION,
   type PhysiologyClientMessage,
@@ -29,14 +31,26 @@ export class PhysiologyGatewayClient {
   private initializeRequestId: string | null = null;
   private advanceRequestId: string | null = null;
   private pendingAdvance: Parameters<PhysiologyGatewayClient['advance']>[0] | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private shouldReconnect = true;
   private state: PhysiologyGatewayState = {
     connection: 'disconnected',
     nativeWorkerAvailable: false,
     messagePt: 'Motor fisiológico local ativo.',
   };
 
+  private static resolveDefaultUrl(): string {
+    if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_PHYSIOLOGY_WS_URL) {
+      return import.meta.env.VITE_PHYSIOLOGY_WS_URL;
+    }
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+      return `ws://${window.location.hostname}:8787/physiology`;
+    }
+    return 'ws://127.0.0.1:8787/physiology';
+  }
+
   public constructor(
-    private readonly url = import.meta.env.VITE_PHYSIOLOGY_WS_URL || 'ws://127.0.0.1:8787/physiology'
+    private readonly url = PhysiologyGatewayClient.resolveDefaultUrl()
   ) {}
 
   public subscribe(listener: Listener): () => void {
@@ -47,6 +61,11 @@ export class PhysiologyGatewayClient {
 
   public connect(): void {
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING) return;
+    this.shouldReconnect = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.update({ connection: 'connecting', messagePt: 'Conectando ao gateway fisiológico…' });
 
     try {
@@ -56,19 +75,27 @@ export class PhysiologyGatewayClient {
         connection: 'error',
         messagePt: error instanceof Error ? error.message : 'Falha ao criar o canal fisiológico.',
       });
+      this.scheduleReconnect();
       return;
     }
 
     this.socket.addEventListener('open', () => {
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
       this.update({ connection: 'connected', messagePt: 'Gateway fisiológico conectado.' });
       if (this.pendingPatient) this.initialize(this.pendingPatient);
     });
     this.socket.addEventListener('message', (event) => this.handleMessage(event.data));
-    this.socket.addEventListener('error', () => this.update({
-      connection: 'error',
-      nativeWorkerAvailable: false,
-      messagePt: 'Gateway fisiológico indisponível; simulação local preservada.',
-    }));
+    this.socket.addEventListener('error', () => {
+      this.update({
+        connection: 'error',
+        nativeWorkerAvailable: false,
+        messagePt: 'Gateway fisiológico indisponível; simulação local preservada.',
+      });
+      this.scheduleReconnect();
+    });
     this.socket.addEventListener('close', () => {
       this.socket = null;
       this.initialized = false;
@@ -79,10 +106,31 @@ export class PhysiologyGatewayClient {
         nativeWorkerAvailable: false,
         messagePt: 'Gateway desconectado; simulação local preservada.',
       });
+      this.scheduleReconnect();
     });
   }
 
+  private scheduleReconnect(): void {
+    if (!this.shouldReconnect || this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.shouldReconnect && (!this.socket || this.socket.readyState === WebSocket.CLOSED)) {
+        this.connect();
+      }
+    }, 2500);
+  }
+
+  public reconnect(): void {
+    this.disconnect();
+    this.connect();
+  }
+
   public disconnect(): void {
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.socket?.close();
     this.socket = null;
   }
@@ -110,6 +158,7 @@ export class PhysiologyGatewayClient {
     activeDoses: ActiveDrugDose[];
     equipment: AnesthesiaEquipmentState;
     surgicalStimulus: number;
+    surgicalProcedure?: ActiveSurgicalProcedure | null;
   }): void {
     if (this.pendingPatient?.species !== 'canine' || this.socket?.readyState !== WebSocket.OPEN) return;
     if (!this.initialized || this.advanceRequestId) {
@@ -147,6 +196,7 @@ export class PhysiologyGatewayClient {
         activeDrugs: input.activeDoses.map((dose) => ({
           id: dose.id,
           drugId: dose.drugId,
+          drugName: dose.drugName,
           route: dose.route,
           dosePerKg: dose.dosePerKg,
           currentCp: dose.currentCp,
@@ -154,9 +204,11 @@ export class PhysiologyGatewayClient {
           isCRI: dose.isCRI,
           criRatePerKgMin: dose.criRatePerKgMin,
           isInfusionRunning: dose.isInfusionRunning,
+          nativeAction: mapDoseToPulseAction(dose),
         })),
         equipment: {
           oxygenFlowLMin: input.equipment.oxygenFlowLMin,
+          nitrousOxideFlowLMin: input.equipment.nitrousOxideFlowLMin,
           vaporizerType: input.equipment.vaporizerType,
           vaporizerDialPct: input.equipment.vaporizerDialPct,
           isVaporizerOn: input.equipment.isVaporizerOn,
@@ -166,8 +218,21 @@ export class PhysiologyGatewayClient {
           ventilatorMode: input.equipment.ventilatorMode,
           isVentilatorActive: input.equipment.isVentilatorActive,
           ventilatorSettings: input.equipment.ventilatorSettings,
+          circuitType: input.equipment.circuitType,
+          activeFluidType: input.equipment.activeFluidType,
+          totalFluidsInfusedMl: input.equipment.totalFluidsInfusedMl,
+          fluidRateMlPerHour: input.equipment.fluidRateMlPerHour,
+          isFluidPumpRunning: input.equipment.isFluidPumpRunning,
         },
         surgicalStimulus: input.surgicalStimulus,
+        surgicalProcedure: input.surgicalProcedure ? {
+          id: input.surgicalProcedure.id,
+          name: input.surgicalProcedure.name,
+          tissueLayer: input.surgicalProcedure.tissueLayer,
+        } : undefined,
+        hybridPharmacology: this.pendingPatient
+          ? buildHybridPharmacologyInput(this.pendingPatient, input.activeDoses, input.equipment, input.vitals)
+          : undefined,
       },
     });
   }

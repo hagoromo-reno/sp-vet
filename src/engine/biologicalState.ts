@@ -1,3 +1,4 @@
+import { stepFluidBalance, type FluidDelivery } from './fluidTherapy';
 import {
   AnesthesiaEquipmentState,
   BiologicalState,
@@ -5,6 +6,8 @@ import {
   SpeciesType,
 } from '../types/simulator';
 import type { ReceptorStateSnapshot } from './cellularReceptors';
+import { getPatientReserveCapacity } from './patientReserve';
+import { getOxygenDeliveryDeficit, getOxygenDeliveryThresholds } from './oxygenTransport';
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const expApproach = (current: number, target: number, dtSeconds: number, tauSeconds: number): number =>
@@ -17,8 +20,6 @@ const BASELINE_GLUCOSE: Record<SpeciesType, number> = {
   feline: 105,
   equine: 92,
   bovine: 72,
-  rabbit: 110,
-  avian: 220,
 };
 
 const STRESS_GLUCOSE_GAIN: Record<SpeciesType, number> = {
@@ -26,8 +27,6 @@ const STRESS_GLUCOSE_GAIN: Record<SpeciesType, number> = {
   feline: 135,
   equine: 55,
   bovine: 48,
-  rabbit: 105,
-  avian: 90,
 };
 
 const CARDIAC_OUTPUT_ML_KG_MIN: Record<SpeciesType, number> = {
@@ -35,27 +34,13 @@ const CARDIAC_OUTPUT_ML_KG_MIN: Record<SpeciesType, number> = {
   feline: 140,
   equine: 75,
   bovine: 95,
-  rabbit: 240,
-  avian: 320,
 };
 
 const CNS_KINETICS: Record<SpeciesType, { induction: number; recovery: number; excitation: number }> = {
-  canine: { induction: 2.8, recovery: 13, excitation: 6 },
-  feline: { induction: 2.4, recovery: 17, excitation: 7 },
-  equine: { induction: 4.5, recovery: 32, excitation: 10 },
-  bovine: { induction: 5.5, recovery: 38, excitation: 12 },
-  rabbit: { induction: 2.0, recovery: 11, excitation: 5 },
-  avian: { induction: 1.5, recovery: 8, excitation: 4 },
-};
-
-type FluidKind = 'crystalloid' | 'hypertonic' | 'colloid' | 'whole_blood';
-
-const classifyFluid = (label: string): FluidKind => {
-  const normalized = label.toLocaleLowerCase('pt-BR');
-  if (normalized.includes('sangue') || normalized.includes('blood')) return 'whole_blood';
-  if (normalized.includes('hipert')) return 'hypertonic';
-  if (normalized.includes('coloide') || normalized.includes('starch')) return 'colloid';
-  return 'crystalloid';
+  canine: { induction: 2.8, recovery: 8, excitation: 6 },
+  feline: { induction: 2.4, recovery: 10, excitation: 7 },
+  equine: { induction: 4.5, recovery: 20, excitation: 10 },
+  bovine: { induction: 5.5, recovery: 25, excitation: 12 },
 };
 
 export class BiologicalStateEngine {
@@ -88,6 +73,11 @@ export class BiologicalStateEngine {
         sympatheticDrive: 0,
         parasympatheticDrive: 0.15,
         catecholamineReserve: 1,
+        norepinephrineSynaptic: 0.20,
+        epinephrinePlasma: 0.05,
+        acetylcholineSynaptic: 0.15,
+        gabaTone: 0.20,
+        glutamateTone: 0.10,
       },
       organPerfusion: {
         cerebralFraction: 1,
@@ -126,7 +116,7 @@ export class BiologicalStateEngine {
         endothelialDysfunction: 0,
         hepaticInjury: 0,
         renalInjury: 0,
-        compensatoryReserve: 1,
+        compensatoryReserve: getPatientReserveCapacity(patient),
       },
       biotransformation: {
         hepaticEnzymeCapacity: 1,
@@ -237,7 +227,7 @@ export class BiologicalStateEngine {
       ? (receptors.muOpioidDrive - 0.45) * 0.8
       : 0;
     const excitationTarget = clamp(
-      Math.max(dissociativeExcitation, transitionExcitation, opioidDysphoria)
+      Math.max(dissociativeExcitation, transitionExcitation, opioidDysphoria, receptors.centralAntimuscarinicExcitation ?? 0)
         + next.neurological.nociceptiveInput * 0.25,
       0,
       1.4
@@ -261,7 +251,8 @@ export class BiologicalStateEngine {
         * (1 - next.neurological.sedativeDepth * 0.68)
         * (1 - next.neurological.dissociativeDepth * 0.82)
         + next.neurological.excitationDrive * 18
-        - previous.organPerfusion.cumulativeOxygenDebt * 45,
+        - previous.organPerfusion.cumulativeOxygenDebt * 45
+        - (receptors.centralM1Blockade ?? 0) * 12,
       0,
       125
     );
@@ -277,16 +268,26 @@ export class BiologicalStateEngine {
       : Math.max(0, previous.neurological.unconsciousnessSeconds - dtSeconds * 2);
 
     const hypotensiveStimulus = clamp((patient.baselineVitals.map - previousMap) / 45, 0, 1);
+    const co2Drive = clamp((previousPaCO2 - 40) / 35, 0, 1.2);
+    const hypoxicDrive = clamp((90 - previousSpO2) / 35, 0, 1);
+    const hypertensiveVagalStimulus = clamp((previousMap - (patient.baselineVitals.map + 12)) / 40, 0, 0.85);
+
     const sympatheticTarget = clamp(
       next.neurological.nociceptiveInput * 0.75
         + Math.max(0, receptors.beta1Drive) * 0.55
         + hypotensiveStimulus * 0.35
+        + co2Drive * 0.25
+        + hypoxicDrive * 0.25
+        + next.neurological.excitationDrive * 0.30
         - Math.max(0, receptors.alpha2Drive) * 0.65,
       0,
       1.5
     );
     const parasympatheticTarget = clamp(
-      0.12 + Math.max(0, receptors.m2Drive) * 0.7 + Math.max(0, receptors.muOpioidDrive) * 0.22,
+      0.12 + Math.max(0, receptors.m2Drive) * 0.70
+        + Math.max(0, receptors.muOpioidDrive) * 0.22
+        + hypertensiveVagalStimulus * 0.45
+        - Math.max(0, receptors.beta1Drive) * 0.25,
       0,
       1.3
     );
@@ -310,8 +311,53 @@ export class BiologicalStateEngine {
       1
     );
 
-    const co2Drive = clamp((previousPaCO2 - 40) / 35, 0, 1.2);
-    const hypoxicDrive = clamp((90 - previousSpO2) / 35, 0, 1);
+    // ----------------------------------------------------
+    // NEUROTRANSMITTER POOL DYNAMICS & SITE OCCUPANCY
+    // ----------------------------------------------------
+    // 1. Synaptic Norepinephrine (NE):
+    // Pre-synaptic sympathetic postganglionic release driven by sympathetic outflow and stored catecholamine reserve.
+    // Pre-synaptic alpha-2 autoreceptor activation inhibits vesicular exocytosis of NE by up to 82%.
+    const alpha2AutoreceptorInhibition = Math.min(0.82, Math.max(0, receptors.alpha2Drive) * 0.85);
+    const targetNE = (0.18 + next.autonomic.sympatheticDrive * 0.85 * next.autonomic.catecholamineReserve)
+      * (1.0 - alpha2AutoreceptorInhibition);
+    const prevNE = previous.autonomic.norepinephrineSynaptic ?? 0.20;
+    next.autonomic.norepinephrineSynaptic = expApproach(prevNE, targetNE, dtSeconds, 2.5);
+
+    // 2. Humoral Epinephrine (Adrenaline in plasma):
+    // Secreted by adrenal medulla chromaffin cells during severe sympathetic stress, hypotension, or hypoxia.
+    const severeStressEpiRelease = (next.autonomic.sympatheticDrive > 0.65 ? (next.autonomic.sympatheticDrive - 0.65) * 0.8 : 0)
+      + (hypotensiveStimulus > 0.5 ? (hypotensiveStimulus - 0.5) * 0.6 : 0)
+      + (hypoxicDrive > 0.4 ? (hypoxicDrive - 0.4) * 0.5 : 0);
+    const exogenousEpi = Math.max(0, receptors.beta1Drive > 0.5 && receptors.beta2Drive > 0.3 ? 0.45 : 0);
+    const targetEpi = 0.05 + severeStressEpiRelease * next.autonomic.catecholamineReserve + exogenousEpi;
+    const prevEpi = previous.autonomic.epinephrinePlasma ?? 0.05;
+    next.autonomic.epinephrinePlasma = expApproach(prevEpi, targetEpi, dtSeconds, 25.0);
+
+    // 3. Synaptic Acetylcholine (ACh):
+    // Vagal release at neuroeffector junctions (cardiac M2, visceral M3, skeletal Nm).
+    // Neostigmine inhibits AChE (receptors.acheInhibition), causing prominent ACh accumulation!
+    const baseAChRelease = 0.12 + next.autonomic.parasympatheticDrive * 0.70;
+    const acheInhibitionFactor = 1.0 + (receptors.acheInhibition || 0) * 3.2;
+    const targetACh = baseAChRelease * acheInhibitionFactor;
+    const prevACh = previous.autonomic.acetylcholineSynaptic ?? 0.15;
+    next.autonomic.acetylcholineSynaptic = expApproach(prevACh, targetACh, dtSeconds, 1.2);
+
+    // 4. Central GABA Tone:
+    // Enhanced allosterically by BZDs, propofol, neurosteroids, and volatiles.
+    const bzdModulation = receptors.bzdAllostericOccupancy * 0.35;
+    const propofolModulation = receptors.propofolSiteOccupancy * 0.55;
+    const volatileModulation = receptors.volatileSiteOccupancy * 0.45;
+    const targetGABA = 0.20 + bzdModulation + propofolModulation + volatileModulation;
+    const prevGABA = previous.autonomic.gabaTone ?? 0.20;
+    next.autonomic.gabaTone = expApproach(prevGABA, targetGABA, dtSeconds, 3.0);
+
+    // 5. Central Glutamate Tone:
+    // Nociceptive afferent release in dorsal horn and central excitation, blocked downstream by NMDA uncoupling (ketamine).
+    const nociceptiveGlutamateRelease = next.neurological.nociceptiveInput * 0.85 + next.neurological.excitationDrive * 0.45;
+    const unblockedGlutamate = nociceptiveGlutamateRelease * (1.0 - Math.min(0.92, receptors.nmdaBlockade * 0.92));
+    const targetGlutamate = 0.10 + unblockedGlutamate;
+    const prevGlutamate = previous.autonomic.glutamateTone ?? 0.10;
+    next.autonomic.glutamateTone = expApproach(prevGlutamate, targetGlutamate, dtSeconds, 4.0);
     const chemoreflexSuppression = clamp(
       receptors.muOpioidDrive * 0.58 + next.neurological.hypnoticDepth * 0.48,
       0,
@@ -349,7 +395,9 @@ export class BiologicalStateEngine {
     isRecumbent: boolean,
     currentMap: number,
     criticalMap: number,
-    recumbencyShuntPct: number
+    recumbencyShuntPct: number,
+    deliveries?: FluidDelivery[],
+    alpha1Drive?: number
   ): BiologicalState {
     const next: BiologicalState = {
       ...previous,
@@ -401,43 +449,18 @@ export class BiologicalStateEngine {
       next.species.myopathyRisk = clamp(previous.species.myopathyRisk - dtSeconds / 28800, 0, 1);
     }
 
-    next.fluids.crystalloidCentralMl = decayByHalfLife(previous.fluids.crystalloidCentralMl, dtSeconds, 1800);
-    next.fluids.hypertonicExpansionMl = decayByHalfLife(previous.fluids.hypertonicExpansionMl, dtSeconds, 1500);
-    next.fluids.colloidCentralMl = decayByHalfLife(previous.fluids.colloidCentralMl, dtSeconds, 7200);
-    next.fluids.wholeBloodCentralMl = decayByHalfLife(previous.fluids.wholeBloodCentralMl, dtSeconds, 43200);
-
+    // Legacy externally added totals remain supported; normal UI and catalog paths
+    // provide composition-specific deliveries in the current tick.
     const observedTotal = Math.max(0, equipment.totalFluidsInfusedMl);
-    const newlyDeliveredMl = Math.max(0, observedTotal - previous.fluids.lastObservedTotalInfusedMl);
-    switch (classifyFluid(equipment.activeFluidType)) {
-      case 'whole_blood':
-        next.fluids.wholeBloodCentralMl += newlyDeliveredMl * 0.9;
-        break;
-      case 'hypertonic':
-        next.fluids.hypertonicExpansionMl += newlyDeliveredMl * 3.2;
-        break;
-      case 'colloid':
-        next.fluids.colloidCentralMl += newlyDeliveredMl * 0.8;
-        break;
-      default:
-        next.fluids.crystalloidCentralMl += newlyDeliveredMl;
-    }
+    const inputs = deliveries ?? [{ fluidName: equipment.activeFluidType, volumeMl: Math.max(0, observedTotal - previous.fluids.lastObservedTotalInfusedMl) }];
+    next.fluids = stepFluidBalance(dtSeconds, patient, previous, inputs);
     next.fluids.lastObservedTotalInfusedMl = observedTotal;
 
-    const effectiveExpansion = next.fluids.crystalloidCentralMl * 0.25
-      + next.fluids.hypertonicExpansionMl
-      + next.fluids.colloidCentralMl
-      + next.fluids.wholeBloodCentralMl;
-    next.fluids.effectiveCirculatingExpansionMl = effectiveExpansion;
-
-    const baselineBloodVolume = Math.max(1, patient.baselineVitals.bloodVolumeMl);
-    const baselineRedCellVolume = baselineBloodVolume * patient.baselineVitals.hctPct / 100;
-    const donorRedCellVolume = next.fluids.wholeBloodCentralMl * 0.4;
-    const centralVolume = baselineBloodVolume + effectiveExpansion;
-    next.fluids.currentHematocritPct = clamp(
-      100 * (baselineRedCellVolume + donorRedCellVolume) / Math.max(1, centralVolume),
-      8,
-      65
-    );
+    // Sequestro esplênico de eritrócitos por relaxamento capsular sob bloqueio alfa-1 (acepromazina)
+    if (alpha1Drive !== undefined && alpha1Drive < -0.05) {
+      const splenicSequestrationFraction = Math.min(0.25, Math.abs(alpha1Drive) * 0.25);
+      next.fluids.currentHematocritPct = clamp(next.fluids.currentHematocritPct * (1 - splenicSequestrationFraction), 5, 65);
+    }
 
     return next;
   }
@@ -503,17 +526,22 @@ export class BiologicalStateEngine {
         glucoseTarget > state.metabolic.bloodGlucoseMgDl ? 210 : 1200
       ),
       25,
-      patient.species === 'avian' ? 520 : 450
+      900
     );
+    next.metabolic.bloodGlucoseMgDl = clamp(next.metabolic.bloodGlucoseMgDl
+      + (state.fluids.glucoseInputMg ?? 0) / Math.max(1, patient.weightKg * 2)
+      - Math.max(0, state.metabolic.bloodGlucoseMgDl - 180) * dtSeconds / 1800
+        * state.organPerfusion.renalFraction * (1 - (patient.pathologyConditions.renalDysfunctionSeverity ?? 0)), 20, 900);
     const oxygenFactor = clamp(spo2 / 95, 0.2, 1.05);
-    const cerebralTarget = clamp((meanArterialPressure - 25) / 45, 0.15, 1.1) * oxygenFactor;
+    const flowAvailability = clamp(cardiacOutputRatio / 0.85, 0.05, 1);
+    const cerebralTarget = clamp((meanArterialPressure - 25) / 45, 0.15, 1.1) * oxygenFactor * flowAvailability;
     const hepaticTarget = clamp(
       (cardiacOutputRatio * 0.65 + oxygenFactor * 0.35) * hepaticPerfusionMultiplier,
       0.08,
       1.15
     );
     const renalTarget = clamp(
-      ((meanArterialPressure - 30) / 50) * oxygenFactor * renalPerfusionMultiplier,
+      ((meanArterialPressure - 30) / 50) * oxygenFactor * renalPerfusionMultiplier * flowAvailability,
       0.05,
       1.1
     );
@@ -528,18 +556,27 @@ export class BiologicalStateEngine {
       * baselineCardiacOutputLMin * cardiacOutputRatio * 10 / Math.max(0.1, patient.weightKg);
     const effectiveCellularOxygen = next.organPerfusion.oxygenDeliveryMlKgMin
       * clamp(cellularOxygenUtilizationFraction, 0.05, 1.1);
-    const deliveryDeficit = clamp(
-      (10 - effectiveCellularOxygen) / 10,
-      0,
-      1
-    );
-    const oxygenDebtRate = Math.max(
-      deliveryDeficit,
-      Math.max(0, 0.75 - Math.min(cerebralTarget, hepaticTarget, renalTarget))
-    );
+    const deliveryDeficit = getOxygenDeliveryDeficit(patient.species, effectiveCellularOxygen);
+    const oxygenThresholds = getOxygenDeliveryThresholds(patient.species);
+    // Renal/hepatic hypoperfusion remains an organ injury/clearance signal. It
+    // must not accumulate as whole-body anoxia and independently trigger PEA.
+    // Systemic delivery failure or profound cerebral hypoperfusion incur global debt.
+    const cerebralIschemicDebtRate = clamp(1 - cerebralTarget / 0.30, 0, 1);
+    const oxygenDebtRate = Math.max(deliveryDeficit, cerebralIschemicDebtRate);
+
+    let recoveryRate = 0;
+    if (oxygenDebtRate === 0) {
+      if (effectiveCellularOxygen >= oxygenThresholds.recovery && meanArterialPressure >= 60 && spo2 >= 94) {
+        // Robust tissue oxygenation actively clears oxygen debt via supranormal DO2
+        const surplusFactor = clamp((effectiveCellularOxygen - oxygenThresholds.recovery) / oxygenThresholds.reserve, 0.25, 2.0);
+        recoveryRate = (dtSeconds / 90) * surplusFactor;
+      } else {
+        recoveryRate = dtSeconds / 360;
+      }
+    }
+
     next.organPerfusion.cumulativeOxygenDebt = clamp(
-      state.organPerfusion.cumulativeOxygenDebt + oxygenDebtRate * dtSeconds / 300
-        - (oxygenDebtRate === 0 ? dtSeconds / 1800 : 0),
+      state.organPerfusion.cumulativeOxygenDebt + (oxygenDebtRate * dtSeconds / 300) - recoveryRate,
       0,
       1
     );

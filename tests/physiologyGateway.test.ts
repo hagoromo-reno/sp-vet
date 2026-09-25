@@ -18,6 +18,14 @@ import {
   type PhysiologyServerMessage,
   type PhysiologyStepInputs,
 } from '../src/physiology/protocol';
+import { mapDoseToPulseAction, PULSE_SUBSTANCE_BY_DRUG_ID } from '../src/physiology/pulseActionMapping';
+import {
+  buildHybridPharmacologyInput,
+  buildPharmacologyCoverage,
+  PULSE_HYBRID_MODEL_VERSION,
+} from '../src/physiology/pulseHybridBridge';
+import { createDefaultEquipment, createSimulationState } from '../src/validation/simulationHarness';
+import type { ActiveDrugDose } from '../src/types/simulator';
 
 const caninePatient = PRESET_SCENARIOS.find((patient) => patient.species === 'canine');
 if (!caninePatient) throw new Error('Os cenários precisam conter ao menos um paciente canino.');
@@ -37,6 +45,7 @@ const stepInputs: PhysiologyStepInputs = {
   activeDrugs: [],
   equipment: {
     oxygenFlowLMin: 1.5,
+    nitrousOxideFlowLMin: 0,
     vaporizerType: 'isoflurane',
     vaporizerDialPct: 0,
     isVaporizerOn: false,
@@ -53,6 +62,11 @@ const stepInputs: PhysiologyStepInputs = {
       pipPressureLimitCmH2O: 18,
       inspiratoryPausePct: 10,
     },
+    circuitType: 'circle_rebreathing_adult',
+    activeFluidType: 'Ringer com lactato',
+    totalFluidsInfusedMl: 0,
+    fluidRateMlPerHour: 0,
+    isFluidPumpRunning: false,
   },
   surgicalStimulus: 0,
 };
@@ -93,6 +107,91 @@ test('perfil canino preserva espécie, unidades e referência basal rastreável'
   assert.equal(checks.length, 7);
   assert.ok(checks.every((check) => check.passed));
   assert.ok(checks.every((check) => check.unit.length > 0));
+});
+
+test('adaptador farmacológico só produz ações Pulse dimensionais e explicitamente suportadas', () => {
+  const propofol = {
+    id: 'dose-propofol',
+    drugId: 'propofol',
+    drugName: 'Propofol',
+    category: 'induction' as const,
+    route: 'IV' as const,
+    administrationSpeed: 'bolus_slow' as const,
+    doseAmount: 82,
+    dosePerKg: 4,
+    volumeMl: 8.2,
+    administeredAtSimTime: 0,
+    peakEffectSimTime: 60,
+    deliveryDurationSec: 60,
+    currentCe: 0,
+    currentCp: 0,
+  };
+  const mapped = mapDoseToPulseAction(propofol);
+  assert.equal(mapped.status, 'native');
+  assert.equal(mapped.pulseSubstance, PULSE_SUBSTANCE_BY_DRUG_ID.propofol);
+  assert.equal(mapped.totalMassMg, 82);
+  assert.equal(mapped.concentrationMgMl, 10);
+
+  const hybrid = mapDoseToPulseAction({ ...propofol, id: 'dose-ace', drugId: 'acepromazine', drugName: 'Acepromazina' });
+  assert.equal(hybrid.status, 'hybrid');
+  assert.match(hybrid.reasonPt || '', /ponte híbrida/i);
+
+  const unsupported = mapDoseToPulseAction({ ...propofol, id: 'dose-desconhecido', drugId: 'desconhecido', drugName: 'Desconhecido' });
+  assert.equal(unsupported.status, 'unsupported');
+  assert.match(unsupported.reasonPt || '', /ausente do catálogo/i);
+});
+
+test('ponte híbrida calcula modificadores farmacodinâmicos veterinários e cobertura de catálogo', () => {
+  const patient = caninePatient;
+  const simState = createSimulationState(patient, createDefaultEquipment(patient));
+  const dexDose: ActiveDrugDose = {
+    id: 'dose-dex',
+    drugId: 'dexmedetomidine',
+    drugName: 'Dexmedetomidina',
+    category: 'premedication',
+    route: 'IV',
+    administrationSpeed: 'bolus_slow',
+    doseAmount: 142.5,
+    dosePerKg: 5,
+    volumeMl: 0.285,
+    administeredAtSimTime: 10,
+    peakEffectSimTime: 60,
+    deliveryDurationSec: 60,
+    currentCe: 0.8,
+    currentCp: 0.8,
+  };
+  const propofolDose: ActiveDrugDose = {
+    id: 'dose-prop',
+    drugId: 'propofol',
+    drugName: 'Propofol',
+    category: 'induction',
+    route: 'IV',
+    administrationSpeed: 'bolus_slow',
+    doseAmount: 114,
+    dosePerKg: 4,
+    volumeMl: 11.4,
+    administeredAtSimTime: 10,
+    peakEffectSimTime: 60,
+    deliveryDurationSec: 60,
+    currentCe: 2.5,
+    currentCp: 3.0,
+  };
+
+  const coverage = buildPharmacologyCoverage([dexDose, propofolDose]);
+  assert.equal(coverage.length, 2);
+  assert.equal(coverage.find((c) => c.drugId === 'dexmedetomidine')?.mode, 'hybrid_veterinary_pd');
+  assert.equal(coverage.find((c) => c.drugId === 'propofol')?.mode, 'native_pbpk_pd');
+
+  const hybridInput = buildHybridPharmacologyInput(
+    patient,
+    [dexDose, propofolDose],
+    simState.equipment,
+    simState.vitals
+  );
+  assert.equal(hybridInput.modelVersion, PULSE_HYBRID_MODEL_VERSION);
+  assert.ok(hybridInput.activeDrugIds.includes('dexmedetomidine'));
+  assert.ok(hybridInput.modifiers.heartRateFraction < 0);
+  assert.ok(hybridInput.modifiers.sedationDelta > 0);
 });
 
 test('saída de referência nunca recebe autoridade sobre o monitor', () => {

@@ -92,7 +92,7 @@ export const createPhysiologyGateway = () => {
           type: 'error',
           protocolVersion: PHYSIOLOGY_PROTOCOL_VERSION,
           code: 'INVALID_PROTOCOL_MESSAGE',
-          messagePt: 'Mensagem incompatível com o protocolo fisiológico 1.0.0.',
+          messagePt: `Mensagem incompatível com o protocolo fisiológico ${PHYSIOLOGY_PROTOCOL_VERSION}.`,
         });
         return;
       }
@@ -130,7 +130,12 @@ export const createPhysiologyGateway = () => {
       }
     });
 
-    socket.on('close', () => nativeWorker.stop());
+    process.stdout.write(`[Gateway] Novo cliente conectado no canal fisiológico.\n`);
+
+    socket.on('close', () => {
+      process.stdout.write(`[Gateway] Cliente desconectado do canal fisiológico.\n`);
+      nativeWorker.stop();
+    });
   });
 
   return { httpServer, webSocketServer };
@@ -141,7 +146,7 @@ const isMainModule = process.argv[1]
 
 if (isMainModule) {
   const { httpServer } = createPhysiologyGateway();
-  httpServer.listen(port, '127.0.0.1', () => {
-    process.stdout.write(`Gateway fisiológico em ws://127.0.0.1:${port}/physiology\n`);
+  httpServer.listen(port, '0.0.0.0', () => {
+    process.stdout.write(`Gateway fisiológico pronto em ws://0.0.0.0:${port}/physiology (compatível com localhost, 127.0.0.1 e LAN)\n`);
   });
 }

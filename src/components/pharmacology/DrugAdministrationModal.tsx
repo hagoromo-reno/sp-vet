@@ -1,4 +1,6 @@
+import { getDrugFormulations, volumePerDoseUnit } from '../../data/drugFormulations';
 import React, { useEffect, useState } from 'react';
+import { EMERGENCY_DRUG_IDS } from '../../data/emergencyDrugs';
 import {
   ActiveDrugDose,
   AdministrationSpeed,
@@ -12,6 +14,7 @@ import {
   calculateAdministration,
   getRoutePharmacokinetics,
   getSpeciesDoseRange,
+  getSpeciesDrugRoutes,
   isTimeBasedDoseUnit,
   validateAdministrationCommand,
 } from '../../engine/drugAdministration';
@@ -34,20 +37,37 @@ import {
 } from 'lucide-react';
 
 interface DrugAdministrationModalProps {
+  requestedDrugId?: string;
   patient: PatientProfile;
   activeDoses: ActiveDrugDose[];
   onAdministerDrug: (dose: Omit<ActiveDrugDose, 'id' | 'administeredAtSimTime' | 'peakEffectSimTime' | 'currentCe' | 'currentCp' | 'deliveryElapsedSec' | 'isFullyDelivered' | 'isFastBolusShockTriggered'>) => void;
   onStopCRI: (doseId: string) => void;
 }
 
+const DRUG_CATEGORIES = [
+          { id: 'all', label: 'Todos' },
+          { id: 'emergency', label: 'Emergência & Reversores' },
+          { id: 'premedication', label: 'Pré-Anestésicos (MPA)' },
+          { id: 'induction', label: 'Indutores' },
+          { id: 'opioid_analgesic', label: 'Opioides & Analgesia' },
+          { id: 'emergency_inotrope', label: 'Emergência & Inotrópicos' },
+          { id: 'antihypertensive', label: 'Anti-hipertensivos Agudos' },
+          { id: 'antiarrhythmic', label: 'Antiarrítmicos' },
+          { id: 'antagonist_reversal', label: 'Antagonistas (Reversão)' },
+          { id: 'nmba', label: 'Bloqueadores NMBA' },
+          { id: 'local_anesthetic', label: 'Anestésicos Locais' },
+          { id: 'fluid_crystalloid', label: 'Fluidos & Sangue' },
+        ] as const;
+
 export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = ({
   patient,
   activeDoses,
   onAdministerDrug,
   onStopCRI,
+  requestedDrugId,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<DrugCategory | 'all'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<DrugCategory | 'all' | 'emergency'>('all');
   const [selectedDrug, setSelectedDrug] = useState<DrugDefinition>(VETERINARY_DRUG_DATABASE[0]);
   
   // Custom dosage inputs
@@ -55,52 +75,99 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
   const [adminSpeed, setAdminSpeed] = useState<AdministrationSpeed>('bolus_slow');
   const [customDosePerKg, setCustomDosePerKg] = useState<number>(() => {
     const recommended = getSpeciesDoseRange(VETERINARY_DRUG_DATABASE[0], patient.species);
-    return recommended?.typical ?? 0;
+    return recommended ? (recommended.min + recommended.max) / 2 : 0;
   });
-  const [customConcentrationMgMl, setCustomConcentrationMgMl] = useState<number>(VETERINARY_DRUG_DATABASE[0].defaultConcentrationMgMl);
+  const [preparationId, setPreparationId] = useState(getDrugFormulations(VETERINARY_DRUG_DATABASE[0])[0].id);
+  const preparations = getDrugFormulations(selectedDrug);
+  const preparation = preparations.find(item => item.id === preparationId) ?? preparations[0];
+  const customConcentrationMgMl = preparation.concentrationMgMl;
   const [isCRI, setIsCRI] = useState(false);
+  const [deliverySeconds, setDeliverySeconds] = useState(60);
   const [adminSuccessMsg, setAdminSuccessMsg] = useState<string | null>(null);
   const [adminErrorMsg, setAdminErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    const recommended = getSpeciesDoseRange(selectedDrug, patient.species);
-    setCustomDosePerKg(recommended?.typical ?? 0);
+    const recommended = getSpeciesDoseRange(selectedDrug, patient.species, isCRI);
+    setCustomDosePerKg(recommended ? (recommended.min + recommended.max) / 2 : 0);
     setAdminErrorMsg(null);
-  }, [patient.species, selectedDrug]);
+  }, [patient.species, patient.weightKg, selectedDrug, isCRI, preparationId]);
+
+  // Helper to normalize strings for accent-insensitive search
+  const normalizeSearch = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
   // Filtered drug catalog
   const filteredDrugs = VETERINARY_DRUG_DATABASE.filter((drug) => {
-    const matchesSearch = drug.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (drug.brandName && drug.brandName.toLowerCase().includes(searchQuery.toLowerCase()));
+    const q = normalizeSearch(searchQuery.trim());
+    const matchesSearch = !q ||
+      normalizeSearch(drug.name).includes(q) ||
+      (drug.brandName && normalizeSearch(drug.brandName).includes(q)) ||
+      (drug.aliases && drug.aliases.some(alias => normalizeSearch(alias).includes(q))) ||
+      normalizeSearch(drug.description).includes(q) ||
+      normalizeSearch(drug.category).includes(q) ||
+      (q.includes('nalox') && drug.id === 'naloxone') ||
+      (q.includes('naxol') && drug.id === 'naloxone') ||
+      (q.includes('atipa') && drug.id === 'atipamezole') ||
+      (q.includes('fluma') && drug.id === 'flumazenil') ||
+      (q.includes('revers') && (drug.category === 'antagonist_reversal' || drug.category === 'nmba_reversal'));
+
+    const isEmergencyDrug = EMERGENCY_DRUG_IDS.has(drug.id) ||
+      drug.category === 'antagonist_reversal' ||
+      drug.category === 'nmba_reversal' ||
+      drug.category === 'emergency_inotrope';
+
     const matchesCategory =
       selectedCategory === 'all' ||
+      (selectedCategory === 'emergency' && isEmergencyDrug) ||
       drug.category === selectedCategory ||
-      (selectedCategory === 'antagonist_reversal' && drug.category === 'nmba_reversal');
-    return matchesSearch && matchesCategory;
+      (selectedCategory === 'fluid_crystalloid' && (drug.category === 'fluid_colloid' || drug.category === 'blood_product')) ||
+      (selectedCategory === 'antagonist_reversal' && (drug.category === 'antagonist_reversal' || drug.category === 'nmba_reversal')) ||
+      (selectedCategory === 'emergency_inotrope' && (drug.category === 'emergency_inotrope' || drug.id === 'epinephrine' || drug.id === 'norepinephrine' || drug.id === 'dobutamine' || drug.id === 'ephedrine'));
+
+    const hasSpeciesRegimen = Boolean(getSpeciesDoseRange(drug, patient.species) || getSpeciesDoseRange(drug, patient.species, true));
+    return matchesSearch && matchesCategory && hasSpeciesRegimen;
   });
 
   const handleSelectDrug = (drug: DrugDefinition) => {
     setSelectedDrug(drug);
+    setDeliverySeconds(drug.id === 'calcium_gluconate' ? 600 : 60);
     const hasValidatedRate = drug.doseUnit.includes('/min') || drug.doseUnit.includes('/h');
-    const isDefaultCRI = hasValidatedRate && drug.supportedRoutes.includes('CRI');
+    const isDefaultCRI = hasValidatedRate && getSpeciesDrugRoutes(drug, patient.species).includes('CRI');
     const recommended = getSpeciesDoseRange(drug, patient.species, isDefaultCRI);
-    const initialDose = recommended?.typical ?? 0;
+    const initialDose = recommended ? (recommended.min + recommended.max) / 2 : 0;
     setCustomDosePerKg(initialDose);
-    setCustomConcentrationMgMl(drug.defaultConcentrationMgMl);
-    setSelectedRoute(isDefaultCRI ? 'CRI' : (drug.supportedRoutes.find((route) => route !== 'CRI') || 'IV'));
+    setPreparationId(getDrugFormulations(drug)[0].id);
+    const routes = getSpeciesDrugRoutes(drug, patient.species);
+    // For emergency / reversal drugs, prefer IV if available, then IV_slow, then IM
+    const defaultRoute = isDefaultCRI ? 'CRI' : (
+      routes.includes('IV') ? 'IV' : routes.includes('IV_slow') ? 'IV_slow' : routes.find(r => r !== 'CRI') || 'IV'
+    );
+    setSelectedRoute(defaultRoute);
     setIsCRI(isDefaultCRI);
-    setAdminSpeed(isDefaultCRI ? 'infusion_cri' : 'bolus_slow');
+    setAdminSpeed(isDefaultCRI ? 'infusion_cri' : (drug.category === 'antagonist_reversal' && drug.id === 'naloxone' ? 'bolus_rapid' : 'bolus_slow'));
   };
+
+  useEffect(() => {
+    const availableDrug = getSpeciesDoseRange(selectedDrug, patient.species)
+      ? selectedDrug
+      : VETERINARY_DRUG_DATABASE.find(drug => getSpeciesDoseRange(drug, patient.species));
+    if (availableDrug) handleSelectDrug(availableDrug);
+  }, [patient.species]);
+
+  useEffect(() => {
+    const drug = VETERINARY_DRUG_DATABASE.find(item => item.id === requestedDrugId);
+    if (drug) { setSelectedCategory('emergency'); setSearchQuery(''); handleSelectDrug(drug); }
+  }, [requestedDrugId]);
 
   const isRateDose = isTimeBasedDoseUnit(selectedDrug.doseUnit);
   const hasCriOption = Boolean(selectedDrug.recommendedCriDose?.[patient.species]);
-  const canUseCRI = (isRateDose || hasCriOption) && selectedDrug.supportedRoutes.includes('CRI');
-  const canUseBolus = !isRateDose && selectedDrug.supportedRoutes.some((route) => route !== 'CRI');
-  const canUseRapidBolus = canUseBolus && selectedDrug.supportedRoutes.includes('IV');
+  const canUseCRI = (isRateDose || hasCriOption) && getSpeciesDrugRoutes(selectedDrug, patient.species).includes('CRI');
+  const canUseBolus = !isRateDose && getSpeciesDrugRoutes(selectedDrug, patient.species).some((route) => route !== 'CRI');
+  const canUseRapidBolus = canUseBolus && getSpeciesDrugRoutes(selectedDrug, patient.species).includes('IV');
   const recommendedRange = getSpeciesDoseRange(selectedDrug, patient.species, isCRI);
   const activeDoseUnit = (isCRI && selectedDrug.criDoseUnit) ? selectedDrug.criDoseUnit : selectedDrug.doseUnit;
-  const selectableRoutes = selectedDrug.supportedRoutes.filter((route) => isCRI ? route === 'CRI' : route !== 'CRI');
+  const selectableRoutes = getSpeciesDrugRoutes(selectedDrug, patient.species).filter((route) => isCRI ? route === 'CRI' : route !== 'CRI');
   const routePK = getRoutePharmacokinetics(selectedDrug, selectedRoute);
+  const isExtravascularInjection = selectedRoute === 'SC' || selectedRoute === 'IM';
 
   // Calculations for chosen drug and patient weight
   const calculatedAdministration = calculateAdministration(
@@ -110,6 +177,16 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
     customConcentrationMgMl,
     isCRI
   );
+  const volumeFactor = volumePerDoseUnit(selectedDrug, patient.weightKg, customConcentrationMgMl, isCRI);
+  const selectedVolume = customDosePerKg * volumeFactor;
+  const volumeUnit = isCRI ? 'mL/h' : 'mL';
+  const describeAmount = (dose: number) => {
+    const volume = dose * volumeFactor;
+    if (activeDoseUnit.startsWith('ml/kg')) return `${formatDecimal(volume, 4)} ${volumeUnit}`;
+    const nativeAmount = dose * patient.weightKg * (isCRI && activeDoseUnit.endsWith('/min') ? 60 : 1);
+    const mass = selectedDrug.unit === 'mcg' ? nativeAmount / 1000 : nativeAmount;
+    return `${formatDecimal(mass, 4)} ${selectedDrug.unit === 'mEq' ? 'mEq' : 'mg'}${isCRI ? '/h' : ''} · ${formatDecimal(volume, 4)} ${volumeUnit}`;
+  };
   const totalDoseAmount = calculatedAdministration.doseAmount;
   const calculatedVolumeMl = calculatedAdministration.volumeMl;
 
@@ -120,18 +197,20 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
       isCRI,
       dosePerKg: customDosePerKg,
       concentrationMgMl: customConcentrationMgMl,
+      deliveryDurationSec: isCRI ? undefined : adminSpeed === 'bolus_rapid' ? 4 : deliverySeconds,
     });
     if (validationErrors.length > 0) {
       setAdminErrorMsg(validationErrors.join(' '));
       setAdminSuccessMsg(null);
       return;
     }
-    const deliveryDuration = adminSpeed === 'bolus_rapid' ? 4 : adminSpeed === 'bolus_slow' ? 60 : 0;
+    const deliveryDuration = adminSpeed === 'bolus_rapid' ? 4 : adminSpeed === 'bolus_slow' ? deliverySeconds : 0;
     const ratePerMin = isCRI
       ? (activeDoseUnit.endsWith('/h') ? customDosePerKg / 60 : customDosePerKg)
       : undefined;
 
     onAdministerDrug({
+      preparation: { ...preparation },
       drugId: selectedDrug.id,
       drugName: selectedDrug.name,
       category: selectedDrug.category,
@@ -150,60 +229,27 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
 
     setAdminSuccessMsg(isCRI
       ? `CRI iniciada: ${selectedDrug.name} (${formatDecimal(customDosePerKg, 2)} ${activeDoseUnit}; ${formatDecimal(calculatedAdministration.pumpRateMlPerHour, 2)} mL/h)`
-      : `Administrado: ${selectedDrug.name} (${formatDecimal(customDosePerKg, 2)} ${activeDoseUnit} = ${formatDecimal(calculatedVolumeMl, 2)} mL) [${adminSpeed.replace('_', ' ').toUpperCase()}]`
+      : `Administrado: ${selectedDrug.name} (${formatDecimal(customDosePerKg, 2)} ${activeDoseUnit} = ${formatDecimal(calculatedVolumeMl, 4)} mL) [${adminSpeed.replace('_', ' ').toUpperCase()}]`
     );
     setAdminErrorMsg(null);
     setTimeout(() => setAdminSuccessMsg(null), 3500);
   };
 
-  // Fast emergency quick dose trigger
-  const handleQuickEmergencyDose = (drugId: string, speed: AdministrationSpeed = 'bolus_rapid') => {
-    const drug = VETERINARY_DRUG_DATABASE.find((d) => d.id === drugId);
+  // Emergency shortcuts open the same dose editor; they never inject a preset.
+  const handleQuickEmergencyDose = (drugId: string, speed?: AdministrationSpeed) => {
+    const drug = VETERINARY_DRUG_DATABASE.find(item => item.id === drugId);
     if (!drug) return;
-
-    const recommended = getSpeciesDoseRange(drug, patient.species);
-    if (!recommended || isTimeBasedDoseUnit(drug.doseUnit)) {
-      setAdminErrorMsg(`${drug.name} não possui dose rápida validada para ${patient.species}.`);
-      return;
+    setSelectedCategory('emergency');
+    setSearchQuery('');
+    handleSelectDrug(drug);
+    if (speed) setAdminSpeed(speed);
+    const routes = getSpeciesDrugRoutes(drug, patient.species);
+    if (routes.includes('IV')) {
+      setSelectedRoute('IV');
+    } else if (routes.includes('IV_slow')) {
+      setSelectedRoute('IV_slow');
     }
-    const dosePerKg = recommended.typical;
-    const calculated = calculateAdministration(drug, dosePerKg, patient.weightKg);
-    const totalDose = calculated.doseAmount;
-    const volMl = calculated.volumeMl;
-
-    const route: DrugRoute = drug.supportedRoutes.includes('IV')
-      ? 'IV'
-      : drug.supportedRoutes.includes('IV_slow')
-        ? 'IV_slow'
-        : drug.supportedRoutes.find((item) => item !== 'CRI') || 'IV';
-    const effectiveSpeed: AdministrationSpeed = route === 'IV' ? speed : 'bolus_slow';
-    const validationErrors = validateAdministrationCommand(patient, drug, {
-      route,
-      administrationSpeed: effectiveSpeed,
-      isCRI: false,
-      dosePerKg,
-    });
-    if (validationErrors.length > 0) {
-      setAdminErrorMsg(validationErrors.join(' '));
-      return;
-    }
-
-    onAdministerDrug({
-      drugId: drug.id,
-      drugName: drug.name,
-      category: drug.category,
-      route,
-      administrationSpeed: effectiveSpeed,
-      doseAmount: Number(totalDose.toFixed(3)),
-      dosePerKg,
-      volumeMl: volMl,
-      deliveryDurationSec: effectiveSpeed === 'bolus_rapid' ? 4 : 60,
-      transitLagRemainingSec: getRoutePharmacokinetics(drug, route).transitLagSeconds,
-      isCRI: false,
-    });
-
-    setAdminSuccessMsg(`EMERGÊNCIA: Injetado ${drug.name} (${formatDecimal(dosePerKg, 2)} ${drug.doseUnit} = ${formatDecimal(volMl, 2)} mL)`);
-    setTimeout(() => setAdminSuccessMsg(null), 3500);
+    setAdminSuccessMsg(null);
   };
 
   // Check potential warnings
@@ -216,239 +262,221 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
   const isAboveRecommendedMaximum = Boolean(recommendedRange && customDosePerKg > recommendedRange.max);
 
   return (
-    <div className="bg-[#0d0d0d] border border-[#222222] rounded-xl p-4 flex flex-col space-y-4 shadow-2xl">
-      {/* Title & Patient Context Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-2 border-b border-[#1f1f1f]">
-        <div className="flex items-center space-x-2">
-          <Syringe className="w-5 h-5 text-emerald-400" />
-          <div>
-            <h3 className="text-sm font-bold text-[#f5f5f5] flex items-center gap-2">
-              <span>FARMACOTERAPIA & SIMULADOR PK/PD</span>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-[#1c2e22] text-emerald-300 border border-emerald-600/40">
-                MULTI-COMPARTIMENTAL
-              </span>
-            </h3>
-            <span className="text-[11px] text-[#888888]">
-              Paciente: <strong className="text-white">{patient.name}</strong> · Peso: <strong className="text-emerald-400">{patient.weightKg} kg</strong> · Espécie: <strong className="text-cyan-300">{formatSpecies(patient.species).toUpperCase()}</strong>
-            </span>
+    <div className="bg-[#0f0f12] border border-zinc-800 rounded-xl p-4 sm:p-5 flex flex-col space-y-4 shadow-2xl font-sans text-zinc-100">
+      {/* Top Header: Title & Context & Emergency Toolbar */}
+      <div className="flex flex-col gap-3 pb-3 border-b border-zinc-800/80">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 rounded-lg bg-emerald-950/80 border border-emerald-700/50 text-emerald-400">
+              <Syringe className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-white tracking-tight">
+                  Prescrição e administração
+                </h3>
+
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Paciente: <strong className="text-white font-medium">{patient.name}</strong> · Peso: <strong className="text-emerald-300 font-medium">{patient.weightKg} kg</strong> · Espécie: <strong className="text-cyan-300 font-medium">{formatSpecies(patient.species).toUpperCase()}</strong>
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Quick Emergency Protocol Buttons */}
-        <div className="flex items-center space-x-1 overflow-x-auto py-1">
-          <span className="text-[10px] text-red-400 font-bold uppercase mr-1 flex items-center gap-0.5">
-            <Flame className="w-3 h-3 text-red-500" />
-            Emergência:
-          </span>
+        {/* Emergency Quick-Dose Strip */}
+        <details className="drug-quick-picks">
+          <summary>Seleção rápida · Emergência e reversores</summary>
+          <div>
+
           <button
             onClick={() => handleQuickEmergencyDose('epinephrine', 'bolus_rapid')}
-            className="text-[10px] font-mono-code px-2 py-1 rounded bg-[#2b0c0f] hover:bg-[#3d1217] border border-red-700/80 text-red-200 font-bold transition whitespace-nowrap"
+            className="text-[11px] font-mono-code font-bold px-2.5 py-1 rounded bg-rose-950/90 hover:bg-rose-900 border border-rose-600/70 text-rose-100 transition whitespace-nowrap shadow-sm cursor-pointer"
             title="Epinefrina 0.01 mg/kg IV rápido na PCR"
           >
             Adrenalina (PCR)
           </button>
           <button
             onClick={() => handleQuickEmergencyDose('ephedrine', 'bolus_slow')}
-            className="text-[10px] font-mono-code px-2 py-1 rounded bg-[#241a08] hover:bg-[#38280d] border border-amber-600/80 text-amber-200 font-bold transition whitespace-nowrap"
-            title="Efedrina 0.1 mg/kg IV lento (Hipotensão / Inotrópico Misto)"
+            className="text-[11px] font-mono-code font-bold px-2.5 py-1 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-600/70 text-amber-100 transition whitespace-nowrap shadow-sm cursor-pointer"
+            title="Efedrina 0.1 mg/kg IV lento (Hipotensão)"
           >
             Efedrina (Hipotensão)
           </button>
           <button
             onClick={() => handleQuickEmergencyDose('atropine', 'bolus_rapid')}
-            className="text-[10px] font-mono-code px-2 py-1 rounded bg-[#261f0c] hover:bg-[#382d12] border border-amber-600/80 text-amber-200 font-bold transition"
+            className="text-[11px] font-mono-code font-bold px-2.5 py-1 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-600/70 text-amber-100 transition whitespace-nowrap shadow-sm cursor-pointer"
             title="Atropina 0.03 mg/kg IV na bradicardia severa"
           >
             Atropina (Bradicardia)
           </button>
           <button
             onClick={() => handleQuickEmergencyDose('atipamezole', 'bolus_slow')}
-            className="text-[10px] font-mono-code px-2 py-1 rounded bg-[#0c222b] hover:bg-[#12303d] border border-cyan-700/80 text-cyan-200 font-bold transition whitespace-nowrap"
-            title="Atipamezol Reversão Alfa-2 (Dexmedetomidina/Xilazina)"
+            className="text-[11px] font-mono-code font-bold px-2.5 py-1 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-600/70 text-cyan-100 transition whitespace-nowrap shadow-sm cursor-pointer"
+            title="Atipamezol Reversão Alfa-2"
           >
             Atipamezol (Alfa-2)
           </button>
           <button
             onClick={() => handleQuickEmergencyDose('naloxone', 'bolus_rapid')}
-            className="text-[10px] font-mono-code px-2 py-1 rounded bg-[#1c0c2b] hover:bg-[#29123d] border border-purple-700/80 text-purple-200 font-bold transition whitespace-nowrap"
-            title="Naloxona Reversão de Opioides (Metadona/Fentanil/Morfina)"
+            className="text-[11px] font-mono-code font-bold px-2.5 py-1 rounded bg-purple-950/80 hover:bg-purple-900 border border-purple-600/70 text-purple-100 transition whitespace-nowrap shadow-sm cursor-pointer"
+            title="Naloxona Reversão de Opioides"
           >
             Naloxona (Opioide)
           </button>
           <button
             onClick={() => handleQuickEmergencyDose('flumazenil', 'bolus_slow')}
-            className="text-[10px] font-mono-code px-2 py-1 rounded bg-[#1a142b] hover:bg-[#261d3f] border border-violet-700/80 text-violet-200 font-bold transition whitespace-nowrap"
-            title="Flumazenil Reversão de Benzodiazepínicos (Midazolam/Diazepam)"
+            className="text-[11px] font-mono-code font-bold px-2.5 py-1 rounded bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-600/70 text-indigo-100 transition whitespace-nowrap shadow-sm cursor-pointer"
+            title="Flumazenil Reversão de Benzodiazepínicos"
           >
             Flumazenil (Benzo)
           </button>
           <button
             onClick={() => handleQuickEmergencyDose('sugammadex', 'bolus_rapid')}
-            className="text-[10px] font-mono-code px-2 py-1 rounded bg-[#0f2415] hover:bg-[#163620] border border-emerald-700/80 text-emerald-200 font-bold transition whitespace-nowrap"
+            className="text-[11px] font-mono-code font-bold px-2.5 py-1 rounded bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-600/70 text-emerald-100 transition whitespace-nowrap shadow-sm cursor-pointer"
             title="Sugamadex Reversão de Bloqueador NMBA"
           >
             Sugamadex (NMBA)
           </button>
           <button
             onClick={() => handleQuickEmergencyDose('lipid_emulsion_20', 'bolus_slow')}
-            className="text-[10px] font-mono-code px-2 py-1 rounded bg-[#2b220c] hover:bg-[#3d3112] border border-yellow-700/80 text-yellow-200 font-bold transition whitespace-nowrap"
-            title="Emulsão Lipídica 20% Resgate de Intoxicação por Anestésicos Locais (Lidocaína em gatos / Bupivacaína)"
+            className="text-[11px] font-mono-code font-bold px-2.5 py-1 rounded bg-yellow-950/80 hover:bg-yellow-900 border border-yellow-600/70 text-yellow-100 transition whitespace-nowrap shadow-sm cursor-pointer"
+            title="Emulsão Lipídica 20% Resgate de Intoxicação por Anestésicos Locais"
           >
-            Intralipid (Sequestro Lipídico)
+            Intralipid (20%)
           </button>
-        </div>
+          </div>
+        </details>
       </div>
 
-      {/* Category Tabs */}
-      <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 text-xs">
-        {[
-          { id: 'all', label: 'Todos' },
-          { id: 'premedication', label: 'Pré-Anestésicos (MPA)' },
-          { id: 'induction', label: 'Indutores' },
-          { id: 'opioid_analgesic', label: 'Opioides & Analgesia' },
-          { id: 'emergency_inotrope', label: 'Emergência & Inotrópicos' },
-          { id: 'antihypertensive', label: 'Anti-hipertensivos Agudos' },
-          { id: 'antiarrhythmic', label: 'Antiarrítmicos' },
-          { id: 'antagonist_reversal', label: 'Antagonistas (Reversão)' },
-          { id: 'nmba', label: 'Bloqueadores NMBA' },
-          { id: 'local_anesthetic', label: 'Anestésicos Locais' },
-          { id: 'fluid_crystalloid', label: 'Fluidos & Sangue' },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setSelectedCategory(tab.id as DrugCategory | 'all')}
-            className={`px-2.5 py-1 rounded-full whitespace-nowrap transition font-medium text-[11px] ${
-              selectedCategory === tab.id
-                ? 'bg-emerald-600 text-white font-bold shadow'
-                : 'bg-[#181818] border border-[#282828] text-[#888888] hover:text-[#e5e5e5] hover:bg-[#222222]'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="drug-filters">
+        <label>Buscar medicamento
+          <input type="search" placeholder="Nome, marca ou categoria…" value={searchQuery}
+            onChange={event => setSearchQuery(event.target.value)} />
+        </label>
+        <label>Categoria
+          <select value={selectedCategory} onChange={event => setSelectedCategory(event.target.value as DrugCategory | 'all' | 'emergency')}>
+            {DRUG_CATEGORIES.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}
+          </select>
+        </label>
       </div>
 
-      {/* Search Input */}
-      <div className="relative w-full">
-        <Search className="w-4 h-4 text-[#666666] absolute left-3 top-2.5" />
-        <input
-          type="text"
-          placeholder="Buscar por nome, marca ou categoria (ex: propofol, xilazina, morfina, atracurio)..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-9 pr-3 py-1.5 bg-[#141414] border border-[#2a2a2a] rounded-lg text-xs text-[#e5e5e5] placeholder-[#666666] focus:outline-none focus:border-emerald-500 font-mono-code"
-        />
-      </div>
-
-      {/* Main Grid: Catalog List vs Selected Drug Calculator */}
+      {/* Main Two-Column Layout */}
+      <p className="text-xs text-zinc-400">{filteredDrugs.length} medicamentos ou soluções com regime cadastrado para {formatSpecies(patient.species)}. Doses e taxas de infusão são específicas da espécie.</p>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Drug Selection List (5 cols) */}
-        <div className="lg:col-span-5 max-h-[380px] overflow-y-auto space-y-1.5 pr-1">
+        <div className="lg:col-span-5 max-h-[390px] overflow-y-auto space-y-1.5 pr-1">
+          {filteredDrugs.length === 0 && <div className="empty-search">
+            <p>Nenhum medicamento encontrado.</p><p className="mt-1 text-xs">Tente outro nome ou altere a categoria.</p>
+            <button className="ui-button" onClick={() => { setSearchQuery(''); setSelectedCategory('all'); }}>Limpar filtros</button>
+          </div>}
           {filteredDrugs.map((drug) => {
             const isSelected = selectedDrug.id === drug.id;
             const rec = getSpeciesDoseRange(drug, patient.species);
             return (
-              <div
+              <button type="button" aria-pressed={isSelected}
                 key={drug.id}
                 onClick={() => handleSelectDrug(drug)}
-                className={`p-2.5 rounded-lg border cursor-pointer transition flex items-center justify-between ${
+                className={`drug-choice p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
                   isSelected
-                    ? 'bg-[#0f1a14] border-emerald-500/70 shadow-md shadow-black/40 ring-1 ring-emerald-500/50'
+                    ? 'bg-emerald-950/40 border-emerald-500 text-white shadow-md ring-1 ring-emerald-500/60'
                     : rec
-                      ? 'bg-[#121212] border-[#222222] hover:bg-[#181818] hover:border-[#2f2f2f]'
-                      : 'bg-[#101010] border-[#1d1d1d] opacity-60'
+                      ? 'bg-zinc-900/80 border-zinc-800 hover:bg-zinc-850 hover:border-zinc-700'
+                      : 'bg-zinc-950/50 border-zinc-850 opacity-60'
                 }`}
               >
                 <div className="truncate pr-2">
-                  <div className="text-xs font-bold text-[#f5f5f5] flex items-center gap-1.5 truncate">
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5 truncate">
                     <span>{drug.name}</span>
+                    {EMERGENCY_DRUG_IDS.has(drug.id) && <span className="text-[10px] text-rose-300">EMERGÊNCIA</span>}
                     {drug.brandName && (
-                      <span className="text-[10px] text-[#737373] font-normal truncate">
+                      <span className="text-[11px] text-zinc-400 font-normal truncate">
                         ({drug.brandName})
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-[#888888] truncate mt-0.5">
+                  <div className="text-[11px] text-zinc-400 truncate mt-0.5">
                     {drug.description}
                   </div>
                 </div>
 
-                <div className="shrink-0 text-right">
-                  <span className="text-[10px] font-mono-code px-1.5 py-0.5 rounded bg-[#181818] border border-[#262626] text-emerald-400 font-semibold block">
-                    {rec ? `${rec.typical} ${drug.doseUnit}` : 'sem faixa na espécie'}
+                <div className="shrink-0 text-right font-mono-code">
+                  <span className="text-xs px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-bold block">
+                    {rec ? `${rec.typical} ${drug.doseUnit}` : 'sem dose'}
                   </span>
-                  <span className="text-[9px] text-[#666666] font-mono-code">
+                  <span className="text-[10px] text-zinc-400 block mt-0.5">
                     Lag: {drug.transitLagSecondsIV || 20}s
                   </span>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
 
         {/* Selected Drug Precision Calculator & Velocity Station (7 cols) */}
-        <div className="lg:col-span-7 bg-[#121212] border border-[#222222] rounded-lg p-4 flex flex-col justify-between space-y-3">
+        <div className="lg:col-span-7 bg-zinc-900/90 border border-zinc-800 rounded-xl p-4 flex flex-col justify-between space-y-3.5 shadow-xl">
           {/* Header Info */}
           <div>
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-extrabold text-emerald-400 flex items-center gap-1.5">
+              <h4 className="text-base font-extrabold text-emerald-400 flex items-center gap-2">
                 <Zap className="w-4 h-4 text-emerald-400" />
                 {selectedDrug.name}
               </h4>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-[#1c1c1c] border border-[#282828] text-[#a3a3a3] font-mono-code uppercase">
-                {selectedDrug.category.replace(/_/g, ' ')}
+              <span className="text-[10px] px-2.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 font-mono-code uppercase font-semibold">
+                {DRUG_CATEGORIES.find(category => category.id === selectedDrug.category)?.label ?? selectedDrug.category}
               </span>
             </div>
-            <p className="text-xs text-[#888888] mt-1">{selectedDrug.description}</p>
+            <p className="text-xs text-zinc-300 mt-1 leading-relaxed">{selectedDrug.description}</p>
+            {selectedDrug.evidenceNote && <div className="mt-3 rounded border border-amber-800/60 bg-amber-950/20 p-3 text-xs text-amber-200">
+              <strong>{selectedDrug.experimentalRegimen ? 'Referência experimental · simulação' : 'Evidência e limites do regime'}</strong>
+              <p className="mt-1 leading-relaxed">{selectedDrug.evidenceNote}</p>
+            </div>}
           </div>
 
-          {/* Dosing Slider & Manual Input */}
-          <div className="bg-[#171717] p-3 rounded-lg border border-[#262626] space-y-2">
-            <div className="flex items-center justify-between text-xs font-mono-code">
-              <span className="text-[#a3a3a3]">Dose ajustada por kg ({selectedDrug.doseUnit}):</span>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="number"
-                  min="0"
-                  step={recommendedRange ? Math.max(0.001, (recommendedRange.max - recommendedRange.min) / 100) : 0.01}
-                  value={customDosePerKg}
-                  onChange={(e) => setCustomDosePerKg(parseFloat(e.target.value) || 0)}
-                  disabled={!recommendedRange}
-                  className="w-24 bg-[#0d0d0d] border border-[#333333] text-emerald-300 font-bold text-xs rounded px-2 py-1 text-right font-mono-code focus:outline-none focus:border-emerald-500"
-                />
-                <span className="text-[#e5e5e5]">{activeDoseUnit}</span>
+          <div className="bg-zinc-950 p-3 rounded-lg border border-zinc-800 space-y-3 text-xs">
+            <label className="block">Frasco / apresentação
+              <select aria-label="Frasco / apresentação" className="w-full mt-1 bg-zinc-900 border border-zinc-700 rounded p-2" value={preparation.id} onChange={event => setPreparationId(event.target.value)}>
+                {preparations.map(item => <option key={item.id} value={item.id}>{item.name} · {item.label}{item.vialVolumeMl ? ` · ${item.vialVolumeMl} mL` : ''}</option>)}
+              </select>
+            </label>
+            {preparation.sourceUrl && <a className="text-cyan-300 underline" href={preparation.sourceUrl} target="_blank" rel="noreferrer">Consultar apresentação no fabricante</a>}
+            <p className="text-zinc-400">Ao trocar a apresentação, o volume inicia na média aritmética da faixa. Faixas informativas do simulador para a espécie e o modo selecionados.</p>
+            <label className="flex justify-between items-center gap-2">{isCRI ? 'Taxa da bomba' : 'Volume a aspirar'} ({volumeUnit})
+              <input aria-label={isCRI ? 'Taxa em mL por hora' : 'Volume em mL'} type="number" min="0" step="any" value={Number.isFinite(selectedVolume) ? Number(selectedVolume.toPrecision(10)) : 0}
+                onChange={event => setCustomDosePerKg(Number(event.target.value) / volumeFactor)}
+                className="w-32 bg-zinc-900 border border-zinc-700 rounded p-2 text-emerald-300" />
+            </label>
+            {recommendedRange && <>
+              <input aria-label="Ajustar volume" type="range" min="0" max={recommendedRange.max * volumeFactor * 2.5} step="any" value={selectedVolume}
+                onChange={event => setCustomDosePerKg(Number(event.target.value) / volumeFactor)} className="w-full accent-emerald-500" />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-zinc-300">
+                <div>Mínimo de referência<br />{describeAmount(recommendedRange.min)}</div>
+                <div className="text-emerald-300">Média da faixa<br />{describeAmount((recommendedRange.min + recommendedRange.max) / 2)}</div>
+                <div>Máximo de referência<br />{describeAmount(recommendedRange.max)}</div>
               </div>
-            </div>
-
-            {recommendedRange && (
-              <div>
-                <input
-                  type="range"
-                  min={recommendedRange.min * 0.2}
-                  max={recommendedRange.max * 2.5}
-                  step={(recommendedRange.max - recommendedRange.min) / 40 || 0.01}
-                  value={customDosePerKg}
-                  onChange={(e) => setCustomDosePerKg(parseFloat(e.target.value))}
-                  className="w-full accent-emerald-500 cursor-pointer h-2 bg-[#262626] rounded-lg"
-                />
-                <div className="flex justify-between text-[10px] font-mono-code text-[#737373] mt-0.5">
-                  <span>Mín: {recommendedRange.min}</span>
-                  <span className="text-emerald-400 font-bold">Típica ({patient.species}): {recommendedRange.typical}</span>
-                  <span>Limite de referência: {recommendedRange.max} {activeDoseUnit}</span>
-                </div>
-              </div>
-            )}
+            </>}
+            <p className="text-emerald-300 font-bold">Quantidade selecionada: {describeAmount(customDosePerKg)}</p>
+            <p>Dose resultante: {formatDecimal(customDosePerKg, 4)} {activeDoseUnit} · Paciente: {patient.weightKg} kg</p>
+            {!isCRI && preparation.vialVolumeMl && selectedVolume > preparation.vialVolumeMl && <p className="text-amber-300">O volume exige {Math.ceil(selectedVolume / preparation.vialVolumeMl)} frascos desta apresentação.</p>}
           </div>
 
-          {/* ADMINISTRATION SPEED & VELOCITY SELECTION (Bolus Rapid vs Bolus Slow vs CRI) */}
-          <div className="bg-[#171717] p-3 rounded-lg border border-[#262626] space-y-2">
-            <label className="text-[11px] font-bold text-[#e0e0e0] flex items-center justify-between">
-              <span className="flex items-center gap-1">
+          {!isCRI && adminSpeed === 'bolus_slow' && (selectedRoute === 'IV' || selectedRoute === 'IV_slow') && (
+            <label className="flex items-center justify-between gap-3 text-xs text-zinc-300">
+              Tempo de administração (segundos)
+              <input aria-label="Tempo de administração em segundos" type="number" min="1" max="3600" value={deliverySeconds}
+                onChange={event => setDeliverySeconds(Number(event.target.value))}
+                className="w-28 bg-zinc-950 border border-zinc-700 rounded p-2 text-emerald-300" />
+            </label>
+          )}
+          {/* Mode and Velocity Selection */}
+          <div className="bg-zinc-950 p-3 rounded-lg border border-zinc-800 space-y-2">
+            <label className="text-xs font-bold text-zinc-200 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
                 <Sliders className="w-3.5 h-3.5 text-cyan-400" />
                 Modo e Velocidade de Aplicação:
               </span>
-              <span className="text-[10px] text-[#888888] font-mono-code">
-                Início por {selectedRoute}: ~{Math.round(routePK.transitLagSeconds)}s + equilíbrio de biofase
+              <span className="text-[11px] text-zinc-400 font-mono-code font-normal">
+                Início ({selectedRoute}): ~{Math.round(routePK.transitLagSeconds)}s + biofase
               </span>
             </label>
 
@@ -461,22 +489,22 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                   setIsCRI(false);
                   setSelectedRoute('IV');
                   const bolusRange = getSpeciesDoseRange(selectedDrug, patient.species, false);
-                  if (bolusRange) setCustomDosePerKg(bolusRange.typical);
+                  if (bolusRange) setCustomDosePerKg((bolusRange.min + bolusRange.max) / 2);
                 }}
                 disabled={!canUseRapidBolus}
-                className={`p-2 rounded border text-left transition ${
+                className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
                   adminSpeed === 'bolus_rapid' && !isCRI
-                     ? 'bg-[#2b1414] border-red-500/80 text-red-200'
+                     ? 'bg-rose-950/70 border-rose-500 text-rose-100 ring-1 ring-rose-500/60'
                     : canUseRapidBolus
-                      ? 'bg-[#141414] border-[#2a2a2a] text-[#888888] hover:bg-[#1a1a1a]'
-                      : 'bg-[#101010] border-[#202020] text-[#4f4f4f] cursor-not-allowed'
+                      ? 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-850 hover:text-white'
+                      : 'bg-zinc-950/60 border-zinc-800 text-zinc-600 cursor-not-allowed'
                 }`}
               >
-                <div className="text-xs font-bold font-mono-code flex items-center gap-1 text-red-400">
+                <div className="text-xs font-bold font-mono-code flex items-center gap-1 text-rose-400">
                   <Zap className="w-3 h-3" />
                   Bólus Rápido
                 </div>
-                <div className="text-[9px] text-[#888888] mt-0.5">Push direto (&lt; 5s)</div>
+                <div className="text-[10px] text-zinc-400 mt-0.5">Push direto (&lt; 5s)</div>
               </button>
 
               <button
@@ -488,22 +516,22 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                   const bolusRoute = selectableRoutes.find((route) => route !== 'CRI') || 'IV_slow';
                   setSelectedRoute(bolusRoute);
                   const bolusRange = getSpeciesDoseRange(selectedDrug, patient.species, false);
-                  if (bolusRange) setCustomDosePerKg(bolusRange.typical);
+                  if (bolusRange) setCustomDosePerKg((bolusRange.min + bolusRange.max) / 2);
                 }}
                 disabled={!canUseBolus}
-                className={`p-2 rounded border text-left transition ${
+                className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
                   adminSpeed === 'bolus_slow' && !isCRI
-                    ? 'bg-[#0f1f18] border-emerald-500/80 text-emerald-200'
+                    ? 'bg-emerald-950/70 border-emerald-500 text-emerald-100 ring-1 ring-emerald-500/60'
                     : canUseBolus
-                      ? 'bg-[#141414] border-[#2a2a2a] text-[#888888] hover:bg-[#1a1a1a]'
-                      : 'bg-[#101010] border-[#202020] text-[#4f4f4f] cursor-not-allowed'
+                      ? 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-850 hover:text-white'
+                      : 'bg-zinc-950/60 border-zinc-800 text-zinc-600 cursor-not-allowed'
                 }`}
               >
                 <div className="text-xs font-bold font-mono-code flex items-center gap-1 text-emerald-400">
                   <Clock className="w-3 h-3" />
-                  Bólus Lento
+                  {isExtravascularInjection ? `Aplicação ${selectedRoute}` : 'Bólus Lento'}
                 </div>
-                <div className="text-[9px] text-[#888888] mt-0.5">Infusão em 60s</div>
+                <div className="text-[10px] text-zinc-400 mt-0.5">{isExtravascularInjection ? 'Absorção gradual' : 'Tempo ajustável'}</div>
               </button>
 
               <button
@@ -514,119 +542,104 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                   setIsCRI(true);
                   setSelectedRoute('CRI');
                   const criRange = getSpeciesDoseRange(selectedDrug, patient.species, true);
-                  if (criRange) setCustomDosePerKg(criRange.typical);
+                  if (criRange) setCustomDosePerKg((criRange.min + criRange.max) / 2);
                 }}
                 disabled={!canUseCRI}
-                title={!canUseCRI ? 'O catálogo ainda não possui um regime de manutenção por tempo validado para este fármaco.' : undefined}
-                className={`p-2 rounded border text-left transition ${
+                className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
                   isCRI
-                    ? 'bg-[#121f2b] border-cyan-500/80 text-cyan-200'
+                    ? 'bg-cyan-950/70 border-cyan-500 text-cyan-100 ring-1 ring-cyan-500/60'
                     : canUseCRI
-                      ? 'bg-[#141414] border-[#2a2a2a] text-[#888888] hover:bg-[#1a1a1a]'
-                      : 'bg-[#101010] border-[#202020] text-[#4f4f4f] cursor-not-allowed'
+                      ? 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-850 hover:text-white'
+                      : 'bg-zinc-950/60 border-zinc-800 text-zinc-600 cursor-not-allowed'
                 }`}
               >
                 <div className="text-xs font-bold font-mono-code flex items-center gap-1 text-cyan-400">
                   <Clock className="w-3 h-3" />
                   Infusão CRI
                 </div>
-                <div className="text-[9px] text-[#888888] mt-0.5">{canUseCRI ? 'Bomba contínua' : 'Regime não cadastrado'}</div>
+                <div className="text-[10px] text-zinc-400 mt-0.5">{canUseCRI ? 'Bomba contínua' : 'Não catalogado'}</div>
               </button>
             </div>
 
-            {/* DYNAMIC CLINICAL PHARMACOKINETIC SAFETY WARNINGS */}
+            {/* Dynamic Warnings */}
             {isAboveRecommendedMaximum && (
-              <div className="p-2 rounded bg-[#35220d] border border-amber-500/80 text-[11px] text-amber-100 flex items-start gap-2">
+              <div className="p-2.5 rounded-lg bg-amber-950/60 border border-amber-500 text-xs text-amber-200 flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
                 <div>
-                  <strong className="text-amber-300">DOSE ACIMA DA FAIXA DE REFERÊNCIA:</strong>{' '}
-                  {customDosePerKg} {selectedDrug.doseUnit} equivale a {(customDosePerKg / recommendedRange.max).toFixed(1)}× o limite catalogado. O motor aplicará efeitos adversos e toxicidade cumulativa.
+                  <strong className="text-amber-300">DOSE ACIMA DA FAIXA:</strong> {formatDecimal(customDosePerKg, 4)} {activeDoseUnit} equivale a {(customDosePerKg / recommendedRange.max).toFixed(1)}× o limite catalogado.
                 </div>
-              </div>
-            )}
-            {!recommendedRange && (
-              <div className="p-2 rounded bg-[#2a1d0d] border border-amber-700/70 text-[11px] text-amber-200 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>
-                  Sem regime curado para <strong>{patient.species}</strong>. O simulador não substituirá essa lacuna por uma dose canina.
-                </span>
               </div>
             )}
             {isPropofolFastApnea && (
-              <div className="p-2 rounded bg-[#2b1212] border border-red-500/80 text-[11px] text-red-200 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+              <div className="p-2.5 rounded-lg bg-rose-950/60 border border-rose-500 text-xs text-rose-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
                 <div>
-                  <strong className="text-red-300">ALERTA FARMACOLÓGICO:</strong> Bólus rápido de Propofol causará apneia imediata (92% de probabilidade) e queda abrupta da PAM por vasodilatação periférica severa.
+                  <strong className="text-rose-300">ALERTA FARMACOLÓGICO:</strong> Bólus rápido de Propofol causará apneia imediata e queda abrupta da PAM por vasodilatação periférica.
                 </div>
               </div>
             )}
-
             {isAlpha2RapidShock && (
-              <div className="p-2 rounded bg-[#2b1c12] border border-amber-500/80 text-[11px] text-amber-200 flex items-start gap-2">
+              <div className="p-2.5 rounded-lg bg-amber-950/60 border border-amber-500 text-xs text-amber-200 flex items-start gap-2">
                 <AlertOctagon className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
                 <div>
-                  <strong className="text-amber-300">ALERTA ALFA-2:</strong> Bólus rápido de agonista alfa-2 provoca pico transitório de vasoconstrição periférica seguido de intensa bradicardia reflexa e Bloqueio AV de 2º grau.
+                  <strong className="text-amber-300">ALERTA ALFA-2:</strong> Bólus rápido provoca pico transitório de vasoconstrição periférica seguido de intensa bradicardia reflexa e BAV 2º grau.
                 </div>
               </div>
             )}
-
             {isBovineXylazineDanger && (
-              <div className="p-2 rounded bg-[#3b0d10] border border-red-600 text-[11px] text-red-200 flex items-start gap-2">
-                <AlertOctagon className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+              <div className="p-2.5 rounded-lg bg-rose-950/70 border border-rose-500 text-xs text-rose-200 flex items-start gap-2">
+                <AlertOctagon className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
                 <div>
-                  <strong className="text-red-300">PERIGO LETAL EM BOVINO:</strong> Bovinos são 10x mais sensíveis a agonistas alfa-2 que equinos. Essa dose causará colapso cardiovascular agudo e parada respiratória fatal!
+                  <strong className="text-rose-300">PERIGO LETAL EM BOVINO:</strong> Bovinos são 10x mais sensíveis a agonistas alfa-2 que equinos. Essa dose causará colapso cardiovascular agudo!
                 </div>
               </div>
             )}
-
             {isFelineLidocaineDanger && (
-              <div className="p-2 rounded bg-[#3b0d10] border border-red-600 text-[11px] text-red-200 flex items-start gap-2">
-                <ShieldAlert className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+              <div className="p-2.5 rounded-lg bg-rose-950/70 border border-rose-500 text-xs text-rose-200 flex items-start gap-2">
+                <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
                 <div>
-                  <strong className="text-red-300">TOXICIDADE GRAVE EM GATO:</strong> Felinos têm deficiência enzimática para depuração de lidocaína IV. Bólus rápido provoca colapso neuro/cardiotóxico fulminante e parada cardíaca!
+                  <strong className="text-rose-300">TOXICIDADE EM GATO:</strong> Felinos têm deficiência enzimática para depuração de lidocaína IV. Bólus rápido provoca colapso neuro/cardiotóxico fulminante!
                 </div>
               </div>
             )}
-
             {isFelinePropofolWarning && (
-              <div className="p-2 rounded bg-[#2b1f12] border border-amber-600/80 text-[11px] text-amber-200 flex items-start gap-2">
+              <div className="p-2.5 rounded-lg bg-amber-950/60 border border-amber-500 text-xs text-amber-200 flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
                 <div>
-                  <strong className="text-amber-300">PARTICULARIDADE FELINA (UGT1A6):</strong> Felinos possuem deficiência congênita na glucuronidação fenólica. Doses repetidas ou infusões contínuas de propofol geram recuperação excessivamente lenta e risco de lesão oxidativa eritrocitária (corpúsculos de Heinz). Recomenda-se alfaxalona para manutenção em gatos.
+                  <strong className="text-amber-300">PARTICULARIDADE FELINA:</strong> Gatos possuem deficiência na glucuronidação fenólica (UGT1A6). Infusões contínuas geram risco de corpúsculos de Heinz.
                 </div>
               </div>
             )}
-
             {isKclBolusDanger && (
-              <div className="p-2 rounded bg-[#3b0d10] border border-red-600 text-[11px] text-red-200 flex items-start gap-2">
-                <ShieldAlert className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+              <div className="p-2.5 rounded-lg bg-rose-950/80 border border-rose-600 text-xs text-rose-100 flex items-start gap-2">
+                <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
                 <div>
-                  <strong className="text-red-300">LETALIDADE MÁXIMA:</strong> Cloreto de potássio NUNCA deve ser aplicado em bólus rápido IV! Provocará hipercalemia aguda, fibrilação ventricular e parada cardíaca imediata em assistolia!
+                  <strong className="text-rose-300">LETALIDADE MÁXIMA:</strong> Cloreto de potássio NUNCA deve ser aplicado em bólus rápido IV! Provocará parada cardíaca imediata em assistolia!
                 </div>
               </div>
             )}
           </div>
 
           {/* Calculated Output Display & Syringe */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            <div className="p-2.5 bg-[#171717] rounded border border-[#262626]">
-              <span className="text-[10px] text-[#737373] block font-mono-code">
-                {isCRI ? `Quantidade por ${selectedDrug.doseUnit.endsWith('/min') ? 'minuto' : 'hora'}` : `Dose total (${patient.weightKg} kg)`}:
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
+            <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+              <span className="text-[11px] text-zinc-400 block font-medium">
+                {isCRI ? `Dose por ${activeDoseUnit.endsWith('/min') ? 'min' : 'h'}` : `Dose total (${patient.weightKg} kg)`}:
               </span>
-              <strong className="text-sm text-[#f5f5f5] font-mono-code font-bold">
-                {formatDecimal(totalDoseAmount, 2)} {selectedDrug.unit}
+              <strong className="text-base text-white font-mono-code font-bold block mt-0.5">
+                {formatDecimal(totalDoseAmount, 4)} {selectedDrug.unit}
               </strong>
             </div>
 
-            <div className="p-2.5 bg-[#171717] rounded border border-[#262626]">
-              <span className="text-[10px] text-[#737373] block font-mono-code">{isCRI ? 'Taxa calculada da bomba:' : 'Volume a injetar:'}</span>
-              <strong className="text-base text-emerald-400 font-digital font-extrabold">
-                {isCRI ? `${formatDecimal(calculatedAdministration.pumpRateMlPerHour, 2)} mL/h` : `${formatDecimal(calculatedVolumeMl, 2)} mL`}
+            <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+              <span className="text-[11px] text-zinc-400 block font-medium">{isCRI ? 'Taxa da bomba CRI:' : 'Volume a injetar:'}</span>
+              <strong className="text-lg text-emerald-400 font-mono-code font-bold block mt-0.5">
+                {isCRI ? `${formatDecimal(calculatedAdministration.pumpRateMlPerHour, 2)} mL/h` : `${formatDecimal(calculatedVolumeMl, 4)} mL`}
               </strong>
             </div>
 
-            <div className="p-2.5 bg-[#171717] rounded border border-[#262626]">
-              <span className="text-[10px] text-[#737373] block font-mono-code">Via de Aplicação:</span>
+            <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+              <span className="text-[11px] text-zinc-400 block font-medium">Via de Aplicação:</span>
               <select
                 value={selectedRoute}
                 onChange={(e) => {
@@ -636,7 +649,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                   setIsCRI(routeIsCri);
                   setAdminSpeed(routeIsCri ? 'infusion_cri' : 'bolus_slow');
                 }}
-                className="bg-[#0d0d0d] text-[#e5e5e5] text-xs rounded border border-[#333333] font-mono-code w-full px-1 py-0.5 mt-0.5 focus:outline-none"
+                className="bg-zinc-900 text-white text-xs rounded border border-zinc-700 font-mono-code w-full px-2 py-1 mt-1 focus:outline-none focus:border-emerald-500"
               >
                 {selectableRoutes.map((r) => (
                   <option key={r} value={r}>
@@ -651,33 +664,33 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
           <div className="pt-1">
             <button
               onClick={handleAdminister}
-              disabled={!recommendedRange || customDosePerKg <= 0 || selectableRoutes.length === 0}
-              className={`w-full py-2.5 px-4 rounded-lg text-xs font-extrabold font-mono-code transition flex items-center justify-center space-x-2 shadow-lg shadow-black/50 ${
-                !recommendedRange || customDosePerKg <= 0 || selectableRoutes.length === 0
-                  ? 'bg-[#202020] text-[#666666] cursor-not-allowed'
+              disabled={!recommendedRange || !Number.isFinite(customDosePerKg) || customDosePerKg <= 0 || selectableRoutes.length === 0}
+              className={`w-full py-3 px-4 rounded-xl text-xs font-bold font-mono-code transition flex items-center justify-center space-x-2 shadow-lg cursor-pointer ${
+                !recommendedRange || !Number.isFinite(customDosePerKg) || customDosePerKg <= 0 || selectableRoutes.length === 0
+                  ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
                   : adminSpeed === 'bolus_rapid'
-                  ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950/50'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50'
               }`}
             >
               <Syringe className="w-4 h-4" />
               <span>
                 {isCRI
-                  ? `INICIAR INFUSÃO CONTÍNUA (CRI) ${customDosePerKg} ${selectedDrug.doseUnit}`
-                  : `ADMINISTRAR ${calculatedVolumeMl} mL (${selectedRoute}) — ${adminSpeed.replace('_', ' ').toUpperCase()}`}
+                  ? `INICIAR INFUSÃO CONTÍNUA (CRI) ${formatDecimal(selectedVolume, 4)} mL/h`
+                  : `ADMINISTRAR ${formatDecimal(calculatedVolumeMl, 4)} mL (${selectedRoute}) — ${isExtravascularInjection ? 'Absorção gradual' : adminSpeed === 'bolus_rapid' ? 'Bólus rápido' : 'Bólus lento'}`}
               </span>
             </button>
           </div>
 
           {adminSuccessMsg && (
-            <div className="p-2 rounded bg-[#0f1a14] border border-emerald-500/60 text-xs text-emerald-300 font-mono-code flex items-center space-x-2 animate-fadeIn">
+            <div className="p-2.5 rounded-lg bg-emerald-950/80 border border-emerald-500/70 text-xs text-emerald-200 font-mono-code flex items-center space-x-2">
               <Check className="w-4 h-4 shrink-0 text-emerald-400" />
               <span>{adminSuccessMsg}</span>
             </div>
           )}
           {adminErrorMsg && (
-            <div className="p-2 rounded bg-[#2b0c0f] border border-red-700/70 text-xs text-red-200 font-mono-code flex items-start space-x-2">
-              <AlertOctagon className="w-4 h-4 shrink-0 text-red-400" />
+            <div className="p-2.5 rounded-lg bg-rose-950/80 border border-rose-500/70 text-xs text-rose-200 font-mono-code flex items-start space-x-2">
+              <AlertOctagon className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
               <span>{adminErrorMsg}</span>
             </div>
           )}
@@ -686,13 +699,13 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
 
       {/* Active Drug Concentration / CRI Infusions Status Table */}
       {activeDoses.length > 0 && (
-        <div className="mt-2 pt-3 border-t border-[#1f1f1f]">
-          <h4 className="text-xs font-bold text-[#d4d4d4] mb-2 flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-cyan-400" />
-            Fármacos ativos (exposição relativa no sítio efetor Ce e trânsito)
+        <div className="mt-2 pt-3 border-t border-zinc-800">
+          <h4 className="text-xs font-bold text-zinc-200 mb-2.5 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-cyan-400" />
+            <span>Fármacos em Circulação Ativa (Sítio Efetor Ce & Eliminação)</span>
           </h4>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {activeDoses.map((dose) => {
               const inTransit = (dose.transitLagRemainingSec || 0) > 0;
               const definition = VETERINARY_DRUG_DATABASE.find((drug) => drug.id === dose.drugId);
@@ -701,59 +714,55 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
               return (
                 <div
                   key={dose.id}
-                  className="p-2.5 bg-[#121212] border border-[#222222] rounded-lg flex items-center justify-between text-xs font-mono-code"
+                  className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl flex items-center justify-between text-xs"
                 >
-                  <div>
-                    <div className="font-bold text-[#f5f5f5] flex items-center gap-1">
+                  <div className="pr-2 truncate">
+                    <div className="font-bold text-white flex items-center gap-1.5 truncate">
                       <span>{dose.drugName}</span>
+                      {definition?.category === 'antagonist_reversal' && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 border border-purple-600 text-purple-200 font-mono-code font-bold">
+                          REVERSOR
+                        </span>
+                      )}
                       {inTransit && (
-                        <span className="text-[9px] px-1 py-0.2 rounded bg-amber-900/60 text-amber-300 border border-amber-600/50">
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-950 border border-amber-600 text-amber-300 font-mono-code">
                           Trânsito: {Math.ceil(dose.transitLagRemainingSec || 0)}s
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-[#888888]">
+                    <div className="text-[11px] text-zinc-400 mt-0.5 font-mono-code truncate">
                       {formatDecimal(dose.dosePerKg, 2)} {dose.isCRI && definition?.criDoseUnit ? definition.criDoseUnit : (definition?.doseUnit || '')} · {dose.route} · {dose.isCRI
-                        ? `${formatDecimal(dose.criRateMlPerHour, 2)} mL/h ${dose.isInfusionRunning === false ? '(interrompida; em eliminação)' : '(CRI)'}`
-                        : `${formatDecimal(dose.volumeMl, 2)} mL (${dose.administrationSpeed?.replace('_', ' ') || 'bolus'})`}
+                        ? `${formatDecimal(dose.criRateMlPerHour, 2)} mL/h`
+                        : `${formatDecimal(dose.volumeMl, 2)} mL`}
                     </div>
+                    {dose.preparation && <p className="text-xs text-cyan-300">{dose.preparation.name} · {dose.preparation.label}</p>}
                     {/* Visual Ce Bar */}
-                    <div className="w-28 bg-[#222222] h-1.5 rounded-full mt-1.5 overflow-hidden">
+                    <div className="w-32 bg-zinc-800 h-1.5 rounded-full mt-2 overflow-hidden">
                       <div
                         className="h-full bg-emerald-400 transition-all duration-300"
                         style={{ width: `${Math.round(effectOccupancy * 100)}%` }}
-                      ></div>
+                      />
                     </div>
                   </div>
 
-                  <div className="text-right">
-                    <span className="text-xs text-emerald-400 font-bold block">
-                      Ce rel.: {dose.currentCe.toFixed(2)}×
+                  <div className="text-right shrink-0 font-mono-code">
+                    <span className="text-xs text-emerald-300 font-bold block">
+                      Ce: {dose.currentCe.toFixed(2)}×
                     </span>
                     <span className="text-[10px] text-cyan-300 block">
                       Cp: {dose.currentCp.toFixed(2)}×
                     </span>
                     {exposure && (
-                      <span className="text-[9px] text-amber-300 block">
-                        {exposure.phaseLabel}{exposure.estimatedEffectMinutesRemaining !== undefined
-                          ? ` · efeito <5% em ~${formatDecimal(exposure.estimatedEffectMinutesRemaining, 0)} min`
-                          : ''}
-                      </span>
-                    )}
-                    {dose.pkCompartments && (
-                      <span
-                        className="text-[9px] text-[#737373] block"
-                        title={`Central ${dose.pkCompartments.centralAmountNormalized.toFixed(2)} · rápido ${dose.pkCompartments.rapidPeripheralAmountNormalized.toFixed(2)} · profundo ${dose.pkCompartments.deepPeripheralAmountNormalized.toFixed(2)} · eliminado ${dose.pkCompartments.cumulativeEliminatedNormalized.toFixed(2)}`}
-                      >
-                        Tecidos: {(dose.pkCompartments.rapidPeripheralAmountNormalized + dose.pkCompartments.deepPeripheralAmountNormalized).toFixed(2)}× · CL {dose.pkCompartments.effectiveClearanceMultiplier.toFixed(2)}×
+                      <span className="text-[10px] text-amber-300 block">
+                        {exposure.phaseLabel}
                       </span>
                     )}
                     {dose.isCRI && dose.isInfusionRunning !== false && (
                       <button
                         onClick={() => onStopCRI(dose.id)}
-                        className="mt-1 text-[9px] px-1.5 py-0.5 rounded bg-[#2b0c0f] text-red-300 border border-red-800/80 hover:bg-[#3d1217] transition flex items-center gap-0.5"
+                        className="mt-1.5 text-[10px] px-2 py-0.5 rounded bg-rose-950 text-rose-200 border border-rose-700 hover:bg-rose-900 transition flex items-center gap-1 font-bold cursor-pointer"
                       >
-                        <Trash2 className="w-2.5 h-2.5" />
+                        <Trash2 className="w-3 h-3" />
                         <span>Parar CRI</span>
                       </button>
                     )}

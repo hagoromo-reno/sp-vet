@@ -13,6 +13,72 @@ import {
   stopInfusion,
 } from '../src/validation/simulationHarness';
 import { analyzePatientDrugKinetics } from '../src/engine/biotransformationEngine';
+import { SPECIES_DATABASE } from '../src/data/speciesData';
+import { PRESET_SCENARIOS } from '../src/data/scenarios';
+import { VETERINARY_DRUG_DATABASE } from '../src/data/drugDatabase';
+import { SPECIES_CELLULAR_CONFIGS } from '../src/engine/speciesPhysiology';
+import { CellularReceptorsEngine } from '../src/engine/cellularReceptors';
+import { RespiratoryGasExchangeEngine } from '../src/engine/respiratoryGasExchange';
+import { NEUTRAL_PHYSIOLOGICAL_MODIFIERS } from '../src/engine/systemCoupling';
+import { getOxygenDeliveryDeficit } from '../src/engine/oxygenTransport';
+import type { SpeciesType } from '../src/types/simulator';
+
+const focusedSpecies: SpeciesType[] = ['canine', 'feline', 'equine', 'bovine'];
+
+test('escopo de espécies é consistente entre fisiologia, medicamentos e cenários', () => {
+  assert.deepEqual(Object.keys(SPECIES_DATABASE).sort(), [...focusedSpecies].sort());
+  assert.deepEqual(Object.keys(SPECIES_CELLULAR_CONFIGS).sort(), [...focusedSpecies].sort());
+  assert.deepEqual([...new Set(PRESET_SCENARIOS.map(patient => patient.species))].sort(), [...focusedSpecies].sort());
+  for (const drug of VETERINARY_DRUG_DATABASE) {
+    for (const species of [...Object.keys(drug.recommendedDose), ...Object.keys(drug.recommendedCriDose ?? {})]) {
+      assert.ok(focusedSpecies.includes(species as SpeciesType), `${drug.id}/${species}`);
+    }
+  }
+});
+
+test('oferta de oxigênio considera a demanda metabólica de cada espécie', () => {
+  // Same absolute delivery can cover a horse while being insufficient for a cat.
+  assert.equal(getOxygenDeliveryDeficit('equine', 7), 0);
+  assert.ok(getOxygenDeliveryDeficit('feline', 7) > 0.2);
+  for (const species of focusedSpecies) {
+    const state = createSimulationState(createHealthyValidationPatient(species));
+    state.equipment.warmingBlanketActive = true;
+    advanceSimulation(state, 600, { dtSeconds: 2 });
+    assert.equal(state.vitals.isCardiacArrest, false, species);
+    assert.ok(state.vitals.biologicalState.organPerfusion.cumulativeOxygenDebt < 0.02, species);
+    assert.ok(state.vitals.biologicalState.systemicRegulation.cellularHypoxia < 0.05, species);
+  }
+});
+
+function lactateStep(species: SpeciesType, hct = 40, organFraction = 1) {
+  const patient = createHealthyValidationPatient(species);
+  const state = createSimulationState(patient);
+  return RespiratoryGasExchangeEngine.stepRespiration(
+    10, 10, patient, CellularReceptorsEngine.computeReceptorState(patient, [], 0, 'isoflurane'),
+    state.equipment, false, 98, 98, 40, 0, 4, 5, 0, 1, 80, patient.baselineVitals.rr,
+    38, 0, hct, 1, 1, 1, NEUTRAL_PHYSIOLOGICAL_MODIFIERS,
+    { ...state.vitals.biologicalState.organPerfusion, hepaticFraction: organFraction, renalFraction: organFraction }
+  );
+}
+
+test('lactato acompanha perfusão hepatorrenal sem penalidade artificial de UGT em felinos', () => {
+  const canine = lactateStep('canine');
+  const feline = lactateStep('feline');
+  const impaired = lactateStep('feline', 40, 0.2);
+  assert.ok(feline.arterialBloodGases.lactate < 4);
+  assert.equal(feline.arterialBloodGases.lactate, canine.arterialBloodGases.lactate);
+  assert.ok(impaired.arterialBloodGases.lactate > feline.arterialBloodGases.lactate);
+});
+
+test('anemia grave pode elevar lactato apesar de SpO2 preservada nas quatro espécies', () => {
+  for (const species of focusedSpecies) {
+    const normal = lactateStep(species);
+    const anemic = lactateStep(species, 5);
+    assert.ok(anemic.pulseOximetrySpO2 > 94, species);
+    assert.ok(anemic.arterialBloodGases.lactate > 4, species);
+    assert.ok(anemic.arterialBloodGases.pH < normal.arterialBloodGases.pH, species);
+  }
+});
 
 const results = runBehaviorScenarios();
 
@@ -81,7 +147,13 @@ test('cristaloide e sangue alteram volume e hematócrito de formas distintas', (
   advanceSimulation(crystalloid, 60);
   advanceSimulation(wholeBlood, 60);
 
-  assert.ok(wholeBlood.vitals.meanArterialPressure > crystalloid.vitals.meanArterialPressure + 4);
+  // Immediately after delivery, crystalloid is still intravascular. Pressure must
+  // not receive a synthetic bonus for blood; compare retained volume after distribution.
+  assert.ok(wholeBlood.vitals.biologicalState.fluids.effectiveCirculatingExpansionMl > 390);
+  advanceSimulation(crystalloid, 1200);
+  advanceSimulation(wholeBlood, 1200);
+  assert.ok(wholeBlood.vitals.biologicalState.fluids.effectiveCirculatingExpansionMl
+    > crystalloid.vitals.biologicalState.fluids.effectiveCirculatingExpansionMl + 50);
   assert.ok(
     wholeBlood.vitals.arterialBloodGases.hematocritPct
       > crystalloid.vitals.arterialBloodGases.hematocritPct + 1.5
@@ -370,4 +442,31 @@ test('toxicidade metabólica reduz utilização celular de oxigênio e repercute
   assert.ok(regulation.cellularOxygenUtilizationFraction < 0.5);
   assert.ok(intoxicated.vitals.arterialBloodGases.lactate > control.vitals.arterialBloodGases.lactate + 4);
   assert.ok(intoxicated.vitals.meanArterialPressure < control.vitals.meanArterialPressure - 10);
+});
+
+test('restaurar pressão e oxigenação reduz dívida residual sem impor recuperação instantânea', () => {
+  const patient = createHealthyValidationPatient('canine');
+  const equipment = createDefaultEquipment(patient, {
+    intubationStatus: 'intubated_tracheal',
+    ventilatorMode: 'cmv_volume',
+    isVentilatorActive: true,
+  });
+  const state = createSimulationState(patient, equipment);
+  administerDrug(state, 'dexmedetomidine', 'typical');
+  administerDrug(state, 'propofol', 'typical');
+
+  advanceSimulation(state, 180, { dtSeconds: 1 });
+
+  // Paciente recebe suporte hemodinâmico com efedrina (exatamente como no log clínico)
+  administerDrug(state, 'ephedrine', 'typical');
+  advanceSimulation(state, 90, { dtSeconds: 1 });
+
+  assert.ok(state.vitals.meanArterialPressure >= 60, `PAM insuficiente: ${state.vitals.meanArterialPressure}`);
+  assert.ok(state.vitals.biologicalState.organPerfusion.oxygenDeliveryMlKgMin >= 9.0);
+  assert.ok(state.vitals.biologicalState.organPerfusion.cumulativeOxygenDebt < 0.05);
+
+  // Global pressure recovery can precede restoration of regional flow.
+  state.vitals.biologicalState.organPerfusion.cumulativeOxygenDebt = 0.35;
+  advanceSimulation(state, 60, { dtSeconds: 1 });
+  assert.ok(state.vitals.biologicalState.organPerfusion.cumulativeOxygenDebt < 0.35);
 });

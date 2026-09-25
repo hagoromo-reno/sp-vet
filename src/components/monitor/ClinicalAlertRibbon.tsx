@@ -34,9 +34,10 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
   const hasInteractions = !vitals.isDead && vitals.activeDrugInteractions && vitals.activeDrugInteractions.length > 0;
   const hasIschemia = !vitals.isDead && !vitals.isCardiacArrest && !hasImpendingDeath && (vitals.hypoxiaExposureSeconds > 25 || vitals.myocardialIschemiaScore > 0.40);
   const hasHomeostaticFailure = !vitals.isDead && !vitals.isCardiacArrest && (
-    vitals.biologicalState.organPerfusion.cumulativeOxygenDebt > 0.25
-    || vitals.arterialBloodGases.glucoseMgDl < 55
-    || vitals.arterialBloodGases.glucoseMgDl > 280
+    vitals.biologicalState.organPerfusion.cumulativeOxygenDebt > 0.50
+    || vitals.arterialBloodGases.lactateMmolL > 7.0
+    || vitals.arterialBloodGases.glucoseMgDl < 45
+    || vitals.arterialBloodGases.glucoseMgDl > 350
   );
 
   const totalAlertsCount = (hasDead ? 1 : 0) + (hasPCR ? 1 : 0) + (hasImpendingDeath ? 1 : 0) + (hasApnea ? 1 : 0) + (hasInteractions ? vitals.activeDrugInteractions.length : 0) + (hasIschemia ? 1 : 0) + (hasHomeostaticFailure ? 1 : 0);
@@ -283,11 +284,15 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
 
           {hasHomeostaticFailure && (
             <div className="p-2 rounded-lg bg-fuchsia-950/70 border border-fuchsia-500/70 text-fuchsia-200 text-xs font-mono-code flex items-center gap-2">
-              <Zap className="w-4 h-4 text-fuchsia-400 shrink-0" />
+              <Zap className="w-4 h-4 text-fuchsia-400 shrink-0 animate-pulse" />
               <div className="text-[11px]">
-                <strong className="text-fuchsia-100">FALHA HOMEOSTÁTICA:</strong>
+                <strong className="text-fuchsia-100">COLAPSO HOMEOSTÁTICO:</strong>
                 <span className="ml-1 font-sans">
-                  Entrega de O₂ {vitals.biologicalState.organPerfusion.oxygenDeliveryMlKgMin.toFixed(1)} mL/kg/min · dívida celular {Math.round(vitals.biologicalState.organPerfusion.cumulativeOxygenDebt * 100)}% · glicemia {vitals.arterialBloodGases.glucoseMgDl.toFixed(0)} mg/dL.
+                  {vitals.biologicalState.organPerfusion.cumulativeOxygenDebt > 0.50 && `Dívida de O₂ celular crítica (${Math.round(vitals.biologicalState.organPerfusion.cumulativeOxygenDebt * 100)}%) · `}
+                  {vitals.arterialBloodGases.lactateMmolL > 7.0 && `Acidose láctica severa (${vitals.arterialBloodGases.lactateMmolL.toFixed(1)} mmol/L) · `}
+                  {vitals.arterialBloodGases.glucoseMgDl < 45 && `Hipoglicemia grave (${vitals.arterialBloodGases.glucoseMgDl.toFixed(0)} mg/dL) · `}
+                  {vitals.arterialBloodGases.glucoseMgDl > 350 && `Hiperglicemia crítica (${vitals.arterialBloodGases.glucoseMgDl.toFixed(0)} mg/dL) · `}
+                  DO₂: {vitals.biologicalState.organPerfusion.oxygenDeliveryMlKgMin.toFixed(1)} mL/kg/min
                 </span>
               </div>
             </div>

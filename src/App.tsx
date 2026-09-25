@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { SimulationHeader, WORKSTATIONS, WorkstationId } from './components/SimulationHeader';
+import { ClinicalSnapshot } from './components/monitor/ClinicalSnapshot';
 import {
   ActiveDrugDose,
+  ActiveNociceptiveTest,
   ActiveSurgicalProcedure,
   AnesthesiaEquipmentState,
   LogEntry,
   MonitorAlarmLimits,
+  NociceptiveTestDefinition,
   PatientProfile,
   ResuscitationState,
   SurgicalProcedureDefinition,
@@ -22,7 +26,7 @@ import {
   isTimeBasedDoseUnit,
   validateAdministrationCommand,
 } from './engine/drugAdministration';
-import { AudioSynthesizer } from './engine/audioSynthesizer';
+import { AudioSynthesizer, ActiveAlarmStatus } from './engine/audioSynthesizer';
 import { formatSpecies } from './utils/formatters';
 import { CanvasWaveforms } from './components/monitor/CanvasWaveforms';
 import { VitalNumbers } from './components/monitor/VitalNumbers';
@@ -42,13 +46,14 @@ import { CellularPhysiologyModal } from './components/monitor/CellularPhysiology
 import { AirwayQuickBar } from './components/airway/AirwayQuickBar';
 import { AnestheticDepthBoard } from './components/monitor/AnestheticDepthBoard';
 import { GeneralEventLogModal } from './components/records/GeneralEventLogModal';
-import { PhysiologyEngineStatus } from './components/monitor/PhysiologyEngineStatus';
 import { EmergencyFeedbackToast, EmergencyFeedbackItem } from './components/emergency/EmergencyFeedbackToast';
 import { LaryngealReflexModal } from './components/airway/LaryngealReflexModal';
-import {
-  PhysiologyGatewayClient,
-  type PhysiologyGatewayState,
-} from './physiology/PhysiologyGatewayClient';
+import { AudioSettingsModal } from './components/monitor/AudioSettingsModal';
+import { ExpertReviewPanel, downloadRecord } from './components/records/ExpertReviewPanel';
+import { useSimulationRecording } from './records/useSimulationRecording';
+import type { SimulationRun } from './records/simulationRecord';
+import { speciesAlarmLimits } from './data/monitorDefaults';
+import { nextSimulationStep } from './engine/simulationClock';
 import {
   Activity,
   Syringe,
@@ -56,18 +61,7 @@ import {
   Droplet,
   HeartPulse,
   FileText,
-  Play,
-  Pause,
-  RotateCcw,
-  FastForward,
-  FolderHeart,
-  Sparkles,
   Stethoscope,
-  Dna,
-  Brain,
-  ListRestart,
-  ScrollText,
-  Bell,
 } from 'lucide-react';
 
 export default function App() {
@@ -78,6 +72,10 @@ export default function App() {
 
   // 2. SIMULATION CLOCK & CONTROLS
   const [isSimPaused, setIsSimPaused] = useState(false);
+  useEffect(() => {
+    if (isSimPaused) AudioSynthesizer.stopAlarmPlayback();
+    return () => AudioSynthesizer.stopAlarmPlayback();
+  }, [isSimPaused]);
   const [simSpeed, setSimSpeed] = useState<number>(1.0); // 1x, 2x, 5x
   const [simTimeSeconds, setSimTimeSeconds] = useState<number>(0);
 
@@ -112,6 +110,8 @@ export default function App() {
       activeFluidType: 'Ringer com Lactato (LRS)',
       fluidRateMlPerHour: 0,
       totalFluidsInfusedMl: 0,
+      fluidBoluses: [],
+      fluidTemperatureC: 22,
       isFluidPumpRunning: false,
       warmingBlanketActive: false,
       warmingBlanketTempC: 38.5,
@@ -133,6 +133,7 @@ export default function App() {
 
   // 5. STIMULATION & INTERACTION
   const [activeSurgicalProcedure, setActiveSurgicalProcedure] = useState<ActiveSurgicalProcedure | null>(null);
+  const [activeNociceptiveTest, setActiveNociceptiveTest] = useState<ActiveNociceptiveTest | null>(null);
 
   // 6. VITALS STATE
   const [vitals, setVitals] = useState<VitalSigns>(() => {
@@ -162,23 +163,21 @@ export default function App() {
   ]);
 
   // 8. ALARMS & SOUND
-  const [alarmLimits, setAlarmLimits] = useState<MonitorAlarmLimits>({
-    hrLow: 50,
-    hrHigh: 160,
-    mapLow: 60,
-    mapHigh: 120,
-    spo2Low: 94,
-    etco2Low: 30,
-    etco2High: 50,
-    tempLow: 36.5,
-    tempHigh: 39.5,
-    isAudioMuted: false,
-  });
+  const [alarmLimits, setAlarmLimits] = useState<MonitorAlarmLimits>(() => speciesAlarmLimits(PRESET_SCENARIOS[0].species));
+  const [activeAlarmStatus, setActiveAlarmStatus] = useState<ActiveAlarmStatus | null>(null);
+  const [isAudioSettingsOpen, setIsAudioSettingsOpen] = useState(false);
 
   // 9. ACTIVE WORKSTATION TAB & MODALS
+  const [requestedDrugId, setRequestedDrugId] = useState<string>();
   const [activeTab, setActiveTab] = useState<
     'drugs' | 'machine_airway' | 'physical_exam' | 'fluids_thermal' | 'emergency_cpr' | 'records'
   >('drugs');
+  const [isTelemetryOpen, setIsTelemetryOpen] = useState(false);
+  const workstationRef = useRef<HTMLElement>(null);
+  const selectWorkstation = (tab: WorkstationId) => {
+    setActiveTab(tab);
+    workstationRef.current?.scrollIntoView({ block: 'start' });
+  };
   const [isDeathModalOpen, setIsDeathModalOpen] = useState(false);
   const [isDepthBoardOpen, setIsDepthBoardOpen] = useState(false);
   const [isGeneralLogOpen, setIsGeneralLogOpen] = useState(false);
@@ -206,37 +205,25 @@ export default function App() {
   const lastLogSimTimeRef = useRef<number>(0);
   const oxygenFlushEndSimTimeRef = useRef<number>(0);
   const previousClinicalAlertKeysRef = useRef<Set<string>>(new Set());
-  const physiologyGatewayRef = useRef<PhysiologyGatewayClient | null>(null);
-  const [physiologyGatewayState, setPhysiologyGatewayState] = useState<PhysiologyGatewayState>({
-    connection: 'disconnected',
-    nativeWorkerAvailable: false,
-    messagePt: 'Motor fisiológico local ativo.',
-  });
 
-  // The external whole-body engine starts in shadow mode. Its output is visible
-  // for validation, but cannot replace monitor values until the canine model is
-  // independently validated and the protocol explicitly marks it authoritative.
-  useEffect(() => {
-    const client = new PhysiologyGatewayClient();
-    physiologyGatewayRef.current = client;
-    const unsubscribe = client.subscribe(setPhysiologyGatewayState);
-    client.connect();
-
-    return () => {
-      unsubscribe();
-      client.disconnect();
-      physiologyGatewayRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    physiologyGatewayRef.current?.initialize(patient);
-  }, [patient]);
+  const observation = {
+    simTimeSeconds, vitals, equipment, doses: activeDoses, resuscitation,
+    surgical: activeSurgicalProcedure, nociceptive: activeNociceptiveTest, paused: isSimPaused, speed: simSpeed,
+    monitor: { continuousBP: isContinuousIbpActive, nibp: lastNibpMeasurement, measuring: isNibpMeasuring, autoIntervalMin: nibpAutoIntervalMin, alarmLimits },
+  };
+  const recording = useSimulationRecording(patient, observation, eventLogs);
+  const [reviewRuns, setReviewRuns] = useState<SimulationRun[] | null>(null);
+  const openExpertReview = async () => {
+    setIsSimPaused(true);
+    try { setReviewRuns(await recording.flush()); }
+    catch { setReviewRuns([structuredClone(recording.recorder.current!.run)]); }
+  };
 
   // Auto-open death report on transition to dead
   useEffect(() => {
     if (vitals.isDead && !prevDeadStateRef.current) {
       setIsDeathModalOpen(true);
+      setIsSimPaused(true);
     }
     prevDeadStateRef.current = vitals.isDead;
   }, [vitals.isDead]);
@@ -302,8 +289,7 @@ export default function App() {
     const timer = setInterval(() => {
       if (isSimPaused) return;
 
-      const dt = 0.1 * simSpeed;
-      const newSimTime = simTimeSeconds + dt;
+      const { dt, newSimTime } = nextSimulationStep(simTimeSeconds, simSpeed);
       setSimTimeSeconds(newSimTime);
 
       // Check NIBP auto-cycle
@@ -338,6 +324,17 @@ export default function App() {
         && newSimTime < activeSurgicalProcedure.endsAtSimTime
         ? activeSurgicalProcedure.intensity
         : 0;
+
+      if (activeNociceptiveTest && newSimTime >= activeNociceptiveTest.endsAtSimTime) {
+        setActiveNociceptiveTest(null);
+      }
+      const activeNociceptiveStimulus = activeNociceptiveTest
+        && newSimTime < activeNociceptiveTest.endsAtSimTime
+        ? activeNociceptiveTest.intensity
+        : 0;
+
+      const combinedNoxiousStimulus = Math.max(activeSurgicalStimulus, activeNociceptiveStimulus);
+
       if (equipment.isOxygenFlushActive && newSimTime >= oxygenFlushEndSimTimeRef.current) {
         cadenceUpdates.isOxygenFlushActive = false;
       }
@@ -364,9 +361,13 @@ export default function App() {
         activeDoses,
         activeEquipment,
         resuscitation,
-        activeSurgicalStimulus,
+        combinedNoxiousStimulus,
         vitals
       );
+
+      // Evaluate medical monitor alarms (IEC 60601-1-8 standard)
+      const alarmStatus = AudioSynthesizer.evaluateAndTriggerAlarms(newVitals, alarmLimits, dt);
+      setActiveAlarmStatus(alarmStatus);
 
       // Check ROSC transition (Return of Spontaneous Circulation)
       if (prevArrestStateRef.current && !newVitals.isCardiacArrest && !newVitals.isDead) {
@@ -391,15 +392,6 @@ export default function App() {
       }
       prevArrestStateRef.current = newVitals.isCardiacArrest;
 
-      physiologyGatewayRef.current?.advance({
-        deltaTimeSeconds: dt,
-        simulationTimeSeconds: newSimTime,
-        vitals: newVitals,
-        activeDoses: updatedDoses,
-        equipment: activeEquipment,
-        surgicalStimulus: activeSurgicalStimulus,
-      });
-
       setVitals(newVitals);
       setActiveDoses(updatedDoses);
 
@@ -409,8 +401,8 @@ export default function App() {
       }
 
       // Check for automatic 30-sec vital record
-      if (newSimTime - lastLogSimTimeRef.current >= 30) {
-        lastLogSimTimeRef.current = newSimTime;
+      if (newSimTime >= lastLogSimTimeRef.current + 30) {
+        lastLogSimTimeRef.current = Math.floor(newSimTime / 30) * 30;
         const mins = Math.floor(newSimTime / 60);
         const secs = Math.floor(newSimTime % 60);
         const timeLabel = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
@@ -448,9 +440,11 @@ export default function App() {
     equipment,
     resuscitation,
     activeSurgicalProcedure,
+    activeNociceptiveTest,
     isNibpMeasuring,
     nibpAutoIntervalMin,
     vitals,
+    alarmLimits,
   ]);
 
   // RESET SIMULATION
@@ -485,6 +479,8 @@ export default function App() {
       activeFluidType: 'Ringer com Lactato (LRS)',
       fluidRateMlPerHour: 0,
       totalFluidsInfusedMl: 0,
+      fluidBoluses: [],
+      fluidTemperatureC: 22,
       isFluidPumpRunning: false,
       warmingBlanketActive: false,
       warmingBlanketTempC: 38.5,
@@ -513,6 +509,12 @@ export default function App() {
       undefined
     );
 
+    const freshAlarmLimits = speciesAlarmLimits(targetPatient.species, alarmLimits.isAudioMuted);
+    setAlarmLimits(freshAlarmLimits);
+    setActiveAlarmStatus(null);
+    recording.restart(targetPatient, { ...observation, simTimeSeconds: 0, vitals: freshVitals,
+      equipment: freshEquipment, resuscitation: freshResuscitation, doses: [], surgical: null, nociceptive: null,
+      paused: false, monitor: { ...observation.monitor, nibp: null, measuring: false, alarmLimits: freshAlarmLimits } });
     setVitals(freshVitals);
     setEquipment(freshEquipment);
     setResuscitation(freshResuscitation);
@@ -529,9 +531,9 @@ export default function App() {
     prevArrestStateRef.current = false;
     oxygenFlushEndSimTimeRef.current = 0;
     setActiveSurgicalProcedure(null);
+    setActiveNociceptiveTest(null);
     setClinicalOccurrenceHistory([]);
     previousClinicalAlertKeysRef.current = new Set();
-    physiologyGatewayRef.current?.reset(targetPatient);
 
     setFeedbackToast({
       id: `reset_${Date.now()}`,
@@ -552,7 +554,10 @@ export default function App() {
     ]);
   };
 
-  const handleResetSimulation = () => resetSimulationForPatient(patient);
+  const handleResetSimulation = () => {
+    AudioSynthesizer.stopAlarmPlayback();
+    resetSimulationForPatient(patient);
+  };
 
   // QUICK MANUAL BREATH TRIGGER (Apertar Balão)
   const handleTriggerManualBreath = () => {
@@ -733,6 +738,8 @@ export default function App() {
       administrationSpeed: doseData.administrationSpeed,
       isCRI: doseData.isCRI,
       dosePerKg: doseData.dosePerKg,
+      concentrationMgMl: doseData.preparation?.concentrationMgMl,
+      deliveryDurationSec: doseData.isCRI ? undefined : doseData.deliveryDurationSec,
     });
     if (validationErrors.length > 0) {
       setEventLogs((prev) => [...prev, {
@@ -767,6 +774,7 @@ export default function App() {
     };
 
     setActiveDoses((prev) => [...prev, newDose]);
+    setIsTelemetryOpen(true);
 
     // Add log
     setEventLogs((prev) => [
@@ -777,7 +785,7 @@ export default function App() {
         realTimestamp: new Date().toLocaleTimeString(),
         type: 'drug',
         message: `Administrado ${newDose.drugName} (${newDose.administrationSpeed?.replace('_', ' ') || 'bolus'})`,
-        details: `${newDose.dosePerKg} ${newDose.route} · Vol: ${newDose.volumeMl} mL · Lag: ${newDose.transitLagRemainingSec}s`,
+        details: `${newDose.preparation ? `${newDose.preparation.name} · ${newDose.preparation.label} · Frasco: ${newDose.preparation.vialVolumeMl ?? 'não informado'} mL · ` : ''}${newDose.dosePerKg} ${newDose.isCRI ? drugDefinition.criDoseUnit || drugDefinition.doseUnit : drugDefinition.doseUnit} · Via: ${newDose.route} · Vol: ${newDose.volumeMl} mL · Entrega: ${newDose.isCRI ? 'contínua' : `${newDose.deliveryDurationSec}s`} · Lag: ${newDose.transitLagRemainingSec}s · ID: ${newDose.id}`,
         severity: newDose.administrationSpeed === 'bolus_rapid' ? 'warning' : 'success',
       },
     ]);
@@ -890,12 +898,50 @@ export default function App() {
     }]);
   };
 
+  // NOCICEPTIVE SENSITIVITY TESTING (Separate from surgical procedures)
+  const handleStartNociceptiveTest = (test: NociceptiveTestDefinition) => {
+    setActiveNociceptiveTest({
+      ...test,
+      startedAtSimTime: simTimeSeconds,
+      endsAtSimTime: simTimeSeconds + test.durationSeconds,
+    });
+    setEventLogs((prev) => [
+      ...prev,
+      {
+        id: `pain_test_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'surgical',
+        message: `Teste de Nocicepção: ${test.name} aplicado.`,
+        details: `${test.targetTissue} · intensidade ${Math.round(test.intensity * 100)}% · duração ${test.durationSeconds}s`,
+        severity: 'warning',
+      },
+    ]);
+  };
+
+  const handleStopNociceptiveTest = () => {
+    if (!activeNociceptiveTest) return;
+    const testName = activeNociceptiveTest.name;
+    setActiveNociceptiveTest(null);
+    setEventLogs((prev) => [
+      ...prev,
+      {
+        id: `pain_test_stop_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'surgical',
+        message: `Estímulo álgico encerrado: ${testName}.`,
+        severity: 'normal',
+      },
+    ]);
+  };
+
   // FLUID BOLUS
-  const handleGiveFluidBolus = (bolusMl: number, fluidName: string) => {
+  const handleGiveFluidBolus = (bolusMl: number, fluidName: string, durationSec: number) => {
+    if (!Number.isFinite(bolusMl) || bolusMl <= 0 || !Number.isFinite(durationSec) || durationSec < 1) return;
     setEquipment((prev) => ({
       ...prev,
-      activeFluidType: fluidName,
-      totalFluidsInfusedMl: prev.totalFluidsInfusedMl + bolusMl,
+      fluidBoluses: [...(prev.fluidBoluses ?? []).filter(bolus => bolus.deliveredMl < bolus.volumeMl - 1e-8), { id: `fluid_${Date.now()}`, fluidName, volumeMl: bolusMl, durationSec, deliveredMl: 0, isRunning: true }],
     }));
 
     setEventLogs((prev) => [
@@ -905,52 +951,15 @@ export default function App() {
         simTimeSeconds,
         realTimestamp: new Date().toLocaleTimeString(),
         type: 'vital',
-        message: `Bólus volêmico de ${bolusMl} mL administrado (${fluidName}).`,
+        message: `Bólus programado: ${bolusMl.toFixed(1)} mL de ${fluidName} em ${(durationSec / 60).toFixed(1)} min (${(bolusMl * 3600 / durationSec).toFixed(1)} mL/h).`,
         severity: 'success',
       },
     ]);
   };
 
-  // QUICK EMERGENCY DRUG
-  const handleAdministerQuickEmergencyDrug = (drugId: string) => {
-    const drug = VETERINARY_DRUG_DATABASE.find((item) => item.id === drugId);
-    if (!drug) return;
-    const range = getSpeciesDoseRange(drug, patient.species);
-    if (!range || isTimeBasedDoseUnit(drug.doseUnit)) {
-      setEventLogs((prev) => [...prev, {
-        id: `quick_drug_rejected_${Date.now()}`,
-        simTimeSeconds,
-        realTimestamp: new Date().toLocaleTimeString(),
-        type: 'system',
-        message: `Atalho indisponível para ${drug.name} em ${patient.species}.`,
-        details: 'Não existe dose rápida específica validada para esta espécie/contexto.',
-        severity: 'danger',
-      }]);
-      return;
-    }
-    const route = drug.supportedRoutes.includes('IV')
-      ? 'IV'
-      : drug.supportedRoutes.includes('IV_slow')
-        ? 'IV_slow'
-        : undefined;
-    if (!route) return;
-    const dosePerKg = range.typical;
-    const calculated = calculateAdministration(drug, dosePerKg, patient.weightKg);
-    const speed = route === 'IV' ? 'bolus_rapid' : 'bolus_slow';
-
-    handleAdministerDrug({
-      drugId,
-      drugName: drug.name,
-      category: drug.category,
-      route,
-      administrationSpeed: speed,
-      doseAmount: calculated.doseAmount,
-      dosePerKg,
-      volumeMl: calculated.volumeMl,
-      deliveryDurationSec: speed === 'bolus_rapid' ? 4 : 60,
-      transitLagRemainingSec: getRoutePharmacokinetics(drug, route).transitLagSeconds,
-      isCRI: false,
-    });
+  const handleSelectEmergencyDrug = (drugId: string) => {
+    setRequestedDrugId(drugId);
+    selectWorkstation('drugs');
   };
 
   const formatSimTime = (seconds: number) => {
@@ -961,170 +970,83 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-[#e5e5e5] flex flex-col justify-between">
-      {/* 1. TOP GLOBAL NAVIGATION & CONTROLS */}
-      <header className="sticky top-0 z-40 bg-[#0a0a0a]/95 border-b border-[#1f1f1f] backdrop-blur-md px-4 py-2.5 shadow-2xl">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
-          {/* Logo & Scenario Name */}
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold shadow-lg shadow-black/60">
-                <HeartPulse className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <h1 className="text-sm font-extrabold tracking-wide text-[#f5f5f5] flex items-center gap-1.5">
-                    <span>Open VetSim</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono-code font-bold">
-                      v2.5 PRO
-                    </span>
-                  </h1>
-                </div>
-                <div className="text-[11px] text-[#737373] font-mono-code">
-                  Simulador Anestésico & Cuidados Críticos Veterinários
-                </div>
-              </div>
-            </div>
+    <div className="vetsim-app min-h-screen flex flex-col">
+      <SimulationHeader
+        patient={patient} paused={isSimPaused} speed={simSpeed} time={formatSimTime(simTimeSeconds)}
+        consciousness={vitals.consciousnessScore ?? 100} eventCount={eventLogs.length}
+        occurrenceCount={clinicalOccurrenceHistory.length}
+        onPause={() => recording.recorder.current!.run.status === 'active' ? setIsSimPaused(prev => !prev) : handleResetSimulation()} onSpeed={setSimSpeed} onReset={handleResetSimulation}
+        onPatient={() => setIsScenarioModalOpen(true)} onBiophysics={() => setIsCellularModalOpen(true)}
+        onConsciousness={() => setIsDepthBoardOpen(true)} onEvents={() => setIsGeneralLogOpen(true)}
+        onOccurrences={() => setIsOccurrenceCenterOpen(true)} onEmergency={() => selectWorkstation('emergency_cpr')}
+      />
 
-            {/* Scenario Button */}
-            <button
-              onClick={() => setIsScenarioModalOpen(true)}
-              className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-[#121212] hover:bg-[#1a1a1a] border border-[#262626] text-xs font-mono-code transition text-[#e5e5e5]"
-            >
-              <FolderHeart className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="font-bold text-[#f5f5f5]">{patient.name}</span>
-              <span className="text-[#888888]">({patient.weightKg}kg · ASA {patient.asa})</span>
-            </button>
-
-            <PhysiologyEngineStatus
-              state={physiologyGatewayState}
-              isCanine={patient.species === 'canine'}
-            />
-
-            {/* Cellular Biophysics & Receptors Button */}
-            <button
-              onClick={() => setIsCellularModalOpen(true)}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-950/50 hover:bg-indigo-900/70 border border-indigo-500/40 text-xs font-mono-code transition text-indigo-200 shadow-md shadow-indigo-950/30 cursor-pointer"
-              title="Inspecionar Receptores Celulares, Segundos Mensageiros e Particularidades de Espécie"
-            >
-              <Dna className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
-              <span className="font-bold hidden sm:inline">Biofísica</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/30 text-indigo-300 font-mono font-bold">
-                {formatSpecies(patient.species).toUpperCase()}
-              </span>
-            </button>
-
-            {/* Depth & Consciousness Board Button */}
-            <button
-              onClick={() => setIsDepthBoardOpen(true)}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-950/50 hover:bg-purple-900/70 border border-purple-500/40 text-xs font-mono-code transition text-purple-200 shadow-md shadow-purple-950/30 cursor-pointer"
-              title="Visualizar Nível de Consciência, Plano de Guedel e Reflexos"
-            >
-              <Brain className="w-3.5 h-3.5 text-purple-400" />
-              <span className="font-bold hidden sm:inline">Consciência</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-500/30 text-purple-200 font-mono font-bold">
-                {vitals.consciousnessScore ?? 100}%
-              </span>
-            </button>
-
-            {/* General Log Button */}
-            <button
-              onClick={() => setIsGeneralLogOpen(true)}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cyan-950/50 hover:bg-cyan-900/70 border border-cyan-500/40 text-xs font-mono-code transition text-cyan-200 shadow-md shadow-cyan-950/30 cursor-pointer"
-              title="Abrir Log Geral de Acontecimentos e Respostas Fisiológicas"
-            >
-              <ScrollText className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="font-bold hidden sm:inline">Log Geral</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/30 text-cyan-200 font-mono font-bold">
-                {eventLogs.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setIsOccurrenceCenterOpen(true)}
-              className="relative flex items-center space-x-1.5 rounded-lg border border-amber-500/40 bg-amber-950/40 px-3 py-1.5 text-xs text-amber-200 shadow-md shadow-amber-950/30 transition hover:bg-amber-900/60"
-              title="Abrir histórico de alertas e interações"
-            >
-              <Bell className="h-3.5 w-3.5 text-amber-400" />
-              <span className="hidden font-bold sm:inline">Ocorrências</span>
-              {clinicalOccurrenceHistory.length > 0 && (
-                <span className="rounded bg-amber-500/25 px-1.5 text-[10px] font-bold text-amber-100">{clinicalOccurrenceHistory.length}</span>
-              )}
-            </button>
-          </div>
-
-          {/* Clock & Speed Multipliers */}
-          <div className="flex items-center space-x-2 font-mono-code text-xs">
-            {/* Simulation Timer */}
-            <div className="flex items-center space-x-2 px-3 py-1 bg-[#101010] border border-[#222222] rounded-lg">
-              <span className="text-[#737373] text-[10px]">TEMPO:</span>
-              <strong className="text-sm font-digital text-emerald-400 font-extrabold tracking-wider">
-                {formatSimTime(simTimeSeconds)}
-              </strong>
-            </div>
-
-            {/* Play/Pause & Speed Buttons */}
-            <div className="flex items-center space-x-1 bg-[#101010] p-1 rounded-lg border border-[#222222]">
-              <button
-                onClick={() => setIsSimPaused(!isSimPaused)}
-                className={`p-1.5 rounded transition ${
-                  isSimPaused
-                    ? 'bg-amber-600 text-white font-bold'
-                    : 'bg-[#1a1a1a] text-[#a3a3a3] hover:text-[#f5f5f5] hover:bg-[#242424]'
-                }`}
-                title={isSimPaused ? 'Retomar' : 'Pausar'}
-              >
-                {isSimPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-              </button>
-
-              <button
-                onClick={() => setSimSpeed(1.0)}
-                className={`px-2 py-0.5 rounded text-[10px] transition ${
-                  simSpeed === 1.0 ? 'bg-emerald-600 text-white font-bold' : 'text-[#737373] hover:text-[#d4d4d4]'
-                }`}
-              >
-                1x
-              </button>
-
-              <button
-                onClick={() => setSimSpeed(2.0)}
-                className={`px-2 py-0.5 rounded text-[10px] transition ${
-                  simSpeed === 2.0 ? 'bg-emerald-600 text-white font-bold' : 'text-[#737373] hover:text-[#d4d4d4]'
-                }`}
-              >
-                2x
-              </button>
-
-              <button
-                onClick={() => setSimSpeed(5.0)}
-                className={`px-2 py-0.5 rounded text-[10px] transition ${
-                  simSpeed === 5.0 ? 'bg-emerald-600 text-white font-bold' : 'text-[#737373] hover:text-[#d4d4d4]'
-                }`}
-              >
-                5x
-              </button>
-
-              <button
-                onClick={handleResetSimulation}
-                className="flex items-center space-x-1 px-2 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/60 text-red-300 hover:text-white rounded text-[10px] font-bold transition ml-1"
-                title="Reiniciar Caso do Início (00:00)"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reiniciar</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <div className="review-access"><button className="ui-button" onClick={openExpertReview}>Revisão por anestesiologista</button><span>{recording.storageError || (recording.savedAt ? `Rodada salva neste dispositivo às ${recording.savedAt}` : 'Preparando registro da rodada…')}</span>{recording.storageError && <button className="ui-button" onClick={() => downloadRecord(JSON.stringify(recording.recorder.current!.run, null, 2), `resgate-${recording.recorder.current!.run.id}.json`)}>Exportar cópia agora</button>}</div>
+      {reviewRuns && <ExpertReviewPanel initialRuns={reviewRuns} activeId={recording.recorder.current!.run.id}
+        onClose={() => setReviewRuns(null)} onRefresh={recording.flush}
+        onFinish={async () => { setIsSimPaused(true); return recording.finish(); }} />}
 
       {/* 2. MAIN WORKSPACE */}
-      <main className="max-w-[1600px] mx-auto w-full p-4 flex-1 flex flex-col space-y-4">
+      <main className="app-main">
         {/* Real-time Non-Disruptive Clinical Alert Ribbon (PCR, Apnea, Interactions, Death) */}
         <ClinicalAlertRibbon
           vitals={vitals}
           onOpenDeathReport={() => setIsDeathModalOpen(true)}
-          onSwitchToEmergencyTab={() => setActiveTab('emergency_cpr')}
+          onSwitchToEmergencyTab={() => selectWorkstation('emergency_cpr')}
         />
+
+        <section id="monitor" className="monitor-section" aria-labelledby="monitor-title">
+          <div className="section-heading">
+            <div><p className="eyebrow">Acompanhamento do paciente</p><h2 id="monitor-title">Monitorização</h2></div>
+            <a className="ui-button" href="#interventions">Ir para intervenções ↓</a>
+          </div>
+
+
+        {/* Top Half: Real-Time Waveform Monitor & Numeric LED Tiles */}
+        <div className="monitor-layout">
+          {/* Waveform Sweeping Canvas (7 cols) */}
+          <div className="waveform-panel">
+            <CanvasWaveforms vitals={vitals} isSimPaused={isSimPaused} equipment={equipment} />
+          </div>
+
+          {/* Numeric Vital Readouts (5 cols) */}
+          <div className="vitals-panel">
+            <VitalNumbers
+              vitals={vitals}
+              equipment={equipment}
+              alarmLimits={alarmLimits}
+              activeAlarmStatus={activeAlarmStatus}
+              onToggleAudioMute={() => {
+                const nextMuted = !alarmLimits.isAudioMuted;
+                setAlarmLimits((prev) => ({ ...prev, isAudioMuted: nextMuted }));
+                AudioSynthesizer.setPulseMuted(nextMuted);
+              }}
+              onToggleAlarmsSilence={() => {
+                AudioSynthesizer.toggleAlarmsSilence(120);
+                setActiveAlarmStatus((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        isSilenced: AudioSynthesizer.getAlarmSilenceRemainingSec() > 0,
+                        silenceRemainingSec: AudioSynthesizer.getAlarmSilenceRemainingSec(),
+                      }
+                    : null
+                );
+              }}
+              onTriggerNibpMeasurement={handleTriggerNibp}
+              isNibpMeasuring={isNibpMeasuring}
+              lastNibpMeasurement={lastNibpMeasurement}
+              nibpAutoIntervalMin={nibpAutoIntervalMin}
+              onChangeNibpAutoInterval={(min) => setNibpAutoIntervalMin(min)}
+              isContinuousIbpActive={isContinuousIbpActive}
+              onToggleContinuousIbp={() => setIsContinuousIbpActive(!isContinuousIbpActive)}
+              simTimeSeconds={simTimeSeconds}
+              onOpenDeathReport={() => setIsDeathModalOpen(true)}
+              onOpenDepthBoard={() => setIsDepthBoardOpen(true)}
+              onOpenAudioSettings={() => setIsAudioSettingsOpen(true)}
+            />
+          </div>
+        </div>
 
         {/* Airway Quick Actions Bar (Intubation / Manual Bag Squeeze / Cadence) */}
         <AirwayQuickBar
@@ -1138,125 +1060,50 @@ export default function App() {
           onApplyLidocaineSpray={handleApplyLidocaineSpray}
         />
 
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="min-w-0 space-y-4">
+        </section>
 
-        {/* Top Half: Real-Time Waveform Monitor & Numeric LED Tiles */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[380px]">
-          {/* Waveform Sweeping Canvas (7 cols) */}
-          <div className="lg:col-span-7 h-[380px]">
-            <CanvasWaveforms vitals={vitals} isSimPaused={isSimPaused} equipment={equipment} />
+        <section className="telemetry-disclosure" aria-label="Farmacocinética e telemetria">
+          <button className="telemetry-toggle" aria-expanded={isTelemetryOpen} aria-controls="telemetry-content" onClick={() => setIsTelemetryOpen(open => !open)}>
+            <span><Activity size={18} /><strong>Farmacocinética e telemetria</strong><span className="quiet-badge">{activeDoses.length} {activeDoses.length === 1 ? 'administração' : 'administrações'}</span></span>
+            <span>{isTelemetryOpen ? 'Recolher −' : 'Explorar detalhes +'}</span>
+          </button>
+          <div id="telemetry-content" hidden={!isTelemetryOpen}>
+            <CirculatingDrugsPanel patient={patient} activeDoses={activeDoses} equipment={equipment} vitals={vitals} />
           </div>
+        </section>
 
-          {/* Numeric Vital Readouts (5 cols) */}
-          <div className="lg:col-span-5 h-[380px]">
-            <VitalNumbers
-              vitals={vitals}
-              equipment={equipment}
-              alarmLimits={alarmLimits}
-              onToggleAudioMute={() => {
-                const nextMuted = !alarmLimits.isAudioMuted;
-                setAlarmLimits((prev) => ({ ...prev, isAudioMuted: nextMuted }));
-                AudioSynthesizer.setMuted(nextMuted);
-              }}
-              onTriggerNibpMeasurement={handleTriggerNibp}
-              isNibpMeasuring={isNibpMeasuring}
-              lastNibpMeasurement={lastNibpMeasurement}
-              nibpAutoIntervalMin={nibpAutoIntervalMin}
-              onChangeNibpAutoInterval={(min) => setNibpAutoIntervalMin(min)}
-              isContinuousIbpActive={isContinuousIbpActive}
-              onToggleContinuousIbp={() => setIsContinuousIbpActive(!isContinuousIbpActive)}
-              simTimeSeconds={simTimeSeconds}
-              onOpenDeathReport={() => setIsDeathModalOpen(true)}
-              onOpenDepthBoard={() => setIsDepthBoardOpen(true)}
-            />
+        <section id="interventions" ref={workstationRef} className="interventions-section" aria-labelledby="interventions-title" tabIndex={-1}>
+          <ClinicalSnapshot vitals={vitals} limits={alarmLimits} paused={isSimPaused} />
+          <div className="section-heading">
+            <div><p className="eyebrow">Conduta clínica</p><h2 id="interventions-title">Intervenções e registros</h2></div>
+            <a className="subtle-link" href="#monitor">Voltar ao monitor ↑</a>
           </div>
-        </div>
-
-        {/* Bottom Half: Clinical Interventions & Anesthetic Workstations */}
-        <div className="flex flex-col space-y-3">
-          {/* Workstation Navigation Tabs */}
-          <div className="flex items-center space-x-2 overflow-x-auto pb-1 text-xs font-mono-code font-bold border-b border-[#1f1f1f]">
-            <button
-              onClick={() => setActiveTab('drugs')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-t-lg transition border-b-2 ${
-                activeTab === 'drugs'
-                  ? 'bg-[#121212] border-emerald-500 text-emerald-400'
-                  : 'text-[#737373] hover:text-[#d4d4d4] border-transparent'
-              }`}
-            >
-              <Syringe className="w-4 h-4" />
-              <span>1. FARMACOPEIA & DOSES</span>
-              {activeDoses.length > 0 && (
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('machine_airway')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-t-lg transition border-b-2 ${
-                activeTab === 'machine_airway'
-                  ? 'bg-[#121212] border-emerald-500 text-emerald-400'
-                  : 'text-[#737373] hover:text-[#d4d4d4] border-transparent'
-              }`}
-            >
-              <Wind className="w-4 h-4" />
-              <span>2. APARELHO DE ANESTESIA & VENTILADOR</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('physical_exam')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-t-lg transition border-b-2 ${
-                activeTab === 'physical_exam'
-                  ? 'bg-[#121212] border-emerald-500 text-emerald-400'
-                  : 'text-[#737373] hover:text-[#d4d4d4] border-transparent'
-              }`}
-            >
-              <Stethoscope className="w-4 h-4" />
-              <span>3. EXAME FÍSICO & REFLEXOS</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('fluids_thermal')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-t-lg transition border-b-2 ${
-                activeTab === 'fluids_thermal'
-                  ? 'bg-[#121212] border-emerald-500 text-emerald-400'
-                  : 'text-[#737373] hover:text-[#d4d4d4] border-transparent'
-              }`}
-            >
-              <Droplet className="w-4 h-4" />
-              <span>4. FLUIDOS & TÉRMICO</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('emergency_cpr')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-t-lg transition border-b-2 ${
-                activeTab === 'emergency_cpr'
-                  ? 'bg-[#121212] border-red-500 text-red-400'
-                  : 'text-[#737373] hover:text-[#d4d4d4] border-transparent'
-              }`}
-            >
-              <HeartPulse className="w-4 h-4" />
-              <span>5. EMERGÊNCIA & CPCR RECOVER</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('records')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-t-lg transition border-b-2 ${
-                activeTab === 'records'
-                  ? 'bg-[#121212] border-indigo-500 text-indigo-400'
-                  : 'text-[#737373] hover:text-[#d4d4d4] border-transparent'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              <span>6. FICHA ANESTÉSICA & LOGS</span>
-            </button>
+          <div className="workstation-tabs" role="tablist" aria-label="Área de intervenção">
+            {WORKSTATIONS.map((tab, index) => {
+              const Icon = [Syringe, Wind, Stethoscope, Droplet, HeartPulse, FileText][index];
+              return <button key={tab.id} id={`tab-${tab.id}`} role="tab" aria-selected={activeTab === tab.id}
+                aria-controls={`panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1}
+                className={tab.id === 'emergency_cpr' ? 'emergency-tab' : ''}
+                onClick={() => selectWorkstation(tab.id)}
+                onKeyDown={event => {
+                  let next = index;
+                  if (event.key === 'ArrowRight') next = (index + 1) % WORKSTATIONS.length;
+                  else if (event.key === 'ArrowLeft') next = (index + WORKSTATIONS.length - 1) % WORKSTATIONS.length;
+                  else if (event.key === 'Home') next = 0;
+                  else if (event.key === 'End') next = WORKSTATIONS.length - 1;
+                  else return;
+                  event.preventDefault();
+                  selectWorkstation(WORKSTATIONS[next].id);
+                  document.getElementById(`tab-${WORKSTATIONS[next].id}`)?.focus({ preventScroll: true });
+                }}><Icon size={17} /><span>{tab.label}</span></button>;
+            })}
           </div>
-
+          <p className="workstation-description">{WORKSTATIONS.find(tab => tab.id === activeTab)?.description}</p>
           {/* Active Workstation Panels */}
-          <div>
+          <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`} tabIndex={0}>
             {activeTab === 'drugs' && (
               <DrugAdministrationModal
+                requestedDrugId={requestedDrugId}
                 patient={patient}
                 activeDoses={activeDoses}
                 onAdministerDrug={handleAdministerDrug}
@@ -1306,11 +1153,16 @@ export default function App() {
                 onStartSurgicalProcedure={handleStartSurgicalProcedure}
                 onStopSurgicalProcedure={handleStopSurgicalProcedure}
                 activeSurgicalProcedure={activeSurgicalProcedure}
+                activeNociceptiveTest={activeNociceptiveTest}
+                onStartNociceptiveTest={handleStartNociceptiveTest}
+                onStopNociceptiveTest={handleStopNociceptiveTest}
+                simTimeSeconds={simTimeSeconds}
               />
             )}
 
             {activeTab === 'fluids_thermal' && (
               <FluidTherapyPanel
+                vitals={vitals}
                 equipment={equipment}
                 patient={patient}
                 onUpdateEquipment={(updates) => setEquipment((prev) => ({ ...prev, ...updates }))}
@@ -1325,7 +1177,7 @@ export default function App() {
                 vitals={vitals}
                 resuscitation={resuscitation}
                 onUpdateResuscitation={(updates) => setResuscitation((prev) => ({ ...prev, ...updates }))}
-                onAdministerQuickEmergencyDrug={handleAdministerQuickEmergencyDrug}
+                onSelectEmergencyDrug={handleSelectEmergencyDrug}
               />
             )}
 
@@ -1338,16 +1190,7 @@ export default function App() {
               />
             )}
           </div>
-        </div>
-          </div>
-
-          <CirculatingDrugsPanel
-            patient={patient}
-            activeDoses={activeDoses}
-            equipment={equipment}
-            vitals={vitals}
-          />
-        </div>
+        </section>
       </main>
 
       {/* 3. SCENARIO SELECTOR MODAL */}
@@ -1369,7 +1212,7 @@ export default function App() {
         onAttemptHeroicCPR={() => {
           setIsDeathModalOpen(false);
           setIsSimPaused(false);
-          setActiveTab('emergency_cpr');
+          selectWorkstation('emergency_cpr');
           setResuscitation((prev) => ({
             ...prev,
             isCPRActive: true,
@@ -1415,7 +1258,7 @@ export default function App() {
         onForceIntubation={handleForceIntubationWithSpasm}
         onOpenDrugAdministration={() => {
           setIsLaryngealReflexModalOpen(false);
-          setActiveTab('drugs');
+          selectWorkstation('drugs');
         }}
       />
 
@@ -1423,6 +1266,18 @@ export default function App() {
       <EmergencyFeedbackToast
         item={feedbackToast}
         onDismiss={() => setFeedbackToast(null)}
+      />
+
+      {/* 10. AUDIO SYNTHESIZER & TIMBRE SETTINGS MODAL */}
+      <AudioSettingsModal
+        isOpen={isAudioSettingsOpen}
+        onClose={() => setIsAudioSettingsOpen(false)}
+        isPulseMuted={alarmLimits.isAudioMuted}
+        onTogglePulseMute={() => {
+          const nextMuted = !alarmLimits.isAudioMuted;
+          setAlarmLimits((prev) => ({ ...prev, isAudioMuted: nextMuted }));
+          AudioSynthesizer.setPulseMuted(nextMuted);
+        }}
       />
 
       <ClinicalOccurrenceCenter
@@ -1434,7 +1289,7 @@ export default function App() {
 
       {/* 11. FOOTER */}
       <footer className="border-t border-[#1a1a1a] bg-[#080808] px-4 py-2.5 text-center text-xs text-[#525252] font-mono-code">
-        Simulador Open VetSim · Modelagem farmacocinética multicompartimental · Diretrizes RECOVER 2024
+        Simulador SimPet · Modelagem farmacocinética multicompartimental · Diretrizes RECOVER 2024
       </footer>
     </div>
   );

@@ -3,6 +3,7 @@ import {
   CardiacRhythm,
   PatientProfile,
   ResuscitationState,
+  HemodynamicDrivers,
 } from '../types/simulator';
 import { SPECIES_DATABASE } from '../data/speciesData';
 import { ReceptorStateSnapshot } from './cellularReceptors';
@@ -11,8 +12,10 @@ import {
   NEUTRAL_PHYSIOLOGICAL_MODIFIERS,
   type PhysiologicalModifiers,
 } from './systemCoupling';
+import { BiologicalVariationsEngine } from './biologicalVariations';
 
 export interface HemodynamicOutputs {
+  drivers: HemodynamicDrivers;
   heartRate: number; // bpm
   cardiacRhythm: CardiacRhythm;
   systolicBP: number; // mmHg
@@ -77,25 +80,18 @@ export class HemodynamicCircuitEngine {
     const baseHR = patient.baselineVitals.hr;
     const baseMAP = patient.baselineVitals.map;
 
-    // ----------------------------------------------------
-    // 1. SYSTEMIC VASCULAR RESISTANCE (AFTERLOAD)
-    // ----------------------------------------------------
-    // Normal baseline SVR scaled by patient body weight
-    // Typical dog 20kg: CO ~ 2.2 L/min, MAP ~ 85, SVR ~ (85-4)/2.2 * 80 ~ 2900 dynes
-    const baselineCOApprox = patient.weightKg * speciesConfig.cardiacOutputMlKgMin / 1000;
-    const baselineSVR = Math.round(((baseMAP - 4) / Math.max(0.1, baselineCOApprox)) * 80);
-
     // Receptors affecting vascular smooth muscle tone:
     // Vasoconstrictors: Alpha-1, initial Alpha-2 peripheral
     // Vasodilators: Beta-2, Volatile inhalants, Acepromazine (alpha-1 block), local anesthetics
-    const alpha1Constriction = Math.max(0, receptors.alpha1Drive) * 0.65;
-    const alpha2Constriction = Math.max(0, receptors.alpha2Drive) * 0.40;
+    const adrenergicResponse = coupling.adrenergicResponsiveness;
+    const alpha1Constriction = Math.max(0, receptors.alpha1Drive) * 0.65 * adrenergicResponse;
+    const alpha2Constriction = Math.max(0, receptors.alpha2Drive) * 1.10;
     const alpha1Blockade = receptors.alpha1Drive < 0 ? Math.min(1, Math.abs(receptors.alpha1Drive)) * 0.16 : 0;
     const volatileVasodilation = Math.min(0.68, Math.max(0, receptors.volatileMacExposure) * 0.18);
     const beta2Dilation = Math.max(0, receptors.beta2Drive) * 0.25;
     const calibratedPressureDilation = Math.max(0, -receptors.directBloodPressureEffect) * 0.10;
     const titratableDirectVasodilation = receptors.directVasodilatorEffect * 0.52;
-    const calibratedPressureSupport = Math.max(0, receptors.directBloodPressureEffect) * 0.16;
+    const calibratedPressureSupport = Math.max(0, receptors.directBloodPressureEffect) * 0.16 * adrenergicResponse;
     const acuteVasodilation = receptors.acuteBolusHypotension * 0.28 + receptors.histamineRelease * 0.22;
 
     // Sepsis pathology vasodilation
@@ -110,19 +106,30 @@ export class HemodynamicCircuitEngine {
     // 2. Hypnosis / Anesthetic Depth (GABA-A cortical/subcortical depression, volatile MAC)
     // 3. Central Sedation & Alpha-2 Sympatholysis (Inhibition of locus coeruleus & RVLM sympathetic outflow)
     // 4. Dissociative sensory uncoupling (Ketamine)
+    // 1. Analgesia: Opioids, Local anesthetics (NaV), and Spinal Alpha-2 form the true antinociceptive gate
     const analgesiaProt = receptors.nociceptiveInhibition;
-    const hypnoticProt = Math.max(receptors.hypnoticEffect, receptors.volatileSiteOccupancy * 0.90);
-    const sedativeProt = Math.min(1.0, receptors.centralSedation * 0.85 + Math.max(0, receptors.alpha2Drive) * 0.90);
-    const dissociativeProt = receptors.dissociativeEffect;
+    // Ketamine dissociates somatic sensory perception (NMDA), offering moderate protection (up to 60%)
+    const dissociativeSomaticProt = Math.min(0.60, receptors.dissociativeEffect * 0.60);
+    const totalAnalgesicProtection = Math.min(0.98, analgesiaProt + dissociativeSomaticProt * (1 - analgesiaProt));
 
     const afferentStimulus = integratedNociceptiveInput > 0
       ? integratedNociceptiveInput
-      : (isSurgicalStimulationActive ? 1 - analgesiaProt : 0);
+      : (isSurgicalStimulationActive ? 1.0 : 0.0);
+
+    // Unblocked nociceptive transmission arriving at the brainstem:
+    const unblockedNociceptiveDrive = Math.max(0, afferentStimulus * (1 - totalAnalgesicProtection));
+
+    // 2. Autonomic breakthrough modulation:
+    // Cortical hypnosis and tranquilization suppress conscious perception and voluntary movement,
+    // but subcortical/spinoreticular sympathetic reflex arcs remain functional.
+    // Deep hypnotic depression blunts the autonomic surge only moderately (~25%),
+    // whereas central Alpha-2 agonists provide potent sympatholysis (inhibition of locus coeruleus/RVLM).
+    const hypnoticAutonomicDampening = Math.min(0.28, Math.max(receptors.hypnoticEffect, receptors.volatileSiteOccupancy) * 0.28);
+    const alpha2Sympatholysis = Math.min(0.85, Math.max(0, receptors.alpha2Drive) * 0.85);
+
     const targetBreakthrough = Math.max(0, Math.min(
       1.0,
-      afferentStimulus * (1 - Math.min(0.92, hypnoticProt * 0.88))
-        * (1 - Math.min(0.92, sedativeProt * 0.82))
-        * (1 - Math.min(0.85, dissociativeProt * 0.70))
+      unblockedNociceptiveDrive * (1 - hypnoticAutonomicDampening) * (1 - alpha2Sympatholysis)
     ));
 
     // Physiological neuro-endocrine wash-in and wash-out kinetics:
@@ -139,19 +146,13 @@ export class HemodynamicCircuitEngine {
     const nociceptiveStressLevel = Number(Math.max(0, Math.min(1.0, currentStress)).toFixed(4));
     const surgicalVasoconstriction = nociceptiveStressLevel * 0.28 * Math.max(0.25, catecholamineReserve);
 
-    const netVascularResistanceFactor = Math.max(
-      0.35,
-      (1.0 + alpha1Constriction + alpha2Constriction + calibratedPressureSupport + surgicalVasoconstriction
-        - alpha1Blockade - volatileVasodilation - beta2Dilation - calibratedPressureDilation
-        - acuteVasodilation - titratableDirectVasodilation) * coupling.vascularResistanceMultiplier
-    );
-    const SVR = Math.round(baselineSVR * netVascularResistanceFactor);
-
     // ----------------------------------------------------
-    // 2. PRELOAD & VENOUS RETURN (END-DIASTOLIC VOLUME)
+    // 1. PRELOAD & INTRAVASCULAR BLOOD VOLUME
     // ----------------------------------------------------
     // SV is derived from a species-scaled resting cardiac index. Using a fixed
     // mL/kg stroke volume made pressure/CO impossible for horses, cattle and birds.
+    const baselineCOApprox = patient.weightKg * speciesConfig.cardiacOutputMlKgMin / 1000;
+    const baseSVRApprox = Math.round(((baseMAP - 4) / Math.max(0.1, baselineCOApprox)) * 80);
     const baselineSV = (baselineCOApprox * 1000) / Math.max(1, baseHR);
     const expectedBloodVolumeMl = Math.max(1, patient.weightKg * speciesInfo.bloodVolumeMlPerKg);
     const observedDeficit = Math.max(0, 1 - patient.baselineVitals.bloodVolumeMl / expectedBloodVolumeMl);
@@ -182,6 +183,7 @@ export class HemodynamicCircuitEngine {
       Math.min(1, Math.abs(Math.min(0, receptors.alpha1Drive))) * 0.22 +
       receptors.hypnoticEffect * 0.12 +
       calibratedPressureDilation * 0.45 +
+      (receptors.directVenodilatorEffect ?? 0) * 0.12 +
       acuteVasodilation * 0.25;
     bloodVolumeRatio = Math.max(0.3, bloodVolumeRatio - venousPooling);
     bloodVolumeRatio = Math.min(1.4, bloodVolumeRatio + receptors.volumeExpansion * 0.28);
@@ -190,11 +192,60 @@ export class HemodynamicCircuitEngine {
     const preloadEDV = baselineSV * 1.5 * Math.max(0.3, bloodVolumeRatio);
 
     // ----------------------------------------------------
+    // DYNAMIC SHOCK STAGES & COMPENSATORY HEMODYNAMICS
+    // ----------------------------------------------------
+    // Hypovolemic/Hemorrhagic Deficit:
+    const effectiveHypovolemicDeficit = Math.max(0, 1.0 - bloodVolumeRatio);
+
+    // Shock Staging:
+    // Compensated Shock (Stage 1-2):
+    // Maintained by endogenous sympathetic drive and baroreflex. Compensatory tachycardia
+    // increases forward flow under reduced stroke volume.
+    // Decompensated / Vasoplegic Shock (Stage 3):
+    // Severe lactic acidosis (lactate > 4.5 mmol/L) causes progressive vascular smooth muscle
+    // paralysis (vasoplegia) and myocardial contractility failure.
+    let acidoticVasoplegia = 0;
+    let acidoticInotropyDepression = 1.0;
+
+    if (previousLactate > 4.5 || effectiveHypovolemicDeficit > 0.08 || patient.pathologyConditions.sepsisVasodilation) {
+      if (previousLactate > 4.5) {
+        const acidoticSeverity = Math.min(1.0, (previousLactate - 4.5) / 5.5);
+        acidoticVasoplegia = acidoticSeverity * 0.26;
+        acidoticInotropyDepression = Math.max(0.58, 1.0 - acidoticSeverity * 0.35);
+      }
+    }
+
+    // ----------------------------------------------------
+    // 2. SYSTEMIC VASCULAR RESISTANCE (AFTERLOAD)
+    // ----------------------------------------------------
+    const baselineSVR = baseSVRApprox;
+
+    // Em choque hipovolêmico ou hemorrágico, o bloqueio alfa-1 (acepromazina) anula a vasoconstrição compensatória
+    const shockAlpha1Failure = (receptors.alpha1Drive < 0 && declaredDeficit > 0.10)
+      ? Math.min(0.40, Math.abs(receptors.alpha1Drive) * declaredDeficit * 0.90)
+      : 0;
+    // Fenômeno da inversão da epinefrina: sob bloqueio alfa-1, o estímulo beta-2 vasodilata sem oposição alfa-1
+    const epinephrineReversalDilation = (receptors.alpha1Drive < 0 && receptors.beta2Drive > 0.05)
+      ? Math.min(0.35, Math.abs(receptors.alpha1Drive) * receptors.beta2Drive * 0.50)
+      : 0;
+
+    const netVascularResistanceFactor = Math.max(
+      0.25,
+      (1.0 + alpha1Constriction + alpha2Constriction + calibratedPressureSupport + surgicalVasoconstriction
+        - alpha1Blockade - volatileVasodilation - beta2Dilation - calibratedPressureDilation
+        - acuteVasodilation - titratableDirectVasodilation - sepsisDilation - acidoticVasoplegia
+        - shockAlpha1Failure - epinephrineReversalDilation) * coupling.vascularResistanceMultiplier
+    );
+    const SVR = Math.round(baselineSVR * netVascularResistanceFactor);
+
+    // ----------------------------------------------------
     // 3. MYOCARDIAL INOTROPY & CONTRACTILITY (Emax)
     // ----------------------------------------------------
     // Inotropic state driven by intracellular calcium [Ca2+]i
     // Normal baseline Emax = 1.0
-    let inotropyFactor = receptors.intracellularCalcium;
+    const responsiveCalcium = receptors.intracellularCalcium <= 1 ? receptors.intracellularCalcium
+      : 1 + (receptors.intracellularCalcium - 1) * adrenergicResponse;
+    let inotropyFactor = responsiveCalcium * acidoticInotropyDepression;
 
     // DCM pathology
     if (patient.pathologyConditions.cardiacFailureDCM) {
@@ -202,30 +253,35 @@ export class HemodynamicCircuitEngine {
     }
 
     // ASA Physical Status Modifiers on Cardiovascular Reserve
+    const baseAsa = patient.asa.replace(/-?E$/, '');
     let asaReserveFactor = 1.0;
     let asaBaroreflexFactor = 1.0;
-    if (patient.asa === 'II') {
+    if (baseAsa === 'II') {
       asaReserveFactor = 0.92;
       asaBaroreflexFactor = 0.90;
-    } else if (patient.asa === 'III') {
+    } else if (baseAsa === 'III') {
       asaReserveFactor = 0.75;
       asaBaroreflexFactor = 0.65;
-    } else if (patient.asa === 'IV' || patient.asa === 'V' || patient.asa === 'E') {
+    } else if (baseAsa === 'IV' || baseAsa === 'V') {
       asaReserveFactor = 0.52;
       asaBaroreflexFactor = 0.40;
     }
 
     inotropyFactor *= asaReserveFactor * coupling.contractilityMultiplier;
 
-    // Volatile myocardial depression is driven by MAC multiples, not by the
-    // saturable receptor occupancy (which can never exceed 1).
-    if (receptors.volatileMacExposure > 0.8) {
-      inotropyFactor = Math.max(0.2, inotropyFactor - (receptors.volatileMacExposure - 0.8) * 0.18);
-    }
+    // Volatile myocardial depression is already included in intracellular calcium.
 
     // Feline local anesthetic toxicity
     if (patient.species === 'feline' && receptors.naVBlockade > 0.25) {
       inotropyFactor = Math.max(0.1, inotropyFactor - receptors.naVBlockade * 0.70);
+    }
+
+    // Propofol and acute induction myocardial contractility depression
+    if (receptors.propofolSiteOccupancy > 0.15) {
+      inotropyFactor = Math.max(0.35, inotropyFactor - (receptors.propofolSiteOccupancy - 0.15) * 0.22);
+    }
+    if (receptors.acuteBolusHypotension > 0.15) {
+      inotropyFactor = Math.max(0.35, inotropyFactor - (receptors.acuteBolusHypotension - 0.15) * 0.20);
     }
 
     const inotropicStateEmax = Number(inotropyFactor.toFixed(2));
@@ -236,6 +292,11 @@ export class HemodynamicCircuitEngine {
     // SV = (Preload * Inotropy) / (1 + AfterloadRatio * 0.5)
     const afterloadRatio = SVR / baselineSVR;
     let computedSV = (preloadEDV * 0.65 * inotropyFactor) / (0.4 + afterloadRatio * 0.6);
+    // Em cardiopatas (DCM/ICC), a elevação de pós-carga por alfa-2 descompensa severamente o ventrículo insuficiente
+    if (patient.pathologyConditions.cardiacFailureDCM && receptors.alpha2Drive > 0.15) {
+      const dcmAfterloadPenalty = 1 / (1 + receptors.alpha2Drive * 1.5);
+      computedSV *= dcmAfterloadPenalty;
+    }
     computedSV = Math.max(baselineSV * 0.12, Math.min(baselineSV * 2.2, computedSV));
     let strokeVolumeMl = computedSV;
 
@@ -266,16 +327,28 @@ export class HemodynamicCircuitEngine {
     let autonomicHRMultiplier = 1.0;
 
     // Direct receptor effect on SA node
-    autonomicHRMultiplier += receptors.beta1Drive * 0.55;
-    autonomicHRMultiplier -= receptors.m2Drive * 0.50;
+    autonomicHRMultiplier += receptors.beta1Drive * 0.55 * adrenergicResponse;
+    const vagolyticReserve = (0.20 + speciesConfig.restingVagalTone * 0.40)
+      * Math.min(1, speciesInfo.normalVitals.hrTypical / Math.max(1, baseHR))
+      * Math.max(0.35, 1 - Math.max(0, receptors.beta1Drive) * 0.5 - nociceptiveStressLevel * 0.4);
+    autonomicHRMultiplier -= Math.max(0, receptors.m2Drive) * 0.50;
+    autonomicHRMultiplier += Math.max(0, -receptors.m2Drive) * vagolyticReserve;
     autonomicHRMultiplier -= receptors.alpha2Drive * 0.40;
     autonomicHRMultiplier += receptors.directHeartRateEffect * 0.32;
     autonomicHRMultiplier -= receptors.acuteBolusBradycardia * 0.28;
     autonomicHRMultiplier -= receptors.hyperkalemicCardiotoxicity * 0.30;
+    const nodalDeltaBpm = baseHR * (autonomicHRMultiplier - 1);
+    const systemicDeltaBpm = baseHR * autonomicHRMultiplier * (coupling.heartRateMultiplier - 1);
     autonomicHRMultiplier *= coupling.heartRateMultiplier;
 
     // Baroreceptor feedback contribution (smoothly bounded)
     autonomicHRMultiplier += baroreceptorEffector;
+
+    // Severe metabolic acidosis SA node failure (terminal Stage 3 shock)
+    if (previousLactate > 8.0) {
+      const terminalBradyDrive = Math.min(0.40, (previousLactate - 8.0) * 0.08);
+      autonomicHRMultiplier -= terminalBradyDrive;
+    }
 
     // Surgical stimulation tachycardia scaled strictly by dynamic nociceptive stress
     // Alpha-2 agonists and M2 vagal tone hyperpolarize the sinoatrial node via Gi/GIRK,
@@ -299,6 +372,18 @@ export class HemodynamicCircuitEngine {
       targetHR += Math.sin(respiratoryPhase) * vagalAmplitude;
     }
 
+    const autonomicDepth = Math.max(
+      receptors.hypnoticEffect,
+      receptors.centralSedation,
+      Math.max(0, receptors.alpha2Drive)
+    );
+    const variations = BiologicalVariationsEngine.compute(
+      simTimeSeconds,
+      patient,
+      autonomicDepth,
+      resuscitation.isCPRActive
+    );
+
     // Pediatric patients depend strictly on heart rate for cardiac output
     const ageTotalYears = patient.ageYears + (patient.ageMonths || 0) / 12;
     if (ageTotalYears < 0.6) {
@@ -308,11 +393,20 @@ export class HemodynamicCircuitEngine {
     targetHR = Math.max(0, Math.min(350, targetHR));
 
     // SA Node Physiological Inertia (1st-order low-pass filter: tau = 1.8s)
-    // Eliminates 100ms numerical limit-cycle flickering
+    // Eliminates 100ms numerical limit-cycle flickering while maintaining dt-invariance
+    const prevVariationHR = resuscitation.isCPRActive ? 0
+      : BiologicalVariationsEngine.compute(Math.max(0, simTimeSeconds - dtSeconds), patient, autonomicDepth, false).hrVariationBpm;
+    const prevCoreHR = previousHR > 0 ? (previousHR - prevVariationHR) : targetHR;
     const hrSmoothingAlpha = 1.0 - Math.exp(-dtSeconds / 1.8);
-    const effectiveHR = previousHR > 0 ? (previousHR + (targetHR - previousHR) * hrSmoothingAlpha) : targetHR;
-    const finalHR = Number(effectiveHR.toFixed(3));
+    const effectiveHR = prevCoreHR > 0 ? (prevCoreHR + (targetHR - prevCoreHR) * hrSmoothingAlpha) : targetHR;
+    const finalHR = Number((effectiveHR + (resuscitation.isCPRActive ? 0 : variations.hrVariationBpm)).toFixed(3));
 
+    // Longer diastole can partly restore SV during vagal/sympatholytic bradycardia.
+    // It cannot manufacture preload in hemorrhage or normalize a failing ventricle.
+    if (effectiveHR > 0 && effectiveHR < baseHR) {
+      const fillingReserve = Math.min(1, Math.max(0, (bloodVolumeRatio - 0.45) / 0.55));
+      strokeVolumeMl *= 1 + Math.min(0.45, (baseHR / effectiveHR - 1) * 0.6) * fillingReserve;
+    }
     // Very high rates shorten diastole and reduce preload instead of increasing CO forever.
     if (effectiveHR > baseHR * 1.2) {
       const fillingPenalty = 1 / (1 + ((effectiveHR / baseHR) - 1.2) * 0.75);
@@ -330,10 +424,13 @@ export class HemodynamicCircuitEngine {
     const cvp = 4.0;
     const rawMAP = cvp + (cardiacOutputLMin * SVR) / 80.0;
 
-    // Low-pass filter MAP to eliminate high-frequency flickering
+    // Low-pass filter MAP to eliminate high-frequency flickering with dt-invariance
+    const prevVariationBP = resuscitation.isCPRActive ? 0
+      : BiologicalVariationsEngine.compute(Math.max(0, simTimeSeconds - dtSeconds), patient, autonomicDepth, false).bpVariationMmHg;
+    const prevCoreMAP = previousMAP > 0 ? (previousMAP - prevVariationBP) : rawMAP;
     const mapSmoothingAlpha = 1.0 - Math.exp(-dtSeconds / 1.4);
-    const smoothedMAP = previousMAP > 0 ? (previousMAP + (rawMAP - previousMAP) * mapSmoothingAlpha) : rawMAP;
-    const finalMAP = Number(smoothedMAP.toFixed(3));
+    const smoothedMAP = prevCoreMAP > 0 ? (prevCoreMAP + (rawMAP - prevCoreMAP) * mapSmoothingAlpha) : rawMAP;
+    const finalMAP = Number(Math.max(5, smoothedMAP + (resuscitation.isCPRActive ? 0 : variations.bpVariationMmHg)).toFixed(3));
     const targetMAP = finalMAP;
 
     // Pulse pressure based on stroke volume and arterial compliance
@@ -347,8 +444,8 @@ export class HemodynamicCircuitEngine {
       12,
       Math.round(baselinePulsePressure * normalizedStrokeVolume * Math.sqrt(Math.max(0.25, SVR / baselineSVR)))
     );
-    let sysBP = Math.round(smoothedMAP + pulsePressure * 0.55);
-    let diaBP = Math.round(Math.max(10, smoothedMAP - pulsePressure * 0.45));
+    let sysBP = Math.round(finalMAP + pulsePressure * 0.55);
+    let diaBP = Math.round(Math.max(10, finalMAP - pulsePressure * 0.45));
 
     // ----------------------------------------------------
     // 8. MYOCARDIAL OXYGEN SUPPLY/DEMAND (MVO2 & ISCHEMIA)
@@ -366,6 +463,9 @@ export class HemodynamicCircuitEngine {
     if (demandRatio > 1.8 && coronaryAdequacy < 1.1) {
       // Severe mismatch (e.g. Alpha-2 peripheral constriction + Atropine tachycardia)
       ischemRatePerMinute = 0.08 * (demandRatio - 1.5);
+    } else if (patient.pathologyConditions.cardiacFailureDCM && receptors.alpha2Drive > 0.25) {
+      // Descompensação isquêmica por estresse de parede em miocárdio insuficiente sob alfa-2
+      ischemRatePerMinute = 0.10 * receptors.alpha2Drive;
     } else if (targetMAP < Math.max(32, baseMAP * 0.52)) {
       // Coronary hypoperfusion is distinct from the higher equine MAP target used
       // to prevent dependent-muscle/nerve injury during prolonged recumbency.
@@ -479,6 +579,16 @@ export class HemodynamicCircuitEngine {
     }
 
     return {
+      drivers: {
+        preloadRatio: bloodVolumeRatio,
+        vascularResistanceRatio: netVascularResistanceFactor,
+        contractilityRatio: inotropyFactor,
+        nodalDeltaBpm,
+        baroreflexDeltaBpm: baseHR * baroreceptorEffector,
+        systemicDeltaBpm,
+        otherDeltaBpm: targetHR - baseHR - nodalDeltaBpm - baseHR * baroreceptorEffector - systemicDeltaBpm,
+        targetHeartRate: targetHR,
+      },
       heartRate: finalHR,
       cardiacRhythm: rhythm,
       systolicBP: Math.round(sysBP),

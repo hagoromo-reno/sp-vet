@@ -1,5 +1,6 @@
 import type { BiologicalState, PatientProfile, VitalSigns } from '../types/simulator';
 import type { PhysiologicalSignal } from './systemCoupling';
+import { getPatientReserveCapacity } from './patientReserve';
 
 const clamp = (value: number, min = 0, max = 1): number => Math.min(max, Math.max(min, value));
 
@@ -21,7 +22,7 @@ export class HomeostaticFeedbackEngine {
       renalInjury: 0,
       compensatoryReserve: 1,
     };
-    const reserve = clamp(regulation.compensatoryReserve);
+    const reserve = clamp(regulation.compensatoryReserve / getPatientReserveCapacity(patient));
 
     if (regulation.cellularHypoxia > 0.05) {
       const severity = clamp(regulation.cellularHypoxia);
@@ -78,6 +79,26 @@ export class HomeostaticFeedbackEngine {
 
     const pH = previousVitals?.arterialBloodGases.pH ?? 7.4;
     const acidemia = clamp((7.28 - pH) / 0.38);
+    const vascularInjury = clamp(regulation.endothelialDysfunction);
+    const refractoryBurden = clamp(acidemia * 0.55 + vascularInjury * 0.35 + regulation.cellularHypoxia * 0.2);
+    if (refractoryBurden > 0.04) {
+      signals.push({
+        id: 'shock-adrenergic-resistance', source: 'metabolico',
+        targets: ['cardiovascular', 'farmacologia'], topology: 'one-to-many', severity: refractoryBurden,
+        label: 'Acidemia e disfunção vascular reduzem resposta a catecolaminas',
+        effects: { adrenergicResponsiveness: 1 - refractoryBurden * 0.65 },
+      });
+    }
+    const exhaustion = clamp((1 - reserve) * Math.max(regulation.cellularHypoxia, state.organPerfusion.cumulativeOxygenDebt));
+    if (exhaustion > 0.06) {
+      signals.push({
+        id: 'circulatory-reserve-exhaustion', source: 'cardiovascular',
+        targets: ['cardiovascular', 'hepatico', 'renal'], topology: 'one-to-many', severity: exhaustion,
+        label: 'Esgotamento de reserva: perda de tônus, força de contração e perfusão orgânica',
+        effects: { contractilityMultiplier: 1 - exhaustion * 0.3, vascularResistanceMultiplier: 1 - exhaustion * 0.22,
+          hepaticPerfusionMultiplier: 1 - exhaustion * 0.2, renalPerfusionMultiplier: 1 - exhaustion * 0.25 },
+      });
+    }
     if (acidemia > 0.02) {
       signals.push({
         id: 'acidemia-cardiovascular-depression',
@@ -94,7 +115,6 @@ export class HomeostaticFeedbackEngine {
       });
     }
 
-    void patient;
     return signals;
   }
 }

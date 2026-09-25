@@ -1,5 +1,5 @@
 import React from 'react';
-import { VitalSigns, MonitorAlarmLimits, AnesthesiaEquipmentState } from '../../types/simulator';
+import { VitalSigns, MonitorAlarmLimits, AnesthesiaEquipmentState, CardiacRhythm, MucousMembraneColor, CapillaryRefillTime } from '../../types/simulator';
 import {
   Activity,
   Heart,
@@ -9,17 +9,23 @@ import {
   Eye,
   Volume2,
   VolumeX,
-  Skull,
+  Bell,
+  BellOff,
+  Sliders,
   AlertTriangle,
   AlertOctagon,
   FileText,
 } from 'lucide-react';
+import { ActiveAlarmStatus } from '../../engine/audioSynthesizer';
 
 interface VitalNumbersProps {
   vitals: VitalSigns;
   equipment: AnesthesiaEquipmentState;
   alarmLimits: MonitorAlarmLimits;
+  activeAlarmStatus?: ActiveAlarmStatus | null;
   onToggleAudioMute: () => void;
+  onToggleAlarmsSilence?: () => void;
+  onOpenAudioSettings?: () => void;
   onTriggerNibpMeasurement: () => void;
   isNibpMeasuring?: boolean;
   lastNibpMeasurement?: { sys: number; dia: number; map: number; timestampSimSec: number } | null;
@@ -32,11 +38,67 @@ interface VitalNumbersProps {
   onOpenDepthBoard?: () => void;
 }
 
+function formatRhythm(rhythm: CardiacRhythm): string {
+  switch (rhythm) {
+    case 'sinus': return 'Sinusal';
+    case 'sinus_arrhythmia': return 'Arritmia Sinusal';
+    case 'sinus_bradycardia': return 'Bradicardia Sinusal';
+    case 'sinus_tachycardia': return 'Taquicardia Sinusal';
+    case 'ventricular_premature_complexes': return 'CPVs Ventriculares';
+    case 'ventricular_tachycardia': return 'Taquicardia Ventricular';
+    case 'ventricular_fibrillation': return 'Fibrilação Ventricular';
+    case 'pulseless_electrical_activity': return 'AESP';
+    case 'asystole': return 'Assistolia';
+    case 'av_block_2nd_degree': return 'BAV 2º Grau';
+    case 'av_block_3rd_degree': return 'BAV 3º Grau';
+    default: return rhythm;
+  }
+}
+
+function formatMucousMembrane(color: MucousMembraneColor): { label: string; colorClass: string } {
+  switch (color) {
+    case 'pink': return { label: 'Róseas', colorClass: 'text-emerald-400' };
+    case 'pale': return { label: 'Pálidas', colorClass: 'text-rose-300' };
+    case 'cyanotic': return { label: 'Cianóticas', colorClass: 'text-cyan-300 font-bold' };
+    case 'brick_red': return { label: 'Congestas', colorClass: 'text-amber-400' };
+    case 'icteric': return { label: 'Ictéricas', colorClass: 'text-yellow-400' };
+    case 'gray_moribund': return { label: 'Cinza', colorClass: 'text-zinc-400' };
+    default: return { label: 'Normal', colorClass: 'text-zinc-300' };
+  }
+}
+
+function formatCRT(crt: CapillaryRefillTime): { label: string; colorClass: string } {
+  switch (crt) {
+    case '< 1s (hyperdynamic)': return { label: '< 1s', colorClass: 'text-amber-300' };
+    case '1 - 2s (normal)': return { label: '1-2s', colorClass: 'text-emerald-300' };
+    case '2 - 3s (sluggish)': return { label: '2-3s', colorClass: 'text-yellow-300' };
+    case '> 3s (poor perfusion)': return { label: '> 3s', colorClass: 'text-rose-400 font-bold' };
+    case 'absent': return { label: 'Ausente', colorClass: 'text-red-500 font-bold' };
+    default: return { label: crt, colorClass: 'text-zinc-300' };
+  }
+}
+
+function formatGuedelStage(stage: string): { badge: string; sub: string } {
+  if (stage.includes('Óbito') || stage.includes('ÓBITO')) return { badge: 'ÓBITO', sub: 'Sem atividade' };
+  if (stage.includes('Dissociativa')) return { badge: 'DISSOCIATIVO', sub: 'Reflexos ativos' };
+  if (stage.includes('Consciente')) return { badge: 'ESTÁGIO I', sub: 'Consciente / Alerta' };
+  if (stage.includes('Sedação')) return { badge: 'ESTÁGIO I', sub: 'Sedação Profunda' };
+  if (stage.includes('Excitação')) return { badge: 'ESTÁGIO II', sub: 'Excitação / Delírio' };
+  if (stage.includes('Plano 1')) return { badge: 'ESTÁGIO III · P1', sub: 'Anestesia Leve' };
+  if (stage.includes('Plano 2')) return { badge: 'ESTÁGIO III · P2', sub: 'Plano Cirúrgico' };
+  if (stage.includes('Plano 3')) return { badge: 'ESTÁGIO III · P3', sub: 'Anestesia Profunda' };
+  if (stage.includes('Estágio IV') || stage.includes('Depressão')) return { badge: 'ESTÁGIO IV', sub: 'Parada Bulbar' };
+  return { badge: 'ESTÁGIO I', sub: stage };
+}
+
 export const VitalNumbers: React.FC<VitalNumbersProps> = ({
   vitals,
   equipment,
   alarmLimits,
+  activeAlarmStatus,
   onToggleAudioMute,
+  onToggleAlarmsSilence,
+  onOpenAudioSettings,
   onTriggerNibpMeasurement,
   isNibpMeasuring = false,
   lastNibpMeasurement = null,
@@ -48,7 +110,6 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
   onOpenDeathReport,
   onOpenDepthBoard,
 }) => {
-  // Check Alarm Conditions
   const isHrAlarm = vitals.heartRate < alarmLimits.hrLow || vitals.heartRate > alarmLimits.hrHigh;
   const isMapAlarm = vitals.meanArterialPressure < alarmLimits.mapLow || vitals.meanArterialPressure > alarmLimits.mapHigh;
   const isSpo2Alarm = vitals.pulseOximetrySpO2 < alarmLimits.spo2Low;
@@ -56,59 +117,52 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
   const isTempAlarm = vitals.bodyTemperatureC < alarmLimits.tempLow || vitals.bodyTemperatureC > alarmLimits.tempHigh;
 
   const isAnyAlarm = isHrAlarm || isMapAlarm || isSpo2Alarm || isEtco2Alarm || isTempAlarm || vitals.isCardiacArrest || vitals.isRespiratoryArrest;
+  const guedel = formatGuedelStage(vitals.guedelStage);
+  const mucous = formatMucousMembrane(vitals.mucousMembraneColor);
+  const crt = formatCRT(vitals.capillaryRefillTime);
 
-  // Format Guedel Stage cleanly without truncation
-  const getGuedelDisplay = () => {
-    if (vitals.isDead) return { stage: 'ÓBITO', sub: 'Sem atividade' };
-    if (vitals.guedelStage.startsWith('Anestesia Dissociativa')) return { stage: 'Dissociativo', sub: 'Reflexos preservados' };
-    if (vitals.guedelStage.includes('Consciente')) return { stage: 'Estágio I', sub: 'Consciente / Alerta' };
-    if (vitals.guedelStage.includes('Sedação')) return { stage: 'Estágio I', sub: 'Sedação / Responsivo' };
-    if (vitals.guedelStage.includes('Excitação')) return { stage: 'Estágio II', sub: 'Excitação / Delírio' };
-    if (vitals.guedelStage.includes('Plano 1')) return { stage: 'Estágio III · P1', sub: 'Anestesia superficial' };
-    if (vitals.guedelStage.includes('Plano 2')) return { stage: 'Estágio III · P2', sub: 'Cirúrgico adequado' };
-    if (vitals.guedelStage.includes('Plano 3')) return { stage: 'Estágio III · P3', sub: 'Anestesia profunda' };
-    return { stage: 'Estágio IV', sub: 'Parada Bulbar Iminente' };
-  };
-
-  const guedel = getGuedelDisplay();
+  const isAlarmSilenced = activeAlarmStatus?.isSilenced || false;
+  const silenceSec = activeAlarmStatus?.silenceRemainingSec || 0;
+  const isCriticalAlarm = activeAlarmStatus?.severity === 'critical';
+  const isWarningAlarm = activeAlarmStatus?.severity === 'warning';
 
   return (
     <div className="flex flex-col h-full space-y-2 select-none justify-between">
       {/* Top Monitor Status Bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d0d] border border-[#222222] rounded-lg text-xs shrink-0">
+      <div className="monitor-toolbar flex items-center justify-between px-3 py-1.5 bg-[#0d0d0f] border border-zinc-800/80 rounded-xl text-xs shrink-0 shadow-sm">
         <div className="flex items-center space-x-2">
           <span
-            className={`w-2 h-2 rounded-full ${
+            className={`w-2.5 h-2.5 rounded-full ${
               vitals.isDead
                 ? 'bg-red-600'
-                : vitals.isCardiacArrest
+                : isCriticalAlarm || vitals.isCardiacArrest
                 ? 'bg-red-500 animate-ping'
-                : isAnyAlarm
+                : isWarningAlarm || isAnyAlarm
                 ? 'bg-amber-400 animate-ping'
-                : 'bg-emerald-400 animate-ping'
+                : 'bg-emerald-400 shadow-[0_0_6px_#34d399]'
             }`}
-          ></span>
-          <span className="font-semibold text-[#e5e5e5] text-xs">MONITOR MULTIPARAMÉTRICO VET</span>
+          />
+          <span className="font-bold text-zinc-200 tracking-wide text-xs">Sinais vitais</span>
           
           {vitals.isDead ? (
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-950 border border-red-500 text-red-300 font-mono-code font-bold">
+            <span className="text-[10px] px-2 py-0.5 rounded bg-red-950/80 border border-red-500 text-red-300 font-mono-code font-bold">
               ÓBITO
             </span>
           ) : vitals.isCardiacArrest ? (
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-950 border border-red-500 text-red-300 font-mono-code font-bold animate-pulse">
+            <span className="text-[10px] px-2 py-0.5 rounded bg-red-950/90 border border-red-500 text-red-200 font-mono-code font-bold animate-pulse">
               PCR ATIVA
             </span>
           ) : vitals.impendingArrestWarning ? (
-            <span className="text-[10px] px-2 py-0.5 rounded bg-red-900 border border-red-500 text-white font-mono-code font-bold animate-pulse flex items-center gap-1">
+            <span className="text-[10px] px-2 py-0.5 rounded bg-red-900/90 border border-red-500 text-white font-mono-code font-bold animate-pulse flex items-center gap-1">
               <AlertOctagon className="w-3 h-3 text-red-300" />
               <span>COLAPSO EM ~{vitals.impendingArrestWarning.secondsRemainingEstimate}s</span>
             </span>
           ) : vitals.isRespiratoryArrest ? (
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-orange-950 border border-orange-500 text-orange-300 font-mono-code font-bold animate-pulse">
+            <span className="text-[10px] px-2 py-0.5 rounded bg-orange-950/80 border border-orange-500 text-orange-200 font-mono-code font-bold animate-pulse">
               APNEIA
             </span>
           ) : (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#171717] border border-[#262626] text-[#888888] font-mono-code">
+            <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-900 border border-zinc-700/60 text-zinc-400 font-mono-code">
               RECOVER 2024
             </span>
           )}
@@ -118,38 +172,102 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
           {vitals.isDead && onOpenDeathReport && (
             <button
               onClick={onOpenDeathReport}
-              className="text-[10px] px-2 py-0.5 rounded bg-red-800 hover:bg-red-700 text-white font-bold flex items-center gap-1 transition"
+              className="text-[10px] px-2 py-0.5 rounded bg-red-800 hover:bg-red-700 text-white font-bold flex items-center gap-1 transition cursor-pointer"
             >
               <FileText className="w-3 h-3" />
               <span>Laudo</span>
             </button>
           )}
 
+          {/* Alarm Silence / Pause Button (120s pause) */}
+          {onToggleAlarmsSilence && (
+            <button
+              onClick={onToggleAlarmsSilence}
+              className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs transition font-semibold cursor-pointer ${
+                isAlarmSilenced
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 animate-pulse shadow-sm shadow-amber-950/50'
+                  : isCriticalAlarm || isWarningAlarm
+                  ? 'bg-red-950/60 border border-red-500 text-red-200 hover:bg-red-900/80 animate-bounce'
+                  : 'bg-zinc-900 border border-zinc-700/60 text-zinc-400 hover:bg-zinc-800'
+              }`}
+              title={isAlarmSilenced ? `Alarmes pausados por mais ${silenceSec}s (clique para reativar)` : 'Pausar/Silenciar apitos de alarme por 120s'}
+            >
+              {isAlarmSilenced ? <BellOff className="w-3.5 h-3.5 text-amber-400" /> : <Bell className="w-3.5 h-3.5" />}
+              <span className="text-[10px] font-mono-code">
+                {isAlarmSilenced ? `PAUSA ${silenceSec}s` : 'SILENCIAR'}
+              </span>
+            </button>
+          )}
+
+          {/* Pulse QRS Audio Beep Toggle */}
           <button
             onClick={onToggleAudioMute}
-            className={`flex items-center space-x-1 px-2 py-0.5 rounded text-xs transition font-medium ${
+            className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs transition font-semibold cursor-pointer ${
               alarmLimits.isAudioMuted
-                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                : 'bg-[#181818] border border-[#282828] text-[#d4d4d4] hover:bg-[#222222]'
+                ? 'bg-zinc-900 text-zinc-500 border border-zinc-800 hover:bg-zinc-800'
+                : 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/50 shadow-sm shadow-emerald-950/30'
             }`}
-            title={alarmLimits.isAudioMuted ? 'Áudio Mutado' : 'Áudio Ativo'}
+            title={alarmLimits.isAudioMuted ? 'Bip de pulso silenciado (clique para ativar)' : 'Bip de pulso SpO2 ativo (clique para mutar)'}
           >
             {alarmLimits.isAudioMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-            <span className="text-[11px]">{alarmLimits.isAudioMuted ? 'MUDO' : 'BIP'}</span>
+            <span className="text-[10px]">{alarmLimits.isAudioMuted ? 'BIP OFF' : 'BIP ON'}</span>
           </button>
+
+          {/* Sound Synthesizer / Audio Profile Config Button */}
+          {onOpenAudioSettings && (
+            <button
+              onClick={onOpenAudioSettings}
+              className="flex items-center space-x-1 px-2 py-1 rounded-lg text-xs transition font-semibold cursor-pointer bg-zinc-900 border border-zinc-700/60 text-zinc-300 hover:bg-zinc-800 hover:text-cyan-300 hover:border-cyan-500/40"
+              title="Configurar Acústica do Monitor, Perfis de Som e Testar Alarmes"
+            >
+              <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-[10px] hidden sm:inline">TIMBRE</span>
+            </button>
+          )}
         </div>
       </div>
 
+      {/* IEC 60601-1-8 Authentic Clinical Alarm Banner */}
+      {activeAlarmStatus && activeAlarmStatus.severity !== 'normal' && activeAlarmStatus.message && (
+        <div
+          className={`px-3 py-1.5 rounded-xl border text-xs font-mono-code flex items-center justify-between shadow-lg shrink-0 ${
+            isCriticalAlarm
+              ? 'bg-gradient-to-r from-red-950/95 via-red-900/90 to-red-950/95 border-red-500 text-red-100 animate-pulse'
+              : 'bg-gradient-to-r from-amber-950/95 via-amber-900/80 to-amber-950/95 border-amber-500 text-amber-100'
+          }`}
+        >
+          <div className="flex items-center space-x-2 truncate">
+            <AlertTriangle
+              className={`w-4 h-4 shrink-0 ${
+                isCriticalAlarm ? 'text-red-400 animate-bounce' : 'text-amber-400'
+              }`}
+            />
+            <div className="truncate flex items-center gap-2">
+              <span className="font-extrabold uppercase tracking-wide">
+                {isCriticalAlarm ? '*** ALARME ALTA PRIORIDADE: ' : '** ALARME: '}
+                {activeAlarmStatus.message}
+                {isCriticalAlarm ? ' ***' : ' **'}
+              </span>
+            </div>
+          </div>
+          {isAlarmSilenced && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/90 border border-amber-500/80 text-amber-300 font-bold shrink-0">
+              ÁUDIO EM PAUSA ({silenceSec}s)
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Impending Arrest Warning Banner */}
       {vitals.impendingArrestWarning && !vitals.isDead && !vitals.isCardiacArrest && (
-        <div className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-red-950/95 via-red-900/80 to-red-950/95 border border-red-500 text-red-100 text-xs font-mono-code flex items-center justify-between animate-pulse shadow-xl shrink-0">
-          <div className="flex items-center space-x-2">
+        <div className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-red-950/95 via-red-900/80 to-red-950/95 border border-red-500 text-red-100 text-xs font-mono-code flex items-center justify-between animate-pulse shadow-xl shrink-0">
+          <div className="flex items-center space-x-2 truncate">
             <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 animate-bounce" />
-            <div>
+            <div className="truncate">
               <span className="font-extrabold text-red-200 uppercase tracking-wide">
                 ⚠️ {vitals.impendingArrestWarning.headline}
               </span>
-              <span className="text-[11px] text-red-300 ml-2 font-sans hidden sm:inline">
+              <span className="text-[11px] text-red-300 ml-2 font-sans hidden sm:inline truncate">
                 {vitals.impendingArrestWarning.details}
               </span>
             </div>
@@ -160,89 +278,89 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
         </div>
       )}
 
-      {/* Grid of Main Vital Parameter Tiles (Guaranteed 2x3 Grid Proportion) */}
-      <div className="grid grid-cols-2 gap-2 flex-1 min-h-[320px]">
-        {/* 1. HEART RATE (GREEN) */}
+      {/* Grid of Main Vital Parameter Tiles (2 Columns x 3 Rows) */}
+      <div className="grid grid-cols-2 gap-2.5 flex-1">
+        {/* 1. HEART RATE (EMERALD) */}
         <div
-          className={`p-2.5 rounded-xl border flex flex-col justify-between transition ${
+          className={`p-3 rounded-xl border flex flex-col justify-between transition-all shadow-sm ${
             vitals.isDead
               ? 'bg-[#14080a] border-red-900/60'
               : isHrAlarm
-              ? 'bg-[#24080a] border-red-500/80 animate-pulse'
-              : 'bg-[#0a0f0c] border-[#1b3824]'
+              ? 'bg-[#260a0d] border-red-500 animate-pulse'
+              : 'bg-[#0a140f] border-emerald-900/40 hover:border-emerald-700/60'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold font-mono-code text-emerald-400 flex items-center gap-1">
+            <span className="text-xs font-bold font-mono-code text-emerald-400 flex items-center gap-1.5">
               <Heart className="w-3.5 h-3.5 text-emerald-400" />
               FC (bpm)
             </span>
-            <span className="text-[10px] text-[#737373] font-mono-code">
+            <span className="text-[10px] text-zinc-400 font-mono-code">
               {alarmLimits.hrLow}-{alarmLimits.hrHigh}
             </span>
           </div>
 
-          <div className="my-0.5 flex items-baseline justify-between">
-            <span className={`text-3xl lg:text-4xl font-extrabold font-digital tracking-wider ${vitals.isDead ? 'text-red-500' : 'text-emerald-400'}`}>
+          <div className="my-1 flex items-baseline justify-between gap-2">
+            <span className={`text-3xl xl:text-4xl font-black font-digital tracking-tight ${vitals.isDead ? 'text-red-500' : 'text-emerald-400'}`}>
               {vitals.isDead || vitals.cardiacRhythm === 'asystole' ? '0' : Math.round(vitals.heartRate)}
             </span>
-            <span className="text-[11px] font-mono-code text-emerald-500/80 uppercase truncate max-w-[110px]">
-              {vitals.cardiacRhythm.replace(/_/g, ' ')}
+            <span className="text-[11px] font-mono-code text-emerald-300 font-bold px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/40 truncate max-w-[130px]" title={vitals.cardiacRhythm}>
+              {formatRhythm(vitals.cardiacRhythm)}
             </span>
           </div>
 
-          <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
-            <span>Pulso: <strong className="text-[#f5f5f5]">{vitals.pulseQuality}</strong> · TPC: <strong className={vitals.capillaryRefillTime === 'prolonged_3s' || vitals.capillaryRefillTime === 'absent' ? 'text-red-400 font-bold' : 'text-[#e5e5e5]'}>{vitals.capillaryRefillTime}</strong></span>
-            <span className="text-[9px] text-[#666666]">ECG DII</span>
+          <div className="text-[11px] text-zinc-300 font-mono-code flex items-center justify-between pt-1.5 border-t border-emerald-900/30">
+            <span>Pulso: <strong className="text-white font-semibold">{vitals.pulseQuality}</strong></span>
+            <span>TPC: <strong className={crt.colorClass}>{crt.label}</strong></span>
           </div>
         </div>
 
         {/* 2. SpO2 & PLETH (CYAN) */}
         <div
-          className={`p-2.5 rounded-xl border flex flex-col justify-between transition ${
+          className={`p-3 rounded-xl border flex flex-col justify-between transition-all shadow-sm ${
             vitals.isDead
               ? 'bg-[#0b1013] border-cyan-950/60'
               : isSpo2Alarm
-              ? 'bg-[#24080a] border-red-500/80 animate-pulse'
-              : 'bg-[#080f13] border-[#153440]'
+              ? 'bg-[#260a0d] border-red-500 animate-pulse'
+              : 'bg-[#08151b] border-cyan-900/40 hover:border-cyan-700/60'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold font-mono-code text-cyan-400 flex items-center gap-1">
+            <span className="text-xs font-bold font-mono-code text-cyan-400 flex items-center gap-1.5">
               <Activity className="w-3.5 h-3.5 text-cyan-400" />
               SpO₂ (%)
             </span>
-            <span className="text-[10px] text-[#737373] font-mono-code">&gt; {alarmLimits.spo2Low}%</span>
+            <span className="text-[10px] text-zinc-400 font-mono-code">&gt; {alarmLimits.spo2Low}%</span>
           </div>
 
-          <div className="my-0.5 flex items-baseline justify-between">
-            <span className={`text-3xl lg:text-4xl font-extrabold font-digital tracking-wider ${vitals.isDead ? 'text-red-400' : 'text-cyan-400'}`}>
+          <div className="my-1 flex items-baseline justify-between gap-2">
+            <span className={`text-3xl xl:text-4xl font-black font-digital tracking-tight ${vitals.isDead ? 'text-red-400' : 'text-cyan-400'}`}>
               {vitals.isDead ? '---' : `${Math.round(vitals.pulseOximetrySpO2)}%`}
             </span>
-            <span className="text-[11px] font-mono-code text-cyan-400/90 font-bold">
+            <span className="text-[11px] font-mono-code text-cyan-300 font-semibold px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/40">
               PI: {vitals.perfusionIndex}%
             </span>
           </div>
 
-          <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
-            <span>PaO₂: <strong className="text-cyan-200">{Math.round(vitals.arterialBloodGases.paO2)}</strong> · Mucosas: <strong className={vitals.mucousMembraneColor === 'cyanotic' || vitals.mucousMembraneColor === 'pale' || vitals.mucousMembraneColor === 'white_ashen' ? 'text-red-400 font-bold' : 'text-cyan-200'}>{vitals.mucousMembraneColor}</strong></span>
-            <span className="text-[9px] text-[#666666]">Oximetria</span>
+          <div className="text-[11px] text-zinc-300 font-mono-code flex items-center justify-between pt-1.5 border-t border-cyan-900/30">
+            <span>PaO₂: <strong className="text-cyan-200 font-bold">{Math.round(vitals.arterialBloodGases.paO2)}</strong></span>
+            <span>Mucosas: <strong className={mucous.colorClass}>{mucous.label}</strong></span>
           </div>
         </div>
 
-        {/* 3. BLOOD PRESSURE (NIBP / IBP) (RED) */}
+        {/* 3. BLOOD PRESSURE (NIBP / IBP) (ROSE / RED) */}
         <div
-          className={`p-2.5 rounded-xl border flex flex-col justify-between transition ${
+          className={`p-3 rounded-xl border flex flex-col justify-between transition-all shadow-sm ${
             vitals.isDead
               ? 'bg-[#14080a] border-red-900/60'
               : isMapAlarm
-              ? 'bg-[#24080a] border-red-500/80 animate-pulse'
-              : 'bg-[#12080a] border-[#381619]'
+              ? 'bg-[#260a0d] border-red-500 animate-pulse'
+              : 'bg-[#170a0e] border-rose-900/40 hover:border-rose-700/60'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold font-mono-code text-red-400 flex items-center gap-1">
-              <Gauge className="w-3.5 h-3.5 text-red-400" />
+            <span className="text-xs font-bold font-mono-code text-rose-400 flex items-center gap-1.5">
+              <Gauge className="w-3.5 h-3.5 text-rose-400" />
               {isContinuousIbpActive ? 'PA Invasiva (IBP)' : 'PNI (NIBP)'}
             </span>
 
@@ -250,7 +368,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
               <button
                 onClick={onTriggerNibpMeasurement}
                 disabled={vitals.isDead || isNibpMeasuring}
-                className="text-[9px] px-1.5 py-0.5 rounded bg-[#260c0f] hover:bg-[#381216] text-red-300 border border-red-800/60 font-mono-code transition disabled:opacity-40 font-bold"
+                className="text-[9px] px-1.5 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-700/60 font-mono-code transition disabled:opacity-40 font-bold cursor-pointer"
                 title="Aferir Pressão Arterial Não-Invasiva Imediatamente"
               >
                 {isNibpMeasuring ? 'MEDINDO...' : 'PNI STAT'}
@@ -260,7 +378,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
                 <select
                   value={nibpAutoIntervalMin}
                   onChange={(e) => onChangeNibpAutoInterval(Number(e.target.value))}
-                  className="bg-[#1e0a0d] text-red-300 text-[9px] font-mono rounded px-1 py-0.5 border border-red-900/60 focus:outline-none"
+                  className="bg-zinc-950 text-rose-300 text-[9px] font-mono rounded px-1 py-0.5 border border-zinc-800 focus:outline-none"
                   title="Ciclo Automático de PNI"
                 >
                   <option value="0">Auto: Off</option>
@@ -273,51 +391,47 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
             </div>
           </div>
 
-          <div className="my-0.5 flex items-baseline justify-between">
+          <div className="my-1 flex items-baseline justify-between gap-2">
             {isNibpMeasuring ? (
-              <div className="w-full py-1 text-center font-mono-code text-xs text-red-300 animate-pulse flex items-center justify-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                <span>Insuflador NIBP (140... 110... 80)</span>
+              <div className="w-full py-1 text-center font-mono-code text-xs text-rose-300 animate-pulse flex items-center justify-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                <span>Insuflador NIBP (140... 100... 70)</span>
               </div>
             ) : isContinuousIbpActive ? (
               <>
-                <div>
-                  <span className="text-xl lg:text-2xl font-bold font-digital text-red-400">
-                    {vitals.isDead ? '0/0' : `${Math.round(vitals.systolicBP)}/${Math.round(vitals.diastolicBP)}`}
-                  </span>
-                </div>
+                <span className="text-2xl xl:text-3xl font-bold font-digital text-rose-300">
+                  {vitals.isDead ? '0/0' : `${Math.round(vitals.systolicBP)}/${Math.round(vitals.diastolicBP)}`}
+                </span>
                 <div className="text-right">
-                  <span className="text-[10px] text-[#888888] font-mono-code mr-1">PAM</span>
-                  <span className="text-2xl lg:text-3xl font-extrabold font-digital text-red-400">
+                  <span className="text-[10px] text-zinc-400 font-mono-code mr-1">PAM</span>
+                  <span className="text-3xl xl:text-4xl font-black font-digital text-rose-400">
                     ({vitals.isDead ? '0' : Math.round(vitals.meanArterialPressure)})
                   </span>
                 </div>
               </>
             ) : lastNibpMeasurement ? (
               <>
-                <div>
-                  <span className="text-xl lg:text-2xl font-bold font-digital text-red-400">
-                    {vitals.isDead ? '0/0' : `${lastNibpMeasurement.sys}/${lastNibpMeasurement.dia}`}
-                  </span>
-                </div>
+                <span className="text-2xl xl:text-3xl font-bold font-digital text-rose-300">
+                  {vitals.isDead ? '0/0' : `${lastNibpMeasurement.sys}/${lastNibpMeasurement.dia}`}
+                </span>
                 <div className="text-right">
-                  <span className="text-[10px] text-[#888888] font-mono-code mr-1">PAM</span>
-                  <span className="text-2xl lg:text-3xl font-extrabold font-digital text-red-400">
+                  <span className="text-[10px] text-zinc-400 font-mono-code mr-1">PAM</span>
+                  <span className="text-3xl xl:text-4xl font-black font-digital text-rose-400">
                     ({vitals.isDead ? '0' : lastNibpMeasurement.map})
                   </span>
                 </div>
               </>
             ) : (
-              <div className="w-full py-1 text-center font-mono-code text-xs text-red-400/60">
-                -- / -- (--) · Pressione PNI STAT
+              <div className="w-full py-1 text-center font-mono-code text-xs text-rose-400/80">
+                -- / -- (--) · Clique PNI STAT
               </div>
             )}
           </div>
 
-          <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
-            <span>
+          <div className="text-[11px] text-zinc-300 font-mono-code flex items-center justify-between pt-1.5 border-t border-rose-900/30">
+            <span className="truncate">
               {isContinuousIbpActive
-                ? 'Contínuo (Artéria)'
+                ? 'Contínua (Artéria)'
                 : lastNibpMeasurement
                 ? `Aferido há ${Math.floor((simTimeSeconds - lastNibpMeasurement.timestampSimSec) / 60)}m ${Math.floor((simTimeSeconds - lastNibpMeasurement.timestampSimSec) % 60)}s`
                 : 'Aguardando 1ª Aferição'}
@@ -326,7 +440,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
             {onToggleContinuousIbp && (
               <button
                 onClick={onToggleContinuousIbp}
-                className="text-[9px] underline text-red-400/80 hover:text-red-300"
+                className="text-[10px] underline text-rose-300 hover:text-white cursor-pointer font-semibold ml-1 shrink-0"
               >
                 {isContinuousIbpActive ? 'Usar PNI' : 'Usar IBP'}
               </button>
@@ -334,143 +448,144 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
           </div>
         </div>
 
-        {/* 4. CAPNOGRAPHY (EtCO2 / FiCO2) (YELLOW) */}
+        {/* 4. CAPNOGRAPHY (EtCO2 / FiCO2) (AMBER / YELLOW) */}
         <div
-          className={`p-2.5 rounded-xl border flex flex-col justify-between transition ${
+          className={`p-3 rounded-xl border flex flex-col justify-between transition-all shadow-sm ${
             vitals.isDead
               ? 'bg-[#121008] border-yellow-950/60'
               : isEtco2Alarm
-              ? 'bg-[#2b1805] border-yellow-500/80 animate-pulse'
-              : 'bg-[#121008] border-[#383015]'
+              ? 'bg-[#2b1805] border-yellow-500 animate-pulse'
+              : 'bg-[#15120a] border-amber-900/40 hover:border-amber-700/60'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold font-mono-code text-yellow-400 flex items-center gap-1">
-              <Wind className="w-3.5 h-3.5 text-yellow-400" />
+            <span className="text-xs font-bold font-mono-code text-amber-400 flex items-center gap-1.5">
+              <Wind className="w-3.5 h-3.5 text-amber-400" />
               EtCO₂ (mmHg)
             </span>
-            <span className="text-[10px] text-[#737373] font-mono-code">
+            <span className="text-[10px] text-zinc-400 font-mono-code">
               {alarmLimits.etco2Low}-{alarmLimits.etco2High}
             </span>
           </div>
 
-          <div className="my-0.5 flex items-baseline justify-between">
-            <span className="text-3xl lg:text-4xl font-extrabold font-digital text-yellow-400 tracking-wider">
+          <div className="my-1 flex items-baseline justify-between gap-2">
+            <span className="text-3xl xl:text-4xl font-black font-digital text-amber-400 tracking-tight">
               {vitals.isDead ? '0' : Math.round(vitals.etCO2)}
             </span>
-            <span className="text-[11px] font-mono-code text-yellow-500/90 font-bold">
+            <span className="text-[11px] font-mono-code text-amber-300 font-semibold px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/40">
               FiCO₂: {vitals.fiCO2}
             </span>
           </div>
 
-          <div className="text-[10px] text-[#888888] font-mono-code truncate flex items-center justify-between">
-            <span>FR: <strong className="text-yellow-200 font-bold">{vitals.isDead ? '0' : Math.round(vitals.respiratoryRate)} rpm</strong></span>
-            {equipment?.intubationStatus === 'intubated_tracheal' && (
-              <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${
+          <div className="text-[11px] text-zinc-300 font-mono-code flex items-center justify-between pt-1.5 border-t border-amber-900/30">
+            <span>FR: <strong className="text-amber-200 font-bold">{vitals.isDead ? '0' : Math.round(vitals.respiratoryRate)} rpm</strong></span>
+            {equipment?.intubationStatus === 'intubated_tracheal' ? (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded border font-bold ${
                 vitals.isSpontaneousApnea
-                  ? 'bg-amber-950/80 border-amber-700/60 text-amber-300'
-                  : 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300'
+                  ? 'bg-amber-950 border-amber-600 text-amber-200'
+                  : 'bg-emerald-950 border-emerald-600 text-emerald-200'
               }`}>
-                {vitals.isSpontaneousApnea ? 'APNEIA · VENTILADO' : `TRAQUEIA #${equipment.tubeSizeMm}mm`}
+                {vitals.isSpontaneousApnea ? 'APNEIA · VENT.' : `Tubo #${equipment.tubeSizeMm}`}
               </span>
-            )}
-            {equipment?.intubationStatus === 'intubated_esophageal' && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-950/80 border border-red-700/60 text-red-300 font-bold animate-pulse">
-                ESÔFAGO!
-              </span>
-            )}
-            {(!equipment || equipment.intubationStatus === 'unintubated' || equipment.intubationStatus === 'extubated') && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-950/50 border border-yellow-800/40 text-yellow-300/90 font-mono-code">
-                Espontâneo (Nasal)
+            ) : (
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-950/60 border border-amber-800/50 text-amber-300 font-mono-code">
+                Espontâneo
               </span>
             )}
           </div>
         </div>
 
-        {/* 5. TEMPERATURE & WARMING (ORANGE) */}
+        {/* 5. TEMPERATURE & GLUCOSE (ORANGE) */}
         <div
-          className={`p-2.5 rounded-xl border flex flex-col justify-between transition ${
+          className={`p-3 rounded-xl border flex flex-col justify-between transition-all shadow-sm ${
             isTempAlarm
-              ? 'bg-[#2b1805] border-amber-500/80 animate-pulse'
-              : 'bg-[#130b07] border-[#382114]'
+              ? 'bg-[#2b1805] border-amber-500 animate-pulse'
+              : 'bg-[#150f09] border-orange-900/40 hover:border-orange-700/60'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold font-mono-code text-orange-400 flex items-center gap-1">
+            <span className="text-xs font-bold font-mono-code text-orange-400 flex items-center gap-1.5">
               <Flame className="w-3.5 h-3.5 text-orange-400" />
               TEMP (°C)
             </span>
-            <span className="text-[10px] text-[#737373] font-mono-code">
+            <span className="text-[10px] text-zinc-400 font-mono-code">
               {alarmLimits.tempLow}-{alarmLimits.tempHigh}°C
             </span>
           </div>
 
-          <div className="my-0.5 flex items-baseline justify-between">
-            <span className="text-2xl lg:text-3xl font-extrabold font-digital text-orange-400">
+          <div className="my-1 flex items-baseline justify-between gap-2">
+            <span className="text-3xl xl:text-4xl font-black font-digital text-orange-400">
               {vitals.bodyTemperatureC.toFixed(1)}°C
             </span>
-            <span className="text-[10px] font-mono-code px-1.5 py-0.5 rounded bg-[#26150b] text-orange-300 border border-orange-800/40 font-bold">
-              {equipment.warmingBlanketActive ? 'Aquecedor ON' : 'Aquecedor OFF'}
+            <span className={`text-[10px] font-mono-code px-1.5 py-0.5 rounded font-bold border ${
+              equipment.warmingBlanketActive
+                ? 'bg-orange-900/60 text-orange-200 border-orange-600/60'
+                : 'bg-zinc-900 text-zinc-400 border-zinc-700/50'
+            }`}>
+              {equipment.warmingBlanketActive ? 'Manta ON' : 'Manta OFF'}
             </span>
           </div>
 
-          <div className="text-[10px] text-[#888888] font-mono-code truncate">
-            Estado: <span className={vitals.bodyTemperatureC < 37.0 ? 'text-amber-300 font-bold' : 'text-[#f5f5f5]'}>
-              {vitals.bodyTemperatureC < 36.5 ? 'Hipotermia Moderada' : vitals.bodyTemperatureC < 37.5 ? 'Hipotermia Leve' : 'Normotermia'}
-            </span>
-          </div>
-          <div className="text-[10px] text-[#888888] font-mono-code">
-            Glicemia: <span className="text-[#f5f5f5] font-bold">{vitals.arterialBloodGases.glucoseMgDl.toFixed(0)} mg/dL</span>
+          <div className="text-[11px] text-zinc-300 font-mono-code flex justify-between items-center pt-1.5 border-t border-orange-900/30">
+            <span>Estado: <strong className={vitals.bodyTemperatureC < 37.0 ? 'text-amber-300 font-semibold' : 'text-zinc-100'}>
+              {vitals.bodyTemperatureC < 36.5 ? 'Hipotermia' : vitals.bodyTemperatureC < 37.5 ? 'Leve' : 'Normotermia'}
+            </strong></span>
+            <span>Glicemia: <strong className="text-white font-bold">{vitals.arterialBloodGases.glucoseMgDl.toFixed(0)} mg/dL</strong></span>
           </div>
         </div>
 
         {/* 6. ANESTHETIC DEPTH & GUEDEL (PURPLE) */}
-        <div className="p-2.5 rounded-xl border bg-[#0f0914] border-[#2c173d] flex flex-col justify-between">
+        <div className="p-3 rounded-xl border bg-[#120a1a] border-purple-900/40 hover:border-purple-700/60 flex flex-col justify-between transition-all shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold font-mono-code text-purple-400 flex items-center gap-1">
+            <span className="text-xs font-bold font-mono-code text-purple-400 flex items-center gap-1.5">
               <Eye className="w-3.5 h-3.5 text-purple-400" />
               PLANO ANESTÉSICO
             </span>
             {onOpenDepthBoard && (
               <button
                 onClick={onOpenDepthBoard}
-                className="text-[9px] px-1.5 py-0.5 rounded bg-[#2a1339] hover:bg-[#3d1a53] text-purple-300 border border-purple-700/60 font-mono-code transition font-bold"
+                className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950 hover:bg-purple-900 text-purple-200 border border-purple-700/60 font-mono-code transition font-bold cursor-pointer"
                 title="Abrir Quadro Detalhado de Consciência e Guedel"
               >
-                VER QUADRO
+                DETALHES
               </button>
             )}
           </div>
 
-          <div className="my-0.5">
-            <div className="flex items-baseline justify-between">
-              <span className="text-xs font-extrabold font-mono-code text-purple-200">
-                {vitals.guedelStage}
-              </span>
-              <span className="text-[10px] text-purple-300 font-mono-code font-bold">
-                Consciência: {vitals.consciousnessScore ?? 100}%
+          <div className="my-1 space-y-1">
+            <div className="flex items-baseline justify-between gap-1">
+              <div className="truncate">
+                <span className="text-xs font-black font-mono-code text-purple-200">
+                  {guedel.badge}
+                </span>
+                <span className="text-[10px] text-purple-300/80 ml-1.5 font-sans hidden sm:inline">
+                  ({guedel.sub})
+                </span>
+              </div>
+              <span className="text-[11px] text-purple-300 font-mono-code font-bold shrink-0">
+                {vitals.consciousnessScore ?? 100}%
               </span>
             </div>
 
-            <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full mt-1 overflow-hidden">
+            <div className="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden border border-zinc-800">
               <div
                 className={`h-full transition-all duration-300 ${
                   vitals.isDead
-                    ? 'bg-red-700'
+                    ? 'bg-rose-700'
                     : vitals.anestheticDepthScore < 40
                     ? 'bg-amber-500'
                     : vitals.anestheticDepthScore <= 80
                     ? 'bg-emerald-500'
-                    : 'bg-red-500'
+                    : 'bg-purple-500'
                 }`}
                 style={{ width: `${vitals.anestheticDepthScore}%` }}
-              ></div>
+              />
             </div>
           </div>
 
-          <div className="text-[10px] text-[#888888] font-mono-code flex justify-between">
-            <span>Mandíbula: <strong className="text-purple-200">{vitals.jawTone === 'relaxed_surgical' ? 'Relaxada (Intubável)' : vitals.jawTone === 'moderate' ? 'Moderada' : vitals.jawTone === 'rigid' ? 'Rígida' : 'Flácida'}</strong></span>
-            <span>Tol: <strong className="text-purple-200">{Math.round(vitals.surgicalTolerancePct)}%</strong></span>
+          <div className="text-[11px] text-zinc-300 font-mono-code flex justify-between pt-1.5 border-t border-purple-900/30">
+            <span>Mandíbula: <strong className="text-purple-200 font-semibold">{vitals.jawTone === 'relaxed_surgical' ? 'Relaxada' : vitals.jawTone === 'moderate' ? 'Moderada' : vitals.jawTone === 'rigid' ? 'Rígida' : 'Flácida'}</strong></span>
+            <span>Tolerância: <strong className="text-purple-200 font-bold">{Math.round(vitals.surgicalTolerancePct)}%</strong></span>
           </div>
         </div>
       </div>

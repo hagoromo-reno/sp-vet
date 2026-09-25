@@ -1,3 +1,4 @@
+import { FLUID_DRUG_NAMES } from './fluidTherapy';
 import {
   ActiveDrugDose,
   DrugDefinition,
@@ -13,6 +14,8 @@ export interface ReceptorStateSnapshot {
   alpha2Drive: number;
   beta1Drive: number;
   beta2Drive: number;
+  centralM1Blockade?: number;
+  centralAntimuscarinicExcitation?: number;
   m2Drive: number;
   m3Drive: number;
   dopamineD2Drive: number;
@@ -48,6 +51,7 @@ export interface ReceptorStateSnapshot {
   directHeartRateEffect: number;
   directBloodPressureEffect: number;
   directVasodilatorEffect: number;
+  directVenodilatorEffect?: number;
   acuteBolusHypotension: number;
   acuteBolusRespiratoryDepression: number;
   acuteBolusBradycardia: number;
@@ -180,8 +184,12 @@ export class CellularReceptorsEngine {
     let rawAlpha2 = 0;
     let rawBeta1 = 0;
     let rawBeta2 = 0;
+    let rawCentralM1 = 0;
+    let centralAntimuscarinicExcitation = 0;
     let rawM2 = 0;
     let rawM3 = 0;
+    const m2BlockadeEffects: number[] = [];
+    const m3BlockadeEffects: number[] = [];
     let rawD2 = 0;
     let rawH1 = 0;
     let raw5HT2 = 0;
@@ -196,6 +204,7 @@ export class CellularReceptorsEngine {
     let bzdSite = 0;
     let propofolSite = 0;
     let neurosteroidSite = 0;
+    let etomidateChlorideSite = 0;
 
     const sedationEffects: number[] = [];
     const hypnoticEffects: number[] = [];
@@ -209,6 +218,7 @@ export class CellularReceptorsEngine {
     let arousalDrive = 0;
     let directHeartRateEffect = 0;
     let directBloodPressureEffect = 0;
+    let directVenodilatorEffect = 0;
     let directVasodilatorEffect = 0;
     let volumeExpansion = 0;
     let oxygenCarryingSupport = 0;
@@ -235,9 +245,25 @@ export class CellularReceptorsEngine {
         centralExposure /= bzdSchildFactor;
         systemicExposure /= bzdSchildFactor;
       }
+      const hepaticImpairment = patient.pathologyConditions.hepaticDysfunctionSeverity || 0;
+      if (hepaticImpairment > 0.05) {
+        const binding = drugDef.biotransformation?.proteinBindingFraction ?? (
+          drugDef.specialTraits?.isBenzodiazepine ? 0.95 :
+          drugDef.specialTraits?.isPhenothiazine ? 0.92 :
+          drugDef.specialTraits?.isAlpha2Agonist ? 0.90 :
+          drugDef.id === 'fentanyl' ? 0.84 : 0.50
+        );
+        if (binding >= 0.75) {
+          const freeFractionShift = 1 + (binding - 0.70) * 1.8 * hepaticImpairment;
+          centralExposure *= freeFractionShift;
+          systemicExposure *= freeFractionShift;
+        }
+      }
       const speciesResponseFactor = drugDef.id === 'atropine'
         ? speciesConfig.atropineResponseFactor
         : 1;
+      // Fluids act through delivered mL and composition, never receptor-like pressure support.
+      if (FLUID_DRUG_NAMES[drugDef.id]) continue;
       const systemicResponse = hillResponse(systemicExposure) * speciesResponseFactor;
       const centralResponse = hillResponse(centralExposure);
 
@@ -250,30 +276,47 @@ export class CellularReceptorsEngine {
       }
       if (profile?.beta1) rawBeta1 += systemicResponse * profile.beta1.affinity * profile.beta1.intrinsicEfficacy;
       if (profile?.beta2) rawBeta2 += systemicResponse * profile.beta2.affinity * profile.beta2.intrinsicEfficacy;
-      if (profile?.m2) rawM2 += systemicResponse * profile.m2.affinity * profile.m2.intrinsicEfficacy;
-      if (profile?.m3) rawM3 += systemicResponse * profile.m3.affinity * profile.m3.intrinsicEfficacy;
+      if (profile?.m1) {
+        rawCentralM1 += centralResponse * profile.m1.affinity * Math.max(0, -profile.m1.intrinsicEfficacy);
+        centralAntimuscarinicExcitation += hillResponse(centralExposure, 2.5, 3) * profile.m1.affinity;
+      }
+      if (profile?.m2) {
+        const effect = systemicResponse * profile.m2.affinity * profile.m2.intrinsicEfficacy;
+        if (effect < 0) m2BlockadeEffects.push(-effect); else rawM2 += effect;
+      }
+      if (profile?.m3) {
+        const effect = systemicResponse * profile.m3.affinity * profile.m3.intrinsicEfficacy;
+        if (effect < 0) m3BlockadeEffects.push(-effect); else rawM3 += effect;
+      }
       if (profile?.dopamineD2) rawD2 += centralResponse * profile.dopamineD2.affinity * profile.dopamineD2.intrinsicEfficacy;
       if (profile?.histamineH1) rawH1 += centralResponse * profile.histamineH1.affinity * profile.histamineH1.intrinsicEfficacy;
       if (profile?.serotonin2) raw5HT2 += systemicResponse * profile.serotonin2.affinity * profile.serotonin2.intrinsicEfficacy;
-      if (profile?.nm) rawNMBA += systemicResponse * profile.nm.affinity;
+      if (profile?.nm) rawNMBA += hillResponse(systemicExposure, 0.35, 2.2) * profile.nm.affinity;
 
       if (profile?.gabaA) {
         const gabaResponse = hillResponse(centralExposure * speciesConfig.gabaSensitivityFactor);
         bzdSite += (gabaResponse * (profile.gabaA.bzdAllosteric || 0));
-        propofolSite += gabaResponse * Math.max(
+        const directGatingPower = Math.max(
           profile.gabaA.propofolBarbiturateDirect || 0,
           profile.gabaA.directChlorideGating || 0
         );
-        neurosteroidSite += gabaResponse * Math.max(
-          profile.gabaA.neurosteroidSite || 0,
-          profile.gabaA.directChlorideGating || 0
-        );
+        if (drugDef.id === 'propofol' || drugDef.id === 'thiopental') {
+          propofolSite += gabaResponse * directGatingPower;
+        } else if (drugDef.id === 'alfaxalone') {
+          neurosteroidSite += gabaResponse * directGatingPower;
+        } else {
+          // Etomidate: opens GABA-A chloride channels without negative inotropic or vasodilatory shock
+          etomidateChlorideSite += gabaResponse * directGatingPower;
+        }
       }
 
       if (profile?.muOpioid) {
         const response = hillResponse(exposure.centralCe / muSchildFactor);
+        const m1ConversionFactor = drugDef.specialTraits?.isTramadol
+          ? speciesConfig.tramadolM1ConversionEfficiency
+          : 1.0;
         rawMu += response * profile.muOpioid.affinity * profile.muOpioid.intrinsicEfficacy
-          * speciesConfig.muOpioidSensitivityFactor;
+          * speciesConfig.muOpioidSensitivityFactor * m1ConversionFactor;
       }
       if (profile?.kappaOpioid) {
         const response = hillResponse(exposure.centralCe / kappaSchildFactor);
@@ -299,7 +342,18 @@ export class CellularReceptorsEngine {
       // Every catalog vector now has a physiological consumer. Receptor mechanisms
       // remain causal; these bounded vectors calibrate net observed organ effects.
       if (applyCatalogPhenotype && drugDef.effectDepth > 0) {
-        const depthEffect = clamp(drugDef.effectDepth * centralResponse);
+        // Opioid sedation vs. analgesia decoupling:
+        // Acute opioid sedation requires higher central occupancy (EC50 ~0.48, gamma 2.0)
+        // so it wanes as Ce drops below 0.35, while receptor reserve maintains analgesia for 6-8h.
+        // For tramadol, sedation is also scaled by active M1 conversion efficiency.
+        let sedativeResponse = centralResponse;
+        if (drugDef.specialTraits?.isOpioid) {
+          sedativeResponse = hillResponse(centralExposure, 0.48, 2.0);
+          if (drugDef.specialTraits?.isTramadol) {
+            sedativeResponse *= speciesConfig.tramadolM1ConversionEfficiency;
+          }
+        }
+        const depthEffect = clamp(drugDef.effectDepth * sedativeResponse);
         if (drugDef.specialTraits?.isDissociative) {
           dissociativeEffects.push(depthEffect);
         } else if (drugDef.category === 'induction' && drugDef.id !== 'guaifenesin') {
@@ -315,26 +369,41 @@ export class CellularReceptorsEngine {
         const effectiveAnalgesicExposure = (drugDef.category === 'local_anesthetic' || drugDef.supportedRoutes.includes('Local') || drugDef.supportedRoutes.includes('Epidural'))
           ? Math.max(centralResponse, hillResponse(exposure.localCe, 0.25, 1.2))
           : centralResponse;
-        if (drugDef.effectAnalgesia > 0) analgesicEffects.push(drugDef.effectAnalgesia * effectiveAnalgesicExposure);
-        if (drugDef.macReductionPct > 0) macSparingEffects.push(drugDef.macReductionPct * centralResponse);
+
+        let finalAnalgesia = drugDef.effectAnalgesia * effectiveAnalgesicExposure;
+        if (drugDef.specialTraits?.isTramadol) {
+          // Dual mechanism: 30% baseline monoaminergic (SNRI) analgesia + 70% mu-opioid analgesia via M1
+          finalAnalgesia = drugDef.effectAnalgesia * (
+            0.30 * centralResponse +
+            0.70 * effectiveAnalgesicExposure * speciesConfig.tramadolM1ConversionEfficiency
+          );
+        }
+        if (drugDef.effectAnalgesia > 0) analgesicEffects.push(finalAnalgesia);
+        if (drugDef.macReductionPct > 0) {
+          const macFactor = drugDef.specialTraits?.isTramadol
+            ? (0.25 + 0.75 * speciesConfig.tramadolM1ConversionEfficiency)
+            : 1.0;
+          macSparingEffects.push(drugDef.macReductionPct * centralResponse * macFactor);
+        }
         if (drugDef.muscleRelaxation > 0) relaxationEffects.push(drugDef.muscleRelaxation * centralResponse);
         if (drugDef.muscleRelaxation < 0) rigidityDrive += Math.abs(drugDef.muscleRelaxation) * centralResponse;
         if (drugDef.effectRR < 0) respiratoryDepressants.push(Math.abs(drugDef.effectRR) * centralResponse);
         if (drugDef.effectRR > 0) respiratoryStimulants.push(drugDef.effectRR * systemicResponse);
 
-        directHeartRateEffect += drugDef.effectHR * systemicResponse;
-        directBloodPressureEffect += drugDef.effectBP * systemicResponse;
+        // Catalog HR/BP vectors describe a net observation, not a second receptor.
+        // Use them only for effects without an explicit cardiovascular mechanism.
+        const hasNodalMechanism = profile?.beta1 || profile?.m2 || profile?.alpha2 || drugDef.specialTraits?.isOpioid;
+        const hasPressureMechanism = profile?.alpha1 || profile?.alpha2 || profile?.beta1 || profile?.beta2 || drugDef.specialTraits?.isDirectVasodilator;
+        if (!hasNodalMechanism) directHeartRateEffect += drugDef.effectHR * systemicResponse;
+        if (!hasPressureMechanism) directBloodPressureEffect += drugDef.effectBP * systemicResponse;
         if (drugDef.specialTraits?.isDirectVasodilator) {
           directVasodilatorEffect += Math.abs(drugDef.effectBP) * systemicResponse;
+          // Nitroprusside dilates capacitance vessels as well as arterioles.
+          // Hydralazine is predominantly arteriolar and does not receive this effect.
+          if (drugDef.id === 'sodium_nitroprusside') directVenodilatorEffect += Math.abs(drugDef.effectBP) * systemicResponse;
         }
       }
 
-      if (drugDef.id === 'fluid_lrs') volumeExpansion += systemicResponse * 0.45;
-      if (drugDef.id === 'hypertonic_saline_72') volumeExpansion += systemicResponse * 0.8;
-      if (drugDef.id === 'whole_blood') {
-        volumeExpansion += systemicResponse * 0.65;
-        oxygenCarryingSupport += systemicResponse;
-      }
       if (drugDef.id === 'potassium_chloride') potassiumLoad += systemicResponse;
       if (drugDef.id === 'calcium_gluconate') calciumMembraneStabilization += systemicResponse;
       if (drugDef.id === 'sodium_bicarbonate') alkalinization += systemicResponse;
@@ -388,7 +457,7 @@ export class CellularReceptorsEngine {
     const volatileSite = hillResponse(effectiveInhalantCe, 0.65, 1.5);
 
     const allostericBZDMultiplier = 1 + 1.15 * clamp(bzdSite);
-    const directGating = 0.78 * propofolSite + 0.82 * neurosteroidSite + 0.86 * volatileSite;
+    const directGating = 1.48 * propofolSite + 1.48 * neurosteroidSite + 1.48 * etomidateChlorideSite + 0.86 * volatileSite;
     const gabaAChlorideConductance = 0.08 + directGating * allostericBZDMultiplier + 0.11 * clamp(bzdSite);
 
     const receptorSedation = clamp(
@@ -406,6 +475,13 @@ export class CellularReceptorsEngine {
       arousalDrive += Math.min(0.35, (rawMu - 0.45) * 0.55);
       directHeartRateEffect += Math.min(0.18, (rawMu - 0.45) * 0.28);
     }
+    const hasSedativeCover = rawMu > 0.15 || rawAlpha2 > 0.15 || dissociativeEffects.length > 0
+      || propofolSite > 0.1 || neurosteroidSite > 0.1 || (patient.ageYears < 0.6 || patient.ageYears > 10)
+      || (patient.pathologyConditions.hepaticDysfunctionSeverity || 0) > 0.3;
+    if (bzdSite > 0.20 && !hasSedativeCover && (patient.species === 'canine' || patient.species === 'feline' || patient.species === 'equine')) {
+      // Excitação paradoxal por benzodiazepínicos isolados em animais hígidos
+      arousalDrive += Math.min(0.30, hillResponse(bzdSite, 0.30, 1.8) * 0.35);
+    }
     centralSedation = clamp(centralSedation - clamp(arousalDrive) * 0.45);
 
     const injectableHypnosis = combineEffects(hypnoticEffects);
@@ -415,7 +491,7 @@ export class CellularReceptorsEngine {
       Math.min(0.35, centralSedation * 0.22),
     ]);
     const dissociativeEffect = combineEffects(dissociativeEffects);
-    const muscleRelaxation = clamp(combineEffects(relaxationEffects) - clamp(rigidityDrive) * 0.75);
+    const muscleRelaxation = clamp(combineEffects([...relaxationEffects, effectiveNMBABlock]) - clamp(rigidityDrive) * 0.75);
 
     const phenotypicRespiratoryDepression = combineEffects(respiratoryDepressants);
     const respiratoryStimulation = combineEffects(respiratoryStimulants);
@@ -464,8 +540,10 @@ export class CellularReceptorsEngine {
 
     // Central vagotonic activation from mu-opioids (fentanyl, methadone, morphine)
     // Produces dose-dependent physiological vagal bradycardia, reversible by atropine (negative M2) or naloxone
-    const opioidVagalDrive = rawMu > 0.05 ? rawMu * 0.35 * speciesConfig.muOpioidSensitivityFactor : 0;
-    const effectiveM2 = rawM2 + opioidVagalDrive;
+    const opioidVagalDrive = rawMu > 0.05 ? clamp(rawMu) * 0.35 : 0;
+    const muscarinicBlockade = combineEffects(m2BlockadeEffects);
+    const effectiveM2 = clamp(rawM2 + opioidVagalDrive) * (1 - muscarinicBlockade) - muscarinicBlockade;
+    rawM3 = clamp(rawM3) * (1 - combineEffects(m3BlockadeEffects)) - combineEffects(m3BlockadeEffects);
 
     // Class Ib antiarrhythmic protection: therapeutic systemic NaV exposure
     // (e.g. Lidocaine 2 mg/kg IV bolus / CRI) stabilizes Purkinje membrane and suppresses VPCs/VT
@@ -478,7 +556,9 @@ export class CellularReceptorsEngine {
     }
 
     const netMyocardialGs = Math.max(0, rawBeta1);
-    const netMyocardialGi = Math.max(0, effectiveM2 * 0.72 + rawAlpha2 * 0.35 + rawMu * 0.18);
+    // Nodal vagal bradycardia is not proportional ventricular failure. Opioid
+    // vagotonia is already represented in M2; do not apply mu again to the ventricle.
+    const netMyocardialGi = Math.max(0, effectiveM2) * 0.08 + Math.max(0, rawAlpha2) * 0.10;
     const cAMPMyocardial = clamp(1 + 0.78 * netMyocardialGs - 0.68 * netMyocardialGi, 0.15, 3.5);
     const vasodilationDrive = 0.6 * Math.max(0, rawBeta2) + Math.abs(Math.min(0, rawAlpha1)) * 0.8;
     const vasoconstrictionDrive = Math.max(0, rawAlpha1) * 1.2 + Math.max(0, rawAlpha2) * 0.5;
@@ -488,8 +568,15 @@ export class CellularReceptorsEngine {
     const hyperkalemicCardiotoxicity = clamp(
       untreatedHyperkalemicToxicity * (1 - clamp(calciumMembraneStabilization) * 0.82)
     );
-    const myocardialDepression = 0.5 * rawSystemicNaV + 0.35 * rawCaV + 0.18 * volatileSite
-      + hyperkalemicCardiotoxicity * 0.42;
+    let directDrugMyocardialDepression = 0;
+    for (const exposure of exposures.values()) {
+      if (exposure.drugDef.specialTraits?.causesDirectMyocardialDepression) {
+        directDrugMyocardialDepression += hillResponse(exposure.systemicCe, 0.35, 1.6) * 0.22;
+      }
+    }
+    // MAC sparing changes hypnosis, not the myocardial dose of inhalant received.
+    const myocardialDepression = 0.5 * rawSystemicNaV + 0.35 * rawCaV + Math.min(0.60, 0.18 * Math.max(0, inhalantCe))
+      + hyperkalemicCardiotoxicity * 0.42 + directDrugMyocardialDepression;
     const intracellularCalcium = clamp(
       cAMPMyocardial * (1 - myocardialDepression) + calciumMembraneStabilization * 0.12,
       0.1,
@@ -501,6 +588,8 @@ export class CellularReceptorsEngine {
       alpha2Drive: rawAlpha2,
       beta1Drive: rawBeta1,
       beta2Drive: rawBeta2,
+      centralM1Blockade: clamp(rawCentralM1),
+      centralAntimuscarinicExcitation: clamp(centralAntimuscarinicExcitation),
       m2Drive: effectiveM2,
       m3Drive: rawM3,
       dopamineD2Drive: rawD2,
@@ -529,6 +618,7 @@ export class CellularReceptorsEngine {
       nociceptiveInhibition,
       directHeartRateEffect: clamp(directHeartRateEffect, -1.5, 1.5),
       directBloodPressureEffect: clamp(directBloodPressureEffect, -1.5, 1.5),
+      directVenodilatorEffect: clamp(directVenodilatorEffect, 0, 1.5),
       directVasodilatorEffect: clamp(directVasodilatorEffect),
       acuteBolusHypotension: clamp(acuteBolusHypotension),
       acuteBolusRespiratoryDepression: clamp(acuteBolusRespiratoryDepression),

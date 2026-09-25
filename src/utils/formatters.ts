@@ -93,7 +93,7 @@ export function formatTemperature(
 import type { SpeciesType } from '../types/simulator';
 
 const SPECIES_LABELS: Record<SpeciesType, string> = {
-  canine: 'canino', feline: 'felino', equine: 'equino', bovine: 'bovino', rabbit: 'coelho', avian: 'ave',
+  canine: 'canino', feline: 'felino', equine: 'equino', bovine: 'bovino',
 };
 
 export function formatSpecies(species: SpeciesType): string {

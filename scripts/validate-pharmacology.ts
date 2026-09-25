@@ -27,7 +27,7 @@ interface CaseResult {
 }
 
 const DOSE_LEVELS: DoseLevel[] = ['min', 'typical', 'max'];
-const SPECIES: SpeciesType[] = ['canine', 'feline', 'equine', 'bovine', 'rabbit', 'avian'];
+const SPECIES: SpeciesType[] = ['canine', 'feline', 'equine', 'bovine'];
 
 function cliValue(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -96,7 +96,7 @@ function validateCase(
   if (metrics.peakEffectSiteExposure < 0.02) failures.push('fármaco não alcançou o sítio efetor');
   if (metrics.cardiacArrestOccurred) failures.push('parada cardíaca na faixa terapêutica em cenário protegido/controlado');
 
-  const speciesFloorFactor = species === 'avian' ? 0.82 : species === 'rabbit' ? 0.88 : 1;
+  const speciesFloorFactor = 1;
   for (const signal of expectation.signals) {
     const observed = metrics[signal.metric];
     const minimum = signal.minimum?.[doseLevel];

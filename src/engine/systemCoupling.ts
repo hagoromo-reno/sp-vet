@@ -26,6 +26,7 @@ export interface PhysiologicalSignal {
 }
 
 export interface PhysiologicalModifiers {
+  adrenergicResponsiveness: number;
   heartRateMultiplier: number;
   vascularResistanceMultiplier: number;
   contractilityMultiplier: number;
@@ -40,6 +41,7 @@ export interface PhysiologicalModifiers {
 }
 
 export const NEUTRAL_PHYSIOLOGICAL_MODIFIERS: PhysiologicalModifiers = {
+  adrenergicResponsiveness: 1,
   heartRateMultiplier: 1,
   vascularResistanceMultiplier: 1,
   contractilityMultiplier: 1,
@@ -64,6 +66,7 @@ export const aggregatePhysiologicalSignals = (signals: PhysiologicalSignal[]): P
   const result = { ...NEUTRAL_PHYSIOLOGICAL_MODIFIERS };
   for (const signal of signals) {
     const effects = signal.effects;
+    if (effects.adrenergicResponsiveness !== undefined) result.adrenergicResponsiveness *= effects.adrenergicResponsiveness;
     if (effects.heartRateMultiplier !== undefined) result.heartRateMultiplier *= effects.heartRateMultiplier;
     if (effects.vascularResistanceMultiplier !== undefined) result.vascularResistanceMultiplier *= effects.vascularResistanceMultiplier;
     if (effects.contractilityMultiplier !== undefined) result.contractilityMultiplier *= effects.contractilityMultiplier;
@@ -77,6 +80,7 @@ export const aggregatePhysiologicalSignals = (signals: PhysiologicalSignal[]): P
     if (effects.renalPerfusionMultiplier !== undefined) result.renalPerfusionMultiplier *= effects.renalPerfusionMultiplier;
   }
   return {
+    adrenergicResponsiveness: clamp(result.adrenergicResponsiveness, 0.2, 1.1),
     heartRateMultiplier: clamp(result.heartRateMultiplier, 0.35, 1.8),
     vascularResistanceMultiplier: clamp(result.vascularResistanceMultiplier, 0.25, 2.2),
     contractilityMultiplier: clamp(result.contractilityMultiplier, 0.18, 1.5),

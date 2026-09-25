@@ -4,7 +4,8 @@ import type {
   PatientProfile,
   SpeciesType,
 } from '../types/simulator';
-import { getRoutePharmacokinetics, isExtravascularRoute } from './drugAdministration';
+import { getRoutePharmacokinetics, isExtravascularRoute, isTimeBasedDoseUnit } from './drugAdministration';
+import { resolveBiotransformationProfile } from './biotransformationEngine';
 
 type PKState = NonNullable<ActiveDrugDose['pkCompartments']>;
 
@@ -21,8 +22,6 @@ const CENTRAL_VOLUME_SCALE: Record<SpeciesType, number> = {
   feline: 0.9,
   equine: 1.12,
   bovine: 1.18,
-  rabbit: 0.82,
-  avian: 0.72,
 };
 
 const GENERIC_CLEARANCE_SCALE: Record<SpeciesType, number> = {
@@ -30,8 +29,6 @@ const GENERIC_CLEARANCE_SCALE: Record<SpeciesType, number> = {
   feline: 0.9,
   equine: 0.9,
   bovine: 0.82,
-  rabbit: 1.3,
-  avian: 1.45,
 };
 
 const concentrationUnitScale = (unit?: string): number => {
@@ -61,6 +58,16 @@ const freshState = (dose: ActiveDrugDose): PKState => ({
  * Open mammillary model with central, rapidly equilibrating, deep tissue and
  * effect-site compartments. Concentrations remain normalized to a usual
  * clinical bolus, allowing the heterogeneous catalog units to share one solver.
+ *
+ * Micro-constants are derived from the drug's alpha (distribution) and beta
+ * (elimination) half-lives. The deep peripheral compartment (k13/k31) now
+ * represents true slow tissue equilibration governed exclusively by beta
+ * kinetics and lipid solubility, rather than using the clinical offset which
+ * previously inverted the trapping ratio for short-acting lipophilic drugs.
+ *
+ * Prolonged infusion accumulates drug in peripheral tissues. Redistribution
+ * continues after stopping the pump; clearance does not switch at pump stop.
+ * These normalized educational parameters are not a clinical TCI model.
  */
 export class PharmacokineticModel {
   public static step(
@@ -70,7 +77,9 @@ export class PharmacokineticModel {
     dose: ActiveDrugDose,
     typicalBolusDosePerKg: number,
     typicalCriRatePerKg: number | undefined,
-    systemicClearanceModifier: number
+    systemicClearanceModifier: number,
+    peripheralPerfusion: number = 1,
+    absorptionRateMultiplier: number = 1
   ): PharmacokineticStepResult {
     const state: PKState = { ...(dose.pkCompartments ?? freshState(dose)) };
     const route = getRoutePharmacokinetics(drug, dose.route);
@@ -96,16 +105,31 @@ export class PharmacokineticModel {
     state.effectiveClearanceMultiplier = clearance;
     state.bioavailableFraction = route.bioavailability;
 
+    const bioProfile = resolveBiotransformationProfile(drug);
+    const lipidSolubility = bioProfile.lipidSolubility ?? 0.5;
+
     const alpha = Math.LN2 / Math.max(0.1, drug.halfLifeAlpha);
     const beta = Math.LN2 / Math.max(0.2, drug.halfLifeBeta);
-    const clinicalOffset = Math.LN2 / Math.max(0.2, drug.durationMinutes);
-    const k10 = Math.max(0.0005, beta * 0.78 * clearance);
+
+    const hepaticFraction = bioProfile.hepaticClearanceFraction;
+    const k10Factor = hepaticFraction > 0.7 ? 0.95 : hepaticFraction > 0.3 ? 0.82 : 0.70;
+    const k10 = Math.max(0.0005, beta * k10Factor * clearance);
+
     const k12 = Math.max(0.001, (alpha - beta) * 0.52);
-    const k21 = Math.max(0.001, k12 * 0.34);
-    const k13 = Math.max(0.0002, beta * 0.22);
-    const k31 = Math.max(0.0001, beta * 0.075, clinicalOffset * 0.5);
+    const k21k12Ratio = Math.max(0.15, 0.55 - lipidSolubility * 0.35);
+    const k21 = Math.max(0.001, k12 * k21k12Ratio);
+
+    const deepUptakeFactor = Math.max(0.12, 0.10 + lipidSolubility * 0.22);
+    const k13 = Math.max(0.0002, beta * deepUptakeFactor);
+    const deepReturnFactor = Math.max(0.03, 0.10 - lipidSolubility * 0.065);
+    const k31 = Math.max(0.0001, beta * deepReturnFactor);
+
+    // Tissue return already produces context dependence. Stopping the pump must
+    // not instantaneously change intrinsic clearance.
+    const effectiveK10 = k10;
+    const effectivePerfusion = Math.min(1.2, Math.max(0.08, peripheralPerfusion)) * Math.max(0.5, Math.min(1.5, absorptionRateMultiplier));
     const ka = route.absorptionHalfLifeMinutes > 0
-      ? Math.LN2 / route.absorptionHalfLifeMinutes
+      ? Math.LN2 / route.absorptionHalfLifeMinutes * effectivePerfusion
       : 0;
 
     let directCentralInput = 0;
@@ -143,14 +167,14 @@ export class PharmacokineticModel {
           0.000001,
           ratePerMinute(typicalCriRatePerKg || dose.dosePerKg, rateUnit) * concentrationUnitScale(rateUnit)
         );
-        const targetCp = configuredRate / typicalRate;
-        const currentCp = state.centralAmountNormalized / vcScale;
-        const establishmentRate = Math.LN2 / Math.max(0.25, drug.onsetMinutes);
-        // Catalog CRI rates define a clinically normalized target. The transient
-        // term represents the distribution/loading component needed while tissue
-        // compartments fill; the maintenance term replaces eliminated drug.
-        const inputRate = targetCp * k10 * vcScale
-          + Math.max(0, targetCp - currentCp) * establishmentRate * vcScale;
+        // A prescribed pump delivers fixed mass/time, independent of patient Cp
+        // and clearance. Dual-mode products share the bolus mass normalization.
+        // Rate-only products use a fixed healthy-reference steady-state scale.
+        const referenceK10 = Math.max(0.0005, beta * k10Factor * speciesClearance);
+        const referenceAmount = isTimeBasedDoseUnit(drug.doseUnit)
+          ? typicalRate / (referenceK10 * vcScale)
+          : typicalBolusDosePerKg * concentrationUnitScale(drug.doseUnit);
+        const inputRate = configuredRate / Math.max(0.000001, referenceAmount);
         inputThisStep += inputRate * hMin;
         state.cumulativeDeliveredNormalized += inputRate * hMin;
       }
@@ -164,11 +188,13 @@ export class PharmacokineticModel {
       const central = Math.max(0, state.centralAmountNormalized + inputThisStep);
       const rapid = Math.max(0, state.rapidPeripheralAmountNormalized);
       const deep = Math.max(0, state.deepPeripheralAmountNormalized);
-      const toRapid = k12 * central * hMin;
-      const fromRapid = k21 * rapid * hMin;
-      const toDeep = k13 * central * hMin;
-      const fromDeep = k31 * deep * hMin;
-      const eliminated = k10 * central * hMin;
+      const totalOutRate = k12 + k13 + effectiveK10;
+      const outflow = central * (1 - Math.exp(-totalOutRate * hMin));
+      const toRapid = outflow * k12 / totalOutRate;
+      const toDeep = outflow * k13 / totalOutRate;
+      const eliminated = outflow * effectiveK10 / totalOutRate;
+      const fromRapid = rapid * (1 - Math.exp(-k21 * hMin));
+      const fromDeep = deep * (1 - Math.exp(-k31 * hMin));
 
       state.centralAmountNormalized = Math.max(0, central - toRapid - toDeep - eliminated + fromRapid + fromDeep);
       state.rapidPeripheralAmountNormalized = Math.max(0, rapid + toRapid - fromRapid);
@@ -176,7 +202,7 @@ export class PharmacokineticModel {
       state.cumulativeEliminatedNormalized += Math.max(0, eliminated);
 
       const plasma = state.centralAmountNormalized / vcScale;
-      effectSite = Math.max(0, effectSite + drug.ke0 * (plasma - effectSite) * hMin);
+      effectSite = Math.max(0, effectSite + (plasma - effectSite) * (1 - Math.exp(-drug.ke0 * hMin)));
     }
 
     if (isExtravascularRoute(dose.route)) {

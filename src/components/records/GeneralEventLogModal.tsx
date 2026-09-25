@@ -232,7 +232,7 @@ export const GeneralEventLogModal: React.FC<GeneralEventLogModalProps> = ({
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-3 border-t border-[#1c1c26] bg-[#121218] text-xs text-[#717182]">
-          <span>Open VetSim Audit Trail · Log Geral Contínuo</span>
+          <span>SimPet Audit Trail · Log Geral Contínuo</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold transition shadow-md"

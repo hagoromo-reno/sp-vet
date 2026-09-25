@@ -1,6 +1,7 @@
 import React from 'react';
 import { PatientProfile, VitalSigns } from '../../types/simulator';
 import { formatSpecies } from '../../utils/formatters';
+import { SystemRelationshipsPanel } from './SystemRelationshipsPanel';
 import {
   Activity,
   Dna,
@@ -110,6 +111,7 @@ export const CellularPhysiologyModal: React.FC<CellularPhysiologyModalProps> = (
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-6 text-xs text-[#d0d0dc]">
+          <SystemRelationshipsPanel patient={patient} vitals={vitals} />
           {/* Top Grid: Cellular Telemetry & Second Messengers */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {/* cAMP Myocardial */}

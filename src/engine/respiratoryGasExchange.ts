@@ -1,5 +1,6 @@
 import {
   AnesthesiaEquipmentState,
+  BiologicalState,
   CapnogramType,
   PatientProfile,
   RespiratoryPattern,
@@ -7,10 +8,12 @@ import {
 import { SPECIES_DATABASE } from '../data/speciesData';
 import { ReceptorStateSnapshot } from './cellularReceptors';
 import { SPECIES_CELLULAR_CONFIGS } from './speciesPhysiology';
+import { getLactateClearanceMultiplier, getOxygenDeliveryDeficit } from './oxygenTransport';
 import {
   NEUTRAL_PHYSIOLOGICAL_MODIFIERS,
   type PhysiologicalModifiers,
 } from './systemCoupling';
+import { BiologicalVariationsEngine } from './biologicalVariations';
 
 export interface RespiratoryOutputs {
   respiratoryRate: number; // bpm
@@ -69,7 +72,9 @@ export class RespiratoryGasExchangeEngine {
     integratedCentralDrive: number = 1,
     integratedNeuromuscularCapacity: number = 1,
     alveolarRecruitment: number = 1,
-    coupling: PhysiologicalModifiers = NEUTRAL_PHYSIOLOGICAL_MODIFIERS
+    coupling: PhysiologicalModifiers = NEUTRAL_PHYSIOLOGICAL_MODIFIERS,
+    organPerfusion?: BiologicalState['organPerfusion'],
+    fluidBaseDeficitMmolL: number = 0
   ): RespiratoryOutputs {
     const speciesInfo = SPECIES_DATABASE[patient.species] || SPECIES_DATABASE.canine;
     const speciesConfig = SPECIES_CELLULAR_CONFIGS[patient.species] || SPECIES_CELLULAR_CONFIGS.canine;
@@ -102,20 +107,20 @@ export class RespiratoryGasExchangeEngine {
       isRespiratoryArrest = true;
       arrestCause = 'Ausência de ventilação espontânea por Bloqueio Neuromuscular Periférico (suporte ventilatório obrigatório)';
     }
-    // B. Post-Induction Apnea (Propofol / Alfaxalone / Thiopental Bolus or BZD synergy)
+    // B. Post-Induction Apnea (Rate-dependent Bolus Surge, Severe Overdose or High-Dose Synergy)
     else if (
-      receptors.acuteBolusRespiratoryDepression > 0.72 ||
-      coupledCentralDrive < 0.12 ||
-      receptors.hypnoticEffect > 0.94 ||
-      receptors.respiratoryDepression > 0.90 ||
-      (receptors.propofolSiteOccupancy > 0.78 && receptors.bzdAllostericOccupancy > 0.25)
+      receptors.acuteBolusRespiratoryDepression > 0.40 ||
+      coupledCentralDrive < 0.08 ||
+      receptors.hypnoticEffect > 0.95 ||
+      receptors.respiratoryDepression > 0.92 ||
+      (receptors.propofolSiteOccupancy > 0.72 && receptors.bzdAllostericOccupancy > 0.28)
     ) {
       spontaneousRR = 0;
       spontaneousVT = 0;
       isRespiratoryArrest = true;
       arrestCause = receptors.hypnoticEffect > 0.96
         ? 'Parada Respiratória por Depressão Bulbar Profunda (Plano Anestésico Excessivo / Estágio IV)'
-        : 'Apneia Pós-Indução por Bólus de Agente Indutor (Propofol/GABA-A)';
+        : 'Apneia Pós-Indução por Bólus Rápido de Agente Indutor (Propofol/GABA-A)';
     }
     // C. Opioid-Induced Central Apnea
     else if (receptors.muOpioidDrive > 0.88 && receptors.respiratoryDepression > 0.82) {
@@ -124,28 +129,35 @@ export class RespiratoryGasExchangeEngine {
       isRespiratoryArrest = true;
       arrestCause = 'Apneia Central por Sinergismo Depressor Bulbar (Opioide Mu-Puro + Anestésico Geral)';
     }
-    // D. Graded Bradypnea / Hypoventilation in Surgical Planes
+    // D. Graded Bradypnea / Hypoventilation in Surgical Planes (Continuous Physiological Curve)
     else {
-      // GABA-A depression
-      const gabaSuppression = receptors.hypnoticEffect * 0.55;
-      const opioidSuppression = Math.max(0, receptors.muOpioidDrive) * 0.22;
+      // Continuous concentration-dependent depression: titrated doses induce smooth bradypnea without apnea
+      const gabaSuppression = receptors.hypnoticEffect * 0.48;
+      const opioidSuppression = Math.max(0, receptors.muOpioidDrive) * 0.26;
+      const bzdSuppression = receptors.bzdAllostericOccupancy * 0.14;
       const netDepression = Math.max(
-        receptors.respiratoryDepression,
-        gabaSuppression + opioidSuppression,
+        receptors.respiratoryDepression * 0.70,
+        gabaSuppression + opioidSuppression + bzdSuppression,
         1 - coupledCentralDrive
       );
 
-      // Graded depression preserves a compensatory ventilatory floor. True apnea
-      // is handled by the explicit thresholds above rather than emerging from
-      // multiplying moderate RR and VT reductions into near-zero ventilation.
-      spontaneousRR = Math.max(0, baselineRR * (1.0 - Math.min(0.80, netDepression * 0.78)));
-      spontaneousVT = Math.max(0, baselineVT * (1.0 - Math.min(0.50, netDepression * 0.45)));
+      // Graded depression: spontaneous RR drops smoothly to bradypnea (~8-12 rpm), VT drops (~20-30%)
+      spontaneousRR = Math.max(0, baselineRR * (1.0 - Math.min(0.65, netDepression * 0.68)));
+      spontaneousVT = Math.max(0, baselineVT * (1.0 - Math.min(0.42, netDepression * 0.40)));
 
       // Hypercapnic chemoreflex, attenuated by opioids and deep hypnosis.
       const co2Stimulus = Math.max(0, Math.min(1.2, (previousPaCO2 - 42) / 35));
       const chemoreflexGain = Math.max(0.08, 1 - Math.max(0, receptors.muOpioidDrive) * 0.65 - receptors.hypnoticEffect * 0.55);
       spontaneousRR *= 1 + co2Stimulus * chemoreflexGain * 0.55;
       spontaneousVT *= 1 + co2Stimulus * chemoreflexGain * 0.22;
+
+      // Peripheral arterial chemoreflex: compensatory hyperventilation responding to metabolic / lactic acidosis
+      const metabolicAcidosisStimulus = Math.max(0, Math.min(1.2, (previousLactate - 2.5) / 4.0));
+      if (metabolicAcidosisStimulus > 0) {
+        const peripheralDriveGain = Math.max(0.12, 1 - receptors.hypnoticEffect * 0.50 - Math.max(0, receptors.muOpioidDrive) * 0.40);
+        spontaneousRR *= 1 + metabolicAcidosisStimulus * peripheralDriveGain * 0.28;
+        spontaneousVT *= 1 + metabolicAcidosisStimulus * peripheralDriveGain * 0.18;
+      }
 
       // Nociceptive afferent tachypnea scaled strictly by dynamic neurohumoral stress
       if (nociceptiveStressLevel > 0.02) {
@@ -227,96 +239,161 @@ export class RespiratoryGasExchangeEngine {
     }
 
     const minuteVolumeL = Number(((finalRR * finalVT) / 1000.0).toFixed(2));
-    const deadSpaceMl = patient.weightKg * speciesConfig.anatomicDeadSpaceMlKg;
-    const alveolarVentilationLMin = Math.max(0, ((finalVT - deadSpaceMl) * finalRR) / 1000.0);
+    // Intubation bypasses nasal and pharyngeal anatomical dead space (~30%), but adds
+    // apparatus mechanical dead space (ET connector, adapter, capnograph sensor, Y-piece).
+    const anatomicDeadSpaceMl = patient.weightKg * speciesConfig.anatomicDeadSpaceMlKg * (hasSealedAirway ? 0.70 : 1.0);
+    const mechanicalDeadSpaceMl = hasSealedAirway ? Math.min(30, Math.max(3.5, patient.weightKg * 1.1)) : 0;
+    const totalDeadSpaceMl = anatomicDeadSpaceMl + mechanicalDeadSpaceMl;
+    const alveolarVentilationLMin = Math.max(0, ((finalVT - totalDeadSpaceMl) * finalRR) / 1000.0);
+
+    // Endotracheal tube cuff seal integrity:
+    // Optimal veterinary cuff inflation pressure: 18 - 25 cmH2O.
+    // Below 12 cmH2O, an inspiratory/expiratory air leak occurs.
+    const cuffLeakFraction = (hasSealedAirway && equipment.cuffPressureCmH2O < 12 && equipment.cuffPressureCmH2O >= 0)
+      ? Math.min(0.45, Math.max(0, (12 - equipment.cuffPressureCmH2O) / 12) * 0.45)
+      : 0;
 
     // ----------------------------------------------------
-    // 3. CAPNOGRAPHY (EtCO2 & FiCO2)
+    // 3. CAPNOGRAPHY (EtCO2 & FiCO2) & CIRCUIT GAS DYNAMICS
     // ----------------------------------------------------
-    let sodaLimeExhaustionPct = equipment.sodaLimeExhaustionPct;
-    if (equipment.circuitType.includes('circle') && equipment.oxygenFlowLMin > 0.1) {
+    const isBainOrTPiece = equipment.circuitType === 'bain_non_rebreathing' || equipment.circuitType === 't_piece_non_rebreathing';
+    const isCircle = Boolean(equipment.circuitType && equipment.circuitType.includes('circle'));
+    const o2Flow = Math.max(0, equipment.oxygenFlowLMin || 0);
+
+    // A. Circle System & Soda Lime Kinetics:
+    let sodaLimeExhaustionPct = equipment.sodaLimeExhaustionPct || 0;
+    if (isCircle && o2Flow > 0.05) {
       sodaLimeExhaustionPct = Math.min(100, sodaLimeExhaustionPct + (dtSeconds / 3600) * 8.0);
     }
 
-    let fico2 = 0;
-    if (sodaLimeExhaustionPct > 55 && equipment.circuitType.includes('circle')) {
-      fico2 = Math.round(((sodaLimeExhaustionPct - 55) / 45) * 16);
+    let circleFiCO2 = 0;
+    if (sodaLimeExhaustionPct > 50 && isCircle) {
+      // High fresh gas flow (>= 2.5 L/min) flushes CO2 out through the APL valve, preventing rebreathing!
+      const highFlowWashoutFactor = Math.min(1.0, o2Flow / 2.5);
+      const unabsorbedFraction = ((sodaLimeExhaustionPct - 50) / 50) * (1.0 - highFlowWashoutFactor);
+      circleFiCO2 = Math.round(unabsorbedFraction * 18);
     }
+
+    // B. Bain / Mapleson D Non-Rebreathing System:
+    // Bain circuits require high fresh gas flow (FGF >= 2.0 to 2.5 x Minute Volume, or 150-250 mL/kg/min)
+    // to flush alveolar gas away from the inspiratory limb before the next breath.
+    let bainFiCO2 = 0;
+    let bainRebreathingDeficit = 0;
+    if (isBainOrTPiece && hasSealedAirway) {
+      const requiredBainFGF = Math.max(0.8, patient.weightKg * 0.18);
+      if (o2Flow < requiredBainFGF) {
+        bainRebreathingDeficit = Math.min(0.85, (requiredBainFGF - o2Flow) / requiredBainFGF);
+        bainFiCO2 = Math.round(bainRebreathingDeficit * 24);
+      }
+    }
+
+    const fico2 = Math.max(circleFiCO2, bainFiCO2);
 
     let capnogramType: CapnogramType = 'normal';
     let etco2 = 0;
     let paCO2Estimate = previousPaCO2 || patient.baselineVitals.etco2 + 4.5;
 
-    // Capnography strictly requires an active tracheal tube or laryngeal mask.
-    // In an unintubated animal or esophageal intubation, the machine sensor is open to room air (EtCO2 = 0, flatline).
     const isAirwaySampled = equipment.intubationStatus === 'intubated_tracheal' || equipment.intubationStatus === 'laryngeal_mask';
 
     // Alveolar metabolic production VCO2 and alveolar ventilation ratio
-    const baselineAlveolarV = ((baselineVT - deadSpaceMl) * baselineRR) / 1000.0;
-    const ventilationRatio = alveolarVentilationLMin / Math.max(0.1, baselineAlveolarV);
+    const baselineAlveolarV = Math.max(0.05, ((baselineVT - totalDeadSpaceMl) * baselineRR) / 1000.0);
+    const ventilationRatio = alveolarVentilationLMin / baselineAlveolarV;
+    const baselinePaCO2 = (patient.baselineVitals.etco2 + 4.5) * coupling.metabolicCo2Multiplier;
 
-    let targetSteadyEtCO2 = patient.baselineVitals.etco2 * coupling.metabolicCo2Multiplier;
-    if (finalRR === 0) {
-      targetSteadyEtCO2 = 0;
-    } else if (ventilationRatio < 0.80) {
-      capnogramType = 'hypoventilation';
-      const severity = Math.min(1.0, (0.80 - ventilationRatio) / 0.45);
-      const maxHypoventEt = patient.baselineVitals.etco2 / Math.max(0.35, ventilationRatio);
-      const metabolicBaselineEtCO2 = patient.baselineVitals.etco2 * coupling.metabolicCo2Multiplier;
-      targetSteadyEtCO2 = metabolicBaselineEtCO2 + (maxHypoventEt - metabolicBaselineEtCO2) * severity;
-    } else if (ventilationRatio > 1.25) {
-      capnogramType = 'hyperventilation';
-      const severity = Math.min(1.0, (ventilationRatio - 1.25) / 0.75);
-      const minHyperventEt = patient.baselineVitals.etco2 / Math.min(2.5, ventilationRatio);
-      const metabolicBaselineEtCO2 = patient.baselineVitals.etco2 * coupling.metabolicCo2Multiplier;
-      targetSteadyEtCO2 = metabolicBaselineEtCO2 - (metabolicBaselineEtCO2 - minHyperventEt) * severity;
-    } else {
-      capnogramType = 'normal';
-    }
-
-    if (fico2 > 0) {
-      targetSteadyEtCO2 += fico2;
-      capnogramType = 'rebreathing_elevated_baseline';
-    }
-
-    // In non-intubated patients (spontaneous breathing with nasal cannula / mask sidestream line),
-    // slight room air entrainment slightly dilutes the measured steady peak (~95% of alveolar plateau)
-    if (!isAirwaySampled && finalRR > 0) {
-      targetSteadyEtCO2 *= 0.95;
-    }
-
-    const targetPaCO2 = targetSteadyEtCO2 + 4.5;
-    const co2Equilibration = 1 - Math.exp(-dtSeconds / 14);
-    paCO2Estimate += (targetPaCO2 - paCO2Estimate) * co2Equilibration;
-
-    if (isEsophageal || finalRR === 0) {
+    if (finalRR === 0 || isEsophageal) {
+      // Complete apnea or esophageal misplacement:
+      // CO2 cannot be eliminated via the lungs; metabolic VCO2 accumulates in arterial blood and tissues.
+      // Accumulation rate: ~0.095 mmHg/s (~5.7 mmHg/min of apnea).
+      paCO2Estimate = Math.min(130, paCO2Estimate + dtSeconds * 0.095 * coupling.metabolicCo2Multiplier);
       etco2 = 0;
       capnogramType = 'cardiac_arrest_flat';
     } else {
-      // Smooth physiological wash-in/wash-out due to Functional Residual Capacity (FRC)
-      // CO2 changes take time (~14 seconds time constant) to wash out or accumulate in lung volume
-      const etco2Tau = 14.0; // seconds
-      const washFraction = 1 - Math.exp(-dtSeconds / etco2Tau);
-      const prevEt = (previousEtCO2 !== undefined && previousEtCO2 > 0) ? previousEtCO2 : (targetSteadyEtCO2 * 0.96);
-      let rawEtco2 = prevEt + (targetSteadyEtCO2 - prevEt) * washFraction;
+      // Active Ventilation (Spontaneous or Mechanical):
+      // Target steady-state PaCO2 is inversely proportional to alveolar ventilation ratio
+      const clampedVentRatio = Math.max(0.25, Math.min(3.2, ventilationRatio));
+      const targetPaCO2 = (baselinePaCO2 / clampedVentRatio) + fico2;
 
-      // Low pulmonary blood flow lowers measured EtCO2 despite systemic CO2 retention.
-      if (cardiacOutputRatio < 0.55) {
-        rawEtco2 = rawEtco2 * Math.max(0.35, cardiacOutputRatio / 0.55);
+      // Physiological body CO2 wash-in / wash-out time constant:
+      // Hypercapnic or hypocapnic clearance through the venous pool takes 40s
+      const washTauSeconds = 40.0;
+      const co2Equilibration = 1 - Math.exp(-dtSeconds / washTauSeconds);
+      paCO2Estimate += (targetPaCO2 - paCO2Estimate) * co2Equilibration;
+
+      // Arterial-to-End-Tidal CO2 gradient: P(a-ET)CO2
+      // Baseline anatomical shunt and dead space creates ~3.5 mmHg gradient.
+      // Impaired pulmonary blood flow (low cardiac output) increases alveolar dead space,
+      // widening the gradient and lowering measured EtCO2.
+      let arterialAlveolarGradient = 3.5;
+      if (cardiacOutputRatio < 0.65) {
+        arterialAlveolarGradient += (0.65 - cardiacOutputRatio) * 16.0;
+      }
+      if (pulmonaryShuntFractionPct > 10) {
+        arterialAlveolarGradient += (pulmonaryShuntFractionPct - 10) * 0.15;
       }
 
-      etco2 = Number(rawEtco2.toFixed(1));
-    }
+      // End-tidal alveolar CO2 derived directly from PaCO2 minus physiological gradient
+      let targetEtCO2 = Math.max(0, paCO2Estimate - arterialAlveolarGradient);
 
-    if (finalRR === 0 || isEsophageal) {
-      paCO2Estimate = Math.min(140, paCO2Estimate + dtSeconds * 0.65);
+      // In non-intubated patients (spontaneous breathing with nasal cannula / mask sidestream line),
+      // slight room air entrainment slightly dilutes the measured peak (~95% of alveolar plateau)
+      if (!isAirwaySampled) {
+        targetEtCO2 *= 0.95;
+      } else if (cuffLeakFraction > 0) {
+        targetEtCO2 *= (1.0 - cuffLeakFraction * 0.35);
+      }
+
+      if (fico2 > 0) {
+        targetEtCO2 += fico2;
+      }
+
+      // Breath-by-breath FRC wash-in/wash-out smoothing (tau ~ 6s)
+      const etco2Tau = 6.0;
+      const washFraction = 1 - Math.exp(-dtSeconds / etco2Tau);
+      const prevEt = (previousEtCO2 !== undefined && previousEtCO2 > 0) ? previousEtCO2 : targetEtCO2;
+      let rawEtco2 = prevEt + (targetEtCO2 - prevEt) * washFraction;
+
+      etco2 = Number(rawEtco2.toFixed(1));
+
+      // Classify Capnogram waveform pattern
+      if (fico2 > 2) {
+        capnogramType = 'rebreathing_elevated_baseline';
+      } else if (etco2 > 46 || paCO2Estimate > 50) {
+        capnogramType = 'hypoventilation';
+      } else if (etco2 < 30 && finalRR > baselineRR * 1.25) {
+        capnogramType = 'hyperventilation';
+      } else if (receptors.nmOccupancy > 0.35 && receptors.nmOccupancy < 0.62) {
+        capnogramType = 'curare_cleft';
+      } else {
+        capnogramType = 'normal';
+      }
     }
 
     // ----------------------------------------------------
     // 4. ARTERIAL OXYGENATION & SHUNT (PaO2 & SpO2)
     // ----------------------------------------------------
-    // Inspired oxygen concentration
-    const fio2 = hasSealedAirway && equipment.oxygenFlowLMin > 0.2 ? 0.98 : 0.21;
+    // Inspired oxygen concentration (FiO2) dynamically computed from fresh gas flow,
+    // circuit type, rebreathing dilution, and airway seal:
+    let fio2 = 0.21;
+    if (equipment.isOxygenFlushActive) {
+      fio2 = 0.99;
+    } else if (hasSealedAirway) {
+      if (o2Flow > 0.05) {
+        let circuitFiO2 = 0.98;
+        if (bainRebreathingDeficit > 0) {
+          circuitFiO2 = 0.98 * (1.0 - bainRebreathingDeficit * 0.30);
+        }
+        if (cuffLeakFraction > 0) {
+          circuitFiO2 = circuitFiO2 * (1.0 - cuffLeakFraction) + 0.21 * cuffLeakFraction;
+        }
+        fio2 = Math.max(0.21, Math.min(0.99, circuitFiO2));
+      } else {
+        // Zero oxygen flow in closed circuit: progressive hypoxic depletion
+        fio2 = Math.max(0.12, 0.21 - (previousHypoxiaSeconds > 10 ? 0.08 : 0.02));
+      }
+    } else {
+      // Extubated / Unintubated patient breathes ambient room air (21% O2)
+      fio2 = 0.21;
+    }
     
     // Alveolar Gas Equation: PAO2 = FiO2 * (P_atm - 47) - (PaCO2 / 0.8)
     const pAO2 = Math.max(10, fio2 * 713 - (paCO2Estimate / 0.8));
@@ -333,7 +410,7 @@ export class RespiratoryGasExchangeEngine {
     targetPaO2 = Math.max(15, Math.min(480, targetPaO2));
 
     // Severe airway disruption (esophageal intubation or total apnea)
-    let isAdequatelyVentilating = finalRR > 0 && finalVT > deadSpaceMl && !isEsophageal;
+    let isAdequatelyVentilating = finalRR > 0 && finalVT > totalDeadSpaceMl && !isEsophageal;
     let currentPaO2 = previousPaO2;
     let currentSpO2 = previousSpO2;
 
@@ -352,13 +429,15 @@ export class RespiratoryGasExchangeEngine {
       } else {
         currentPaO2 = Math.max(targetPaO2, currentPaO2 - dtSeconds * 6.0);
       }
-
     }
 
-    // Keep PaO2 and SpO2 physiologically coherent in both ventilation and apnea.
-    const p50 = 28.0;
+    // Keep PaO2 and SpO2 physiologically coherent in both ventilation and apnea
+    // with physiological Bohr shift (pH and PaCO2 effect on hemoglobin P50).
+    const baseP50 = 28.0;
+    const bohrShift = (7.40 - (previousLactate > 2.5 ? 7.32 : 7.40)) * 10.0 + Math.max(0, paCO2Estimate - 40) * 0.12;
+    const effectiveP50 = Math.max(22.0, Math.min(36.0, baseP50 + bohrShift));
     const hillN = 2.7;
-    const calculatedSpO2 = 100 * (Math.pow(currentPaO2, hillN) / (Math.pow(p50, hillN) + Math.pow(currentPaO2, hillN)));
+    const calculatedSpO2 = 100 * (Math.pow(currentPaO2, hillN) / (Math.pow(effectiveP50, hillN) + Math.pow(currentPaO2, hillN)));
     currentSpO2 = Math.min(100, Math.max(0, calculatedSpO2));
 
     // Hypoxia accumulation tracker
@@ -375,22 +454,40 @@ export class RespiratoryGasExchangeEngine {
     // ----------------------------------------------------
     // 5. ACID-BASE BALANCE (HENDERSON-HASSELBALCH & LACTATE)
     // ----------------------------------------------------
+    const variations = BiologicalVariationsEngine.compute(
+      simTimeSeconds,
+      patient,
+      receptors.hypnoticEffect,
+      isRespiratoryArrest
+    );
+
     let lactate = previousLactate + coupling.additionalLactateMmolLMin * dtSeconds / 60;
-    const perfusionDeficit = Math.max(0, (60 - meanArterialPressure) / 40) + Math.max(0, 0.7 - cardiacOutputRatio);
-    if (currentSpO2 < 75 || hypoxiaSecondsAccumulated > 20 || perfusionDeficit > 0.25) {
+    // Perfusion threshold is species-aware: MAP < 60 mmHg (dogs/cats) or < 70 mmHg (equines)
+    // causes subclinical tissue dysoxia and progressive microvascular lactate accumulation
+    const criticalMapThreshold = patient.species === 'equine' ? 68 : 58;
+    const perfusionDeficit = Math.max(0, (criticalMapThreshold - meanArterialPressure) / 30) + Math.max(0, 0.55 - cardiacOutputRatio);
+    const oxygenContent = 1.34 * (persistentHematocritPct ?? patient.baselineVitals.hctPct) / 3 * currentSpO2 / 100 + 0.003 * currentPaO2;
+    const delivery = oxygenContent * speciesConfig.cardiacOutputMlKgMin * cardiacOutputRatio / 100;
+    const deliveryDeficit = getOxygenDeliveryDeficit(patient.species, delivery, coupling.cellularOxygenUtilizationFraction);
+    if (currentSpO2 < 75 || hypoxiaSecondsAccumulated > 20 || perfusionDeficit > 0.20 || deliveryDeficit > 0.05) {
       // Anaerobic glycolysis lactic acid accumulation
-      lactate = Math.min(18.0, lactate + (dtSeconds / 60.0) * (2.2 + perfusionDeficit * 1.4));
+      const hypoxicRate = currentSpO2 < 75 || hypoxiaSecondsAccumulated > 20 || perfusionDeficit > 0.20 ? 1.25 : 0;
+      lactate = Math.min(18.0, lactate + (dtSeconds / 60.0) * (hypoxicRate + perfusionDeficit * 1.6 + deliveryDeficit * 1.2));
     } else if (lactate > patient.baselineVitals.lactateMmolL) {
-      // Hepatic clearance of lactate
-      const clearanceMultiplier = speciesConfig.glucuronidationClearanceMultiplier;
+      // Lactate metabolism follows hepatic/renal perfusion, not feline UGT activity.
+      const clearanceMultiplier = getLactateClearanceMultiplier(
+        organPerfusion?.hepaticFraction ?? Math.min(1, cardiacOutputRatio),
+        organPerfusion?.renalFraction ?? Math.min(1, cardiacOutputRatio)
+      );
       lactate = Math.max(patient.baselineVitals.lactateMmolL, lactate - (dtSeconds / 60.0) * 0.45 * clearanceMultiplier);
     }
 
-    const lactateBaseDeficit = Math.max(0, lactate - patient.baselineVitals.lactateMmolL) * 1.15;
+    const lactateBaseDeficit = Math.max(0, lactate - patient.baselineVitals.lactateMmolL) * 1.25
+      + (deliveryDeficit > 0.05 ? deliveryDeficit * 0.8 : 0);
     // A normalized bicarbonate effect represents a clinically relevant buffer dose,
     // not a concentration fraction. Keep the effect large enough to remain visible
     // while the drug redistributes, but cap it to avoid non-physiologic alkalosis.
-    const bicarb = Math.max(8, Math.min(32, 24.0 - lactateBaseDeficit + receptors.alkalinization * 12));
+    const bicarb = Math.max(8, Math.min(32, 24.0 - lactateBaseDeficit - fluidBaseDeficitMmolL + receptors.alkalinization * 12));
     const paCO2Final = paCO2Estimate;
     // Henderson-Hasselbalch couples respiratory CO2 and metabolic bicarbonate.
     const finalPH = Math.max(6.70, Math.min(
@@ -415,13 +512,23 @@ export class RespiratoryGasExchangeEngine {
       (persistentHematocritPct ?? patient.baselineVitals.hctPct) + receptors.oxygenCarryingSupport * 10
         - Math.max(0, receptors.volumeExpansion - receptors.oxygenCarryingSupport * 0.65) * 5
     );
+
+    // Physiological potassium dynamics:
+    // 1. Classical transcellular H+/K+ shift: acidosis shifts K+ out of cells (~0.35 mEq/L per 0.1 pH unit)
+    // 2. Beta-2 stimulation activates Na+/K+ ATPase, driving K+ intracellularly
+    // 3. Severe tissue hypoxia / ATP depletion causes cytotoxic K+ release
+    const phPotassiumShift = (7.38 - finalPH) * 0.35;
+    const beta2PotassiumShift = -Math.max(0, receptors.beta2Drive) * 0.20;
+    const ischemicKRelease = Math.min(1.2, (hypoxiaSecondsAccumulated / 45) * 0.30);
+
     const potassium = Math.max(
       2,
       patient.baselineVitals.potassiumMeqL + receptors.potassiumLoad * 1.2
         - receptors.alkalinization * 0.65
-        // Acidemia shifts K extracellularly, although this is smaller and slower
-        // than the direct modeled alkalinizing treatment effect.
-        + Math.max(0, 7.35 - finalPH) * 0.2
+        + phPotassiumShift
+        + beta2PotassiumShift
+        + ischemicKRelease
+        + (isRespiratoryArrest ? 0 : variations.potassiumVariationMeqL)
     );
 
     const hasAssistedVentilation = hasSealedAirway && (
@@ -430,17 +537,28 @@ export class RespiratoryGasExchangeEngine {
       || hasManualCadence
     );
 
+    // Apply continuous biological variations when spontaneously ventilating
+    const reportedRR = (finalRR > 0 && !hasAssistedVentilation)
+      ? Math.max(1, finalRR + variations.rrVariationRpm)
+      : finalRR;
+    const reportedVT = (finalVT > 0 && !hasAssistedVentilation)
+      ? Math.max(0.1, finalVT * variations.vtVariationFactor)
+      : finalVT;
+    const reportedEtCO2 = etco2 > 10 ? Math.max(0, etco2 + variations.etco2VariationMmHg) : etco2;
+    const reportedSpO2 = currentSpO2 > 85 ? Math.min(100, Math.max(0, currentSpO2 + variations.spo2VariationPct)) : currentSpO2;
+    const reportedPH = Math.max(6.70, Math.min(7.65, finalPH + (isRespiratoryArrest ? 0 : variations.phVariation)));
+
     return {
-      respiratoryRate: Number(finalRR.toFixed(3)),
-      tidalVolumeMl: Number(finalVT.toFixed(3)),
+      respiratoryRate: Number(reportedRR.toFixed(3)),
+      tidalVolumeMl: Number(reportedVT.toFixed(3)),
       minuteVolumeL,
       respiratoryPattern: pattern,
-      etCO2: etco2,
+      etCO2: Number(reportedEtCO2.toFixed(1)),
       fiCO2: fico2,
       capnogramType,
-      pulseOximetrySpO2: Number(currentSpO2.toFixed(3)),
+      pulseOximetrySpO2: Number(reportedSpO2.toFixed(3)),
       arterialBloodGases: {
-        pH: Number(finalPH.toFixed(2)),
+        pH: Number(reportedPH.toFixed(2)),
         paO2: Number(currentPaO2.toFixed(3)),
         paCO2: Number(paCO2Final.toFixed(3)),
         bicarbonate: Number(bicarb.toFixed(2)),

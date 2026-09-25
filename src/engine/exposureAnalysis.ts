@@ -15,9 +15,23 @@ const PHASE_LABELS: Record<DrugConcentrationPhase, string> = {
 };
 
 export const estimateEffectOffsetMinutes = (concentration: number, drug: DrugDefinition, isInfusionRunning: boolean): number | undefined => {
-  if (isInfusionRunning || concentration <= 0.05) return undefined;
-  const clinicalHalfTime = Math.min(drug.halfLifeBeta, Math.max(0.5, drug.durationMinutes * 0.55));
-  return Math.max(0, clinicalHalfTime * Math.log2(concentration / 0.05));
+  if (isInfusionRunning) return undefined;
+
+  // Cutoff below which clinical effect (hypnosis, deep sedation, surgical analgesia) is terminated
+  const isInductionOrHypnotic = drug.category === 'induction' || drug.category === 'inhalation';
+  const cutoffCe = isInductionOrHypnotic ? 0.20 : 0.15;
+  if (concentration <= cutoffCe) return undefined;
+
+  // A standard therapeutic bolus achieves peak Ce ~0.85-1.0 and lasts ~drug.durationMinutes.
+  // Effective decay constant per half-time from peak to cutoff:
+  const baseDuration = Math.max(1, drug.durationMinutes);
+  const effectiveHalfTime = baseDuration / Math.max(1, Math.log2(1.0 / cutoffCe));
+
+  // Dose-dependent offset: log2(Ce / cutoff) half-times until emergence
+  const halfTimesRemaining = Math.log2(concentration / cutoffCe);
+  const remaining = effectiveHalfTime * halfTimesRemaining;
+
+  return Math.max(0.5, Math.round(remaining * 10) / 10);
 };
 
 export const analyzeDrugExposure = (dose: ActiveDrugDose, drug: DrugDefinition): DrugExposureAnalysis => {

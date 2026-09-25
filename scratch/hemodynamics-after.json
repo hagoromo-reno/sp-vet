@@ -1,0 +1,2942 @@
+[
+  {
+    "species": "canine",
+    "protocol": "control",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 76,
+    "time": 18,
+    "maxHR": 93.1,
+    "HRatMinMAP": 87.8,
+    "Ca": 1,
+    "CO": 2.12,
+    "SVR": 2691,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 90.635,
+        "map": 76.698,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00364337359368544,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.9995905838879822
+        }
+      },
+      {
+        "t": 180,
+        "hr": 90.635,
+        "map": 76.698,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.006065259661126425,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.9983252346837994
+        }
+      },
+      {
+        "t": 300,
+        "hr": 90.635,
+        "map": 76.698,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.006360020208518567,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.9974396462699532
+        }
+      },
+      {
+        "t": 600,
+        "hr": 90.635,
+        "map": 76.698,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.006438661769024899,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.9964499650414322
+        }
+      },
+      {
+        "t": 900,
+        "hr": 90.635,
+        "map": 76.698,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0064398888244147565,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.9961633848133579
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "acepromazine",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 66.6,
+    "time": 798,
+    "maxHR": 96.5,
+    "HRatMinMAP": 91.3,
+    "Ca": 1,
+    "CO": 1.99,
+    "SVR": 2488,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 90.868,
+        "map": 75.813,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.004522475059610069,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0002683932958127825,
+          "renalInjury": 0.00007147461952770068,
+          "compensatoryReserve": 0.9995286760632425
+        }
+      },
+      {
+        "t": 180,
+        "hr": 92.127,
+        "map": 71.415,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.03405429788833277,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0028639323851574502,
+          "renalInjury": 0.000912263812924493,
+          "compensatoryReserve": 0.9938756427600153
+        }
+      },
+      {
+        "t": 300,
+        "hr": 93.314,
+        "map": 69.773,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.05743743905473208,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005608387888676473,
+          "renalInjury": 0.0019146016293734608,
+          "compensatoryReserve": 0.9833314512145395
+        }
+      },
+      {
+        "t": 600,
+        "hr": 93.884,
+        "map": 68.167,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.07556073150657834,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.010906661841761896,
+          "renalInjury": 0.003981186188190773,
+          "compensatoryReserve": 0.9630661047380146
+        }
+      },
+      {
+        "t": 900,
+        "hr": 93.943,
+        "map": 67.792,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.07886476262344187,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.014261424422485519,
+          "renalInjury": 0.005405518330472845,
+          "compensatoryReserve": 0.9541373598402644
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "methadone",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 71.3,
+    "time": 370,
+    "maxHR": 93.1,
+    "HRatMinMAP": 79.6,
+    "Ca": 0.99,
+    "CO": 2,
+    "SVR": 2680,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 88.327,
+        "map": 75.225,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.005066655064687925,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0003383395401455906,
+          "renalInjury": 0.00004284942382295679,
+          "compensatoryReserve": 0.9994954323608221
+        }
+      },
+      {
+        "t": 180,
+        "hr": 83.107,
+        "map": 72.382,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.03283693218470459,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0032790979686399017,
+          "renalInjury": 0.0005081742552294943,
+          "compensatoryReserve": 0.9935232862243163
+        }
+      },
+      {
+        "t": 300,
+        "hr": 82.116,
+        "map": 71.993,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.043755801316900024,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.006303024249808792,
+          "renalInjury": 0.0010444402473737885,
+          "compensatoryReserve": 0.9857485016829836
+        }
+      },
+      {
+        "t": 600,
+        "hr": 82.224,
+        "map": 72.018,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.04610586105873164,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.012027363034709845,
+          "renalInjury": 0.0021190076204392412,
+          "compensatoryReserve": 0.9752140339509153
+        }
+      },
+      {
+        "t": 900,
+        "hr": 83.007,
+        "map": 72.353,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.04459811709010014,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.015417935233988392,
+          "renalInjury": 0.0028040746226522103,
+          "compensatoryReserve": 0.9730454333732456
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "acepromazine+methadone",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 61.9,
+    "time": 734,
+    "maxHR": 93.1,
+    "HRatMinMAP": 83.4,
+    "Ca": 0.99,
+    "CO": 1.85,
+    "SVR": 2486,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 88.547,
+        "map": 74.098,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0058401658092848245,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0005391558635454964,
+          "renalInjury": 0.00011092154409889198,
+          "compensatoryReserve": 0.9994404440188034
+        }
+      },
+      {
+        "t": 180,
+        "hr": 85.202,
+        "map": 67.014,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.06155465046580455,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005084850395782511,
+          "renalInjury": 0.001349545074050837,
+          "compensatoryReserve": 0.9889297940021652
+        }
+      },
+      {
+        "t": 300,
+        "hr": 85.095,
+        "map": 64.373,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.09572876842065084,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.009804296287082511,
+          "renalInjury": 0.0028082813254606204,
+          "compensatoryReserve": 0.9715476809790774
+        }
+      },
+      {
+        "t": 600,
+        "hr": 85.745,
+        "map": 62.587,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.11938086116277931,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.018898702536864282,
+          "renalInjury": 0.005797117364368765,
+          "compensatoryReserve": 0.9401727511723574
+        }
+      },
+      {
+        "t": 900,
+        "hr": 86.596,
+        "map": 62.7,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.12063924366085675,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.024625529061501512,
+          "renalInjury": 0.007825710717048084,
+          "compensatoryReserve": 0.92851966773466
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "midazolam",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 75,
+    "time": 168,
+    "maxHR": 93.1,
+    "HRatMinMAP": 87.6,
+    "Ca": 1,
+    "CO": 2.1,
+    "SVR": 2681,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 90.473,
+        "map": 76.234,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.004221699101074974,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00033718753607780733,
+          "renalInjury": 0.000039430009996104124,
+          "compensatoryReserve": 0.999549119607728
+        }
+      },
+      {
+        "t": 180,
+        "hr": 90.3,
+        "map": 75.441,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.013038887826338025,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.003156655130203746,
+          "renalInjury": 0.000449039310526961,
+          "compensatoryReserve": 0.9969982345334162
+        }
+      },
+      {
+        "t": 300,
+        "hr": 90.31,
+        "map": 75.438,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.015021419025404954,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005919139556640755,
+          "renalInjury": 0.0008900036385823251,
+          "compensatoryReserve": 0.9945149793046757
+        }
+      },
+      {
+        "t": 600,
+        "hr": 90.359,
+        "map": 75.811,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.014467305707092044,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.010768247799312755,
+          "renalInjury": 0.0016995534154184842,
+          "compensatoryReserve": 0.9920315885943689
+        }
+      },
+      {
+        "t": 900,
+        "hr": 90.445,
+        "map": 75.88,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.012954549052199582,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.013006388492228266,
+          "renalInjury": 0.0021043729936897535,
+          "compensatoryReserve": 0.9919870033184157
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "ketamine",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 76,
+    "time": 6,
+    "maxHR": 98.8,
+    "HRatMinMAP": 88.8,
+    "Ca": 1,
+    "CO": 2.13,
+    "SVR": 2691,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 94.594,
+        "map": 94.831,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0008012487174740396,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0003234015528792017,
+          "renalInjury": 0.00005034386467106791,
+          "compensatoryReserve": 0.9999286936499526
+        }
+      },
+      {
+        "t": 180,
+        "hr": 94.556,
+        "map": 116.804,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00048598191320343114,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.003030087314649902,
+          "renalInjury": 0.0005692298600019855,
+          "compensatoryReserve": 0.9999332924114535
+        }
+      },
+      {
+        "t": 300,
+        "hr": 96.612,
+        "map": 109.511,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.000294762930423685,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005671545555630521,
+          "renalInjury": 0.0011250540598691078,
+          "compensatoryReserve": 0.9999375945849599
+        }
+      },
+      {
+        "t": 600,
+        "hr": 95.376,
+        "map": 101.488,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00008445099350295228,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.010265246774353429,
+          "renalInjury": 0.002137607406193733,
+          "compensatoryReserve": 0.999947174956634
+        }
+      },
+      {
+        "t": 900,
+        "hr": 94.196,
+        "map": 94.736,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.000024195614738204617,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0123134939621679,
+          "renalInjury": 0.0026312180862876943,
+          "compensatoryReserve": 0.9999552845661748
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "midazolam+ketamine",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 76,
+    "time": 6,
+    "maxHR": 99.1,
+    "HRatMinMAP": 88.8,
+    "Ca": 1,
+    "CO": 2.13,
+    "SVR": 2691,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 94.562,
+        "map": 94.381,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0008013011873239549,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.000582727064833349,
+          "renalInjury": 0.0000876210245231045,
+          "compensatoryReserve": 0.999928656127427
+        }
+      },
+      {
+        "t": 180,
+        "hr": 94.98,
+        "map": 116.071,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00048601373777611503,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005120604498351444,
+          "renalInjury": 0.0009788808486349198,
+          "compensatoryReserve": 0.9999332573088684
+        }
+      },
+      {
+        "t": 300,
+        "hr": 96.969,
+        "map": 108.767,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00029478223300275,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.009571009065869846,
+          "renalInjury": 0.0019366923747717907,
+          "compensatoryReserve": 0.9999375617462463
+        }
+      },
+      {
+        "t": 600,
+        "hr": 95.508,
+        "map": 100.61,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00008445652378444613,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.01749796994900603,
+          "renalInjury": 0.003694252654529568,
+          "compensatoryReserve": 0.9999471471592635
+        }
+      },
+      {
+        "t": 900,
+        "hr": 94.256,
+        "map": 94.195,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00002419719919038058,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.021319001593505544,
+          "renalInjury": 0.004568980963081628,
+          "compensatoryReserve": 0.9999552610362087
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "dexmedetomidine",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 76,
+    "time": 10,
+    "maxHR": 93,
+    "HRatMinMAP": 88,
+    "Ca": 1,
+    "CO": 2.12,
+    "SVR": 2694,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 82.79,
+        "map": 78.425,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.008487404025589635,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00029087297521476296,
+          "renalInjury": 0.00007776350448997798,
+          "compensatoryReserve": 0.9992870913962724
+        }
+      },
+      {
+        "t": 180,
+        "hr": 69.999,
+        "map": 78.68,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0862181995472163,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0028097425820894856,
+          "renalInjury": 0.0008923730312073477,
+          "compensatoryReserve": 0.9829780263276918
+        }
+      },
+      {
+        "t": 300,
+        "hr": 68.42,
+        "map": 78.602,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.12089728212136826,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005339505821928619,
+          "renalInjury": 0.0018019621896004003,
+          "compensatoryReserve": 0.9614412048793852
+        }
+      },
+      {
+        "t": 600,
+        "hr": 69.962,
+        "map": 78.602,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.12468293956393821,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.009976515146552976,
+          "renalInjury": 0.0035673144934608185,
+          "compensatoryReserve": 0.9331071575922855
+        }
+      },
+      {
+        "t": 900,
+        "hr": 72.637,
+        "map": 79.171,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.11258362116259009,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.012466074198701415,
+          "renalInjury": 0.0046061991126583185,
+          "compensatoryReserve": 0.9309014977090724
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "dexmedetomidine+methadone",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 72.7,
+    "time": 434,
+    "maxHR": 93,
+    "HRatMinMAP": 56.9,
+    "Ca": 0.94,
+    "CO": 1.13,
+    "SVR": 4832,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 80.34,
+        "map": 77.102,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.009085933079430689,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.000558184426713131,
+          "renalInjury": 0.00011703076570809771,
+          "compensatoryReserve": 0.9992453048060032
+        }
+      },
+      {
+        "t": 180,
+        "hr": 62.169,
+        "map": 74.181,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.11232106692312291,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0050581225023292094,
+          "renalInjury": 0.0013322326505459535,
+          "compensatoryReserve": 0.9795968388218297
+        }
+      },
+      {
+        "t": 300,
+        "hr": 59.611,
+        "map": 73.824,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.1591084838640421,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.009636025277667614,
+          "renalInjury": 0.0027060036756893827,
+          "compensatoryReserve": 0.9503307891481563
+        }
+      },
+      {
+        "t": 600,
+        "hr": 61.169,
+        "map": 73.997,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.16533704620557282,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.01829481077356355,
+          "renalInjury": 0.005419214259851788,
+          "compensatoryReserve": 0.9115692050428416
+        }
+      },
+      {
+        "t": 900,
+        "hr": 64.595,
+        "map": 74.521,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.15357326960663478,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.023432242485473015,
+          "renalInjury": 0.0070933065026396475,
+          "compensatoryReserve": 0.9068188999047675
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "propofol",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 62.5,
+    "time": 104,
+    "maxHR": 97.5,
+    "HRatMinMAP": 91.9,
+    "Ca": 1,
+    "CO": 1.94,
+    "SVR": 2385,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 93.123,
+        "map": 66.69,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.017724609021811548,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0002687909306102403,
+          "renalInjury": 0.000042951994031774186,
+          "compensatoryReserve": 0.9985181309776908
+        }
+      },
+      {
+        "t": 180,
+        "hr": 94.916,
+        "map": 64.83,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.09966188850649177,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0023291744206706115,
+          "renalInjury": 0.0004379173247370198,
+          "compensatoryReserve": 0.9780600681744759
+        }
+      },
+      {
+        "t": 300,
+        "hr": 94.282,
+        "map": 67.814,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.09907310056688147,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00421398656688855,
+          "renalInjury": 0.0008268533453407145,
+          "compensatoryReserve": 0.9628158147086822
+        }
+      },
+      {
+        "t": 600,
+        "hr": 92.496,
+        "map": 73.001,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.06954557428452803,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.007100893308114796,
+          "renalInjury": 0.0014498744579076255,
+          "compensatoryReserve": 0.9593387014252984
+        }
+      },
+      {
+        "t": 900,
+        "hr": 91.207,
+        "map": 74.707,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.04093082003482535,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.007929922123352397,
+          "renalInjury": 0.0016619898543764214,
+          "compensatoryReserve": 0.962598509688388
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "acepromazine+methadone+propofol",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 54.5,
+    "time": 210,
+    "maxHR": 93.5,
+    "HRatMinMAP": 87.8,
+    "Ca": 0.99,
+    "CO": 1.77,
+    "SVR": 2283,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 90.889,
+        "map": 63.761,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.019910664139893022,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0007091590192900769,
+          "renalInjury": 0.00014884692793884073,
+          "compensatoryReserve": 0.9983698085132868
+        }
+      },
+      {
+        "t": 180,
+        "hr": 88.082,
+        "map": 54.819,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.1606607855554944,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.006159275492148072,
+          "renalInjury": 0.001700790237434792,
+          "compensatoryReserve": 0.967918283263051
+        }
+      },
+      {
+        "t": 300,
+        "hr": 87.124,
+        "map": 55.04,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.19034003680629102,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0116266964230024,
+          "renalInjury": 0.00344784126401381,
+          "compensatoryReserve": 0.9341264579681089
+        }
+      },
+      {
+        "t": 600,
+        "hr": 86.716,
+        "map": 58.291,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.17963303703867717,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.021925065678926964,
+          "renalInjury": 0.006912016896419022,
+          "compensatoryReserve": 0.9020077680920592
+        }
+      },
+      {
+        "t": 900,
+        "hr": 86.978,
+        "map": 60.4,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.15716466772486049,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.028083125895420773,
+          "renalInjury": 0.00912575626490486,
+          "compensatoryReserve": 0.9019833206391064
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "dexmedetomidine+methadone+propofol",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 61.3,
+    "time": 170,
+    "maxHR": 93,
+    "HRatMinMAP": 65.2,
+    "Ca": 0.95,
+    "CO": 1.05,
+    "SVR": 4355,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 82.626,
+        "map": 66.711,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.019258728260913426,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0007261613034841243,
+          "renalInjury": 0.0001547878467171681,
+          "compensatoryReserve": 0.9984406918039481
+        }
+      },
+      {
+        "t": 180,
+        "hr": 64.609,
+        "map": 61.605,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.20273154222521694,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.006143637220808142,
+          "renalInjury": 0.0016862235726759617,
+          "compensatoryReserve": 0.959113274847124
+        }
+      },
+      {
+        "t": 300,
+        "hr": 61.356,
+        "map": 63.501,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.23597630389148738,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0.00015866745314178143,
+          "hepaticInjury": 0.012085703194828514,
+          "renalInjury": 0.003850520919300216,
+          "compensatoryReserve": 0.9174726812885937
+        }
+      },
+      {
+        "t": 600,
+        "hr": 62.046,
+        "map": 68.627,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.22095490922409883,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0.0006322173633322587,
+          "hepaticInjury": 0.023539627701573588,
+          "renalInjury": 0.008434725570964774,
+          "compensatoryReserve": 0.8793638241869126
+        }
+      },
+      {
+        "t": 900,
+        "hr": 65.091,
+        "map": 72.019,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.18839018680197303,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0.0005359788329130046,
+          "hepaticInjury": 0.028604782938799082,
+          "renalInjury": 0.009910233357985434,
+          "compensatoryReserve": 0.8801908614415663
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "midazolam+propofol",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 60.2,
+    "time": 130,
+    "maxHR": 97.5,
+    "HRatMinMAP": 92.4,
+    "Ca": 1,
+    "CO": 1.87,
+    "SVR": 2381,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 92.995,
+        "map": 65.433,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.018612630339707004,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0005414592954126116,
+          "renalInjury": 0.00008057982741755456,
+          "compensatoryReserve": 0.9984577828630914
+        }
+      },
+      {
+        "t": 180,
+        "hr": 94.97,
+        "map": 61.952,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.11790106544124342,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.004653977131912367,
+          "renalInjury": 0.000857342256903392,
+          "compensatoryReserve": 0.9747087562671665
+        }
+      },
+      {
+        "t": 300,
+        "hr": 94.273,
+        "map": 65.221,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.11949973705827757,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.008594012648866825,
+          "renalInjury": 0.0016586101045914883,
+          "compensatoryReserve": 0.9555718580936183
+        }
+      },
+      {
+        "t": 600,
+        "hr": 92.521,
+        "map": 71.519,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.08684984468405578,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.01535283486329609,
+          "renalInjury": 0.003056627495052739,
+          "compensatoryReserve": 0.9500884252340089
+        }
+      },
+      {
+        "t": 900,
+        "hr": 91.576,
+        "map": 73.886,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.05233354554607738,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.01828507609044724,
+          "renalInjury": 0.0036748247734266462,
+          "compensatoryReserve": 0.953822403071524
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "atropine",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 76,
+    "time": 18,
+    "maxHR": 115.9,
+    "HRatMinMAP": 87.9,
+    "Ca": 1,
+    "CO": 2.12,
+    "SVR": 2691,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 98.092,
+        "map": 82.662,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.001989304330716808,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00016824156765147142,
+          "renalInjury": 0.000043754824833016906,
+          "compensatoryReserve": 0.999786887907689
+        }
+      },
+      {
+        "t": 180,
+        "hr": 112.895,
+        "map": 91.76,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0012065740680788646,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.002559120861572641,
+          "renalInjury": 0.0008052270732517056,
+          "compensatoryReserve": 0.9998006321490481
+        }
+      },
+      {
+        "t": 300,
+        "hr": 113.253,
+        "map": 92.055,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0007318241655040298,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005116746546938621,
+          "renalInjury": 0.0017196317538817286,
+          "compensatoryReserve": 0.9998134899828435
+        }
+      },
+      {
+        "t": 600,
+        "hr": 109.539,
+        "map": 91.412,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00020967113387511025,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00980015976521003,
+          "renalInjury": 0.003494335352676398,
+          "compensatoryReserve": 0.9998421226789679
+        }
+      },
+      {
+        "t": 900,
+        "hr": 106.206,
+        "map": 89.763,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00006007178561833423,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.012281178298361341,
+          "renalInjury": 0.004524348995186768,
+          "compensatoryReserve": 0.9998663597329714
+        }
+      }
+    ]
+  },
+  {
+    "species": "canine",
+    "protocol": "atropine+ketamine",
+    "baseHR": 90,
+    "baseMAP": 78,
+    "minMAP": 76,
+    "time": 6,
+    "maxHR": 116.8,
+    "HRatMinMAP": 88.8,
+    "Ca": 1,
+    "CO": 2.13,
+    "SVR": 2691,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 100.876,
+        "map": 101.269,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0007998820293677788,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0004459342008571851,
+          "renalInjury": 0.00009134122241659032,
+          "compensatoryReserve": 0.9999292366774281
+        }
+      },
+      {
+        "t": 180,
+        "hr": 114.656,
+        "map": 134.575,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00048515297496471907,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.004685542590573961,
+          "renalInjury": 0.0013025054291808547,
+          "compensatoryReserve": 0.99993380041745
+        }
+      },
+      {
+        "t": 300,
+        "hr": 114.404,
+        "map": 123.597,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0002942601539668978,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.008998626459409355,
+          "renalInjury": 0.0026931927080794133,
+          "compensatoryReserve": 0.9999380698281181
+        }
+      },
+      {
+        "t": 600,
+        "hr": 110.84,
+        "map": 115.629,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00008430694563633443,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.016833523382629268,
+          "renalInjury": 0.0053482848084963255,
+          "compensatoryReserve": 0.9999475772412825
+        }
+      },
+      {
+        "t": 900,
+        "hr": 107.368,
+        "map": 108.193,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00002415434433344112,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.020878806133106113,
+          "renalInjury": 0.006826459161485916,
+          "compensatoryReserve": 0.9999556250927772
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "control",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 78.1,
+    "time": 2,
+    "maxHR": 145.9,
+    "HRatMinMAP": 145.1,
+    "Ca": 1,
+    "CO": 0.61,
+    "SVR": 9651,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 145.777,
+        "map": 78.795,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00001852761643202231,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.999998760830416
+        }
+      },
+      {
+        "t": 180,
+        "hr": 145.777,
+        "map": 78.795,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.000011237567417417115,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.9999988407481987
+        }
+      },
+      {
+        "t": 300,
+        "hr": 145.777,
+        "map": 78.795,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0000068159291792512015,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.9999989155118426
+        }
+      },
+      {
+        "t": 600,
+        "hr": 145.777,
+        "map": 78.795,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00000195279640491481,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.9999990820005942
+        }
+      },
+      {
+        "t": 900,
+        "hr": 145.777,
+        "map": 78.795,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 5.594855372994278e-7,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0,
+          "renalInjury": 0,
+          "compensatoryReserve": 0.9999992229302794
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "acepromazine",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 68.6,
+    "time": 824,
+    "maxHR": 151.5,
+    "HRatMinMAP": 151.3,
+    "Ca": 1,
+    "CO": 0.58,
+    "SVR": 8875,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 146.209,
+        "map": 77.186,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00001852761643202231,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0002943565461013957,
+          "renalInjury": 0.0000790482732581439,
+          "compensatoryReserve": 0.999998760830416
+        }
+      },
+      {
+        "t": 180,
+        "hr": 148.484,
+        "map": 72.734,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.023510497936373772,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.003114024804567964,
+          "renalInjury": 0.0010054882598438156,
+          "compensatoryReserve": 0.996808433224649
+        }
+      },
+      {
+        "t": 300,
+        "hr": 150.305,
+        "map": 70.495,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.05042896029323366,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.006094722279015109,
+          "renalInjury": 0.0021100736870522294,
+          "compensatoryReserve": 0.987419048700156
+        }
+      },
+      {
+        "t": 600,
+        "hr": 151.15,
+        "map": 69.53,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.06352152045268446,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.011855433262984863,
+          "renalInjury": 0.004389169365143593,
+          "compensatoryReserve": 0.9690017259994055
+        }
+      },
+      {
+        "t": 900,
+        "hr": 151.305,
+        "map": 68.558,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.06953318344235905,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.015516411405143204,
+          "renalInjury": 0.0059631244228660315,
+          "compensatoryReserve": 0.9602031904818613
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "methadone",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 73.7,
+    "time": 376,
+    "maxHR": 145.9,
+    "HRatMinMAP": 134.7,
+    "Ca": 0.99,
+    "CO": 0.58,
+    "SVR": 9611,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 141.605,
+        "map": 77.498,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00002139495097094463,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.000370219978889381,
+          "renalInjury": 0.000047487741264775515,
+          "compensatoryReserve": 0.9999985363038432
+        }
+      },
+      {
+        "t": 180,
+        "hr": 135.015,
+        "map": 74.911,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.01742393091783294,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.003556276618252003,
+          "renalInjury": 0.0005622552848088212,
+          "compensatoryReserve": 0.9971076630050913
+        }
+      },
+      {
+        "t": 300,
+        "hr": 134.684,
+        "map": 74.649,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.02366238895322777,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00683267883846418,
+          "renalInjury": 0.0011557349549874895,
+          "compensatoryReserve": 0.9928332608145822
+        }
+      },
+      {
+        "t": 600,
+        "hr": 134.528,
+        "map": 73.919,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.02795914793991308,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.013045294709943008,
+          "renalInjury": 0.002345826049907027,
+          "compensatoryReserve": 0.9855417206538558
+        }
+      },
+      {
+        "t": 900,
+        "hr": 134.915,
+        "map": 74.91,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.024213131302526336,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.016745792790981838,
+          "renalInjury": 0.0031061666574271297,
+          "compensatoryReserve": 0.9851119631597851
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "acepromazine+methadone",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 63.8,
+    "time": 802,
+    "maxHR": 145.9,
+    "HRatMinMAP": 141.2,
+    "Ca": 0.99,
+    "CO": 0.54,
+    "SVR": 8863,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 142.483,
+        "map": 75.67,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00015479697153801075,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0005847228947735665,
+          "renalInjury": 0.00012238692072885665,
+          "compensatoryReserve": 0.9999913625650981
+        }
+      },
+      {
+        "t": 180,
+        "hr": 138.763,
+        "map": 68.14,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.051235258922767535,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005442884604045883,
+          "renalInjury": 0.0014818144360374457,
+          "compensatoryReserve": 0.9918779609883983
+        }
+      },
+      {
+        "t": 300,
+        "hr": 139.571,
+        "map": 65.969,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.08427286731360926,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0104844292799188,
+          "renalInjury": 0.003082968330308296,
+          "compensatoryReserve": 0.9761656064919989
+        }
+      },
+      {
+        "t": 600,
+        "hr": 140.765,
+        "map": 63.954,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.10792829841307554,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.020215580128728997,
+          "renalInjury": 0.006366594119000583,
+          "compensatoryReserve": 0.9471744584092012
+        }
+      },
+      {
+        "t": 900,
+        "hr": 141.407,
+        "map": 63.825,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.11004745776058968,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0263775306160218,
+          "renalInjury": 0.008600851311691598,
+          "compensatoryReserve": 0.9353560911385104
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "midazolam",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 77.3,
+    "time": 184,
+    "maxHR": 145.9,
+    "HRatMinMAP": 145.4,
+    "Ca": 1,
+    "CO": 0.61,
+    "SVR": 9612,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 145.752,
+        "map": 77.51,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00001852761643202231,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0003690564073776962,
+          "renalInjury": 0.00004371563007073737,
+          "compensatoryReserve": 0.999998760830416
+        }
+      },
+      {
+        "t": 180,
+        "hr": 145.401,
+        "map": 77.299,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0015473470936131395,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0034287177441621195,
+          "renalInjury": 0.0004974230283191328,
+          "compensatoryReserve": 0.9997775254121237
+        }
+      },
+      {
+        "t": 300,
+        "hr": 145.396,
+        "map": 77.292,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.002525797643161808,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00642998381762649,
+          "renalInjury": 0.000986434361651639,
+          "compensatoryReserve": 0.999272547120125
+        }
+      },
+      {
+        "t": 600,
+        "hr": 145.603,
+        "map": 77.345,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0024569330340477526,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.011719522326252984,
+          "renalInjury": 0.0018860949913073596,
+          "compensatoryReserve": 0.9987020879109847
+        }
+      },
+      {
+        "t": 900,
+        "hr": 145.815,
+        "map": 77.398,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.002111697786781949,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.014194837430283554,
+          "renalInjury": 0.002338972082975294,
+          "compensatoryReserve": 0.9986879673379583
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "ketamine",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 78.1,
+    "time": 2,
+    "maxHR": 155.8,
+    "HRatMinMAP": 145.1,
+    "Ca": 1,
+    "CO": 0.61,
+    "SVR": 9651,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 152.478,
+        "map": 98.659,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00001852761643202231,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00035420534949496776,
+          "renalInjury": 0.000055783212744256915,
+          "compensatoryReserve": 0.999998760830416
+        }
+      },
+      {
+        "t": 180,
+        "hr": 154.91,
+        "map": 117.392,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.000011237567417417115,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.003295445527768271,
+          "renalInjury": 0.0006301585429054979,
+          "compensatoryReserve": 0.9999988407481987
+        }
+      },
+      {
+        "t": 300,
+        "hr": 154.415,
+        "map": 115.811,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0000068159291792512015,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.006170348013715884,
+          "renalInjury": 0.0012465112777593896,
+          "compensatoryReserve": 0.9999989155118426
+        }
+      },
+      {
+        "t": 600,
+        "hr": 153.452,
+        "map": 105.357,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00000195279640491481,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.011194965630970555,
+          "renalInjury": 0.0023730056274347635,
+          "compensatoryReserve": 0.9999990820005942
+        }
+      },
+      {
+        "t": 900,
+        "hr": 152.158,
+        "map": 98.894,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 5.594855372994278e-7,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.01347486016567626,
+          "renalInjury": 0.0029278437087486165,
+          "compensatoryReserve": 0.9999992229302794
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "midazolam+ketamine",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 78.1,
+    "time": 2,
+    "maxHR": 156.1,
+    "HRatMinMAP": 145.1,
+    "Ca": 1,
+    "CO": 0.61,
+    "SVR": 9651,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 152.441,
+        "map": 98.484,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00001852761643202231,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.000631386261648477,
+          "renalInjury": 0.00009686413436440366,
+          "compensatoryReserve": 0.999998760830416
+        }
+      },
+      {
+        "t": 180,
+        "hr": 155.751,
+        "map": 115.886,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.000011237567417417115,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005485636356438818,
+          "renalInjury": 0.0010795367170007809,
+          "compensatoryReserve": 0.9999988407481987
+        }
+      },
+      {
+        "t": 300,
+        "hr": 154.863,
+        "map": 115.423,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0000068159291792512015,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.010253107735889798,
+          "renalInjury": 0.0021374327685482176,
+          "compensatoryReserve": 0.9999989155118426
+        }
+      },
+      {
+        "t": 600,
+        "hr": 154.368,
+        "map": 104.77,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00000195279640491481,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.018793084120036607,
+          "renalInjury": 0.004085488178669,
+          "compensatoryReserve": 0.9999990820005942
+        }
+      },
+      {
+        "t": 900,
+        "hr": 152.085,
+        "map": 98.704,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 5.594855372994278e-7,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.022989988385704634,
+          "renalInjury": 0.005065482878084928,
+          "compensatoryReserve": 0.9999992229302794
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "dexmedetomidine",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 78.1,
+    "time": 2,
+    "maxHR": 145.9,
+    "HRatMinMAP": 145.1,
+    "Ca": 1,
+    "CO": 0.61,
+    "SVR": 9651,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 130.449,
+        "map": 80.103,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.010370856310814284,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0003189923467486843,
+          "renalInjury": 0.00008601242349871945,
+          "compensatoryReserve": 0.9992329255222686
+        }
+      },
+      {
+        "t": 180,
+        "hr": 107.558,
+        "map": 79.738,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.09548785549550827,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.003059517845610249,
+          "renalInjury": 0.000984615027285447,
+          "compensatoryReserve": 0.9808214643607862
+        }
+      },
+      {
+        "t": 300,
+        "hr": 104.377,
+        "map": 80.396,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.13023529993291091,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005814565819952082,
+          "renalInjury": 0.0019892775502910517,
+          "compensatoryReserve": 0.9576204704783111
+        }
+      },
+      {
+        "t": 600,
+        "hr": 106.995,
+        "map": 80.335,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.13555290890000646,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.010879468891193077,
+          "renalInjury": 0.003943284960850026,
+          "compensatoryReserve": 0.9277558794790439
+        }
+      },
+      {
+        "t": 900,
+        "hr": 111.941,
+        "map": 80.132,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.12316903984542887,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.01362573175432541,
+          "renalInjury": 0.0051004003194255985,
+          "compensatoryReserve": 0.9248449050619306
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "dexmedetomidine+methadone",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 73.6,
+    "time": 368,
+    "maxHR": 145.9,
+    "HRatMinMAP": 90.8,
+    "Ca": 0.94,
+    "CO": 0.3,
+    "SVR": 18551,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 126.339,
+        "map": 79.66,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.010998294354955886,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0006052825959737699,
+          "renalInjury": 0.00012913152188291565,
+          "compensatoryReserve": 0.9991891960911403
+        }
+      },
+      {
+        "t": 180,
+        "hr": 94.858,
+        "map": 75.301,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.11984127946378388,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00541809679438898,
+          "renalInjury": 0.0014638918319123144,
+          "compensatoryReserve": 0.9778039323624418
+        }
+      },
+      {
+        "t": 300,
+        "hr": 90.671,
+        "map": 75.385,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.16642960199778103,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.010315489773702374,
+          "renalInjury": 0.0029741762787472877,
+          "compensatoryReserve": 0.9470629180242971
+        }
+      },
+      {
+        "t": 600,
+        "hr": 92.575,
+        "map": 75.932,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.1763265972008974,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.01960220566456729,
+          "renalInjury": 0.005962358402730279,
+          "compensatoryReserve": 0.9061350021354518
+        }
+      },
+      {
+        "t": 900,
+        "hr": 98.654,
+        "map": 76.068,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.16361286588798088,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.02515897400893681,
+          "renalInjury": 0.007815496514497117,
+          "compensatoryReserve": 0.9010237316869052
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "propofol",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 64.2,
+    "time": 98,
+    "maxHR": 153.4,
+    "HRatMinMAP": 151.6,
+    "Ca": 1,
+    "CO": 0.57,
+    "SVR": 8445,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 150.453,
+        "map": 67.09,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.011987708189830795,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0002965516839799352,
+          "renalInjury": 0.00004786036617851089,
+          "compensatoryReserve": 0.9991628449292808
+        }
+      },
+      {
+        "t": 180,
+        "hr": 153.34,
+        "map": 64.955,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.09470550459061347,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0025812311899449975,
+          "renalInjury": 0.0004932885595009134,
+          "compensatoryReserve": 0.9798257720806407
+        }
+      },
+      {
+        "t": 300,
+        "hr": 152.535,
+        "map": 67.387,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.09595916627303916,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.004694436131435288,
+          "renalInjury": 0.000937811008930249,
+          "compensatoryReserve": 0.9645713228815442
+        }
+      },
+      {
+        "t": 600,
+        "hr": 149.662,
+        "map": 72.616,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.06889002490700671,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.008023464152638627,
+          "renalInjury": 0.0016693991820895106,
+          "compensatoryReserve": 0.9603377519080636
+        }
+      },
+      {
+        "t": 900,
+        "hr": 147.78,
+        "map": 74.468,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.04069124260026711,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.009107535053845863,
+          "renalInjury": 0.0019440240060328096,
+          "compensatoryReserve": 0.9634630203151306
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "acepromazine+methadone+propofol",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 54.4,
+    "time": 222,
+    "maxHR": 147.1,
+    "HRatMinMAP": 141.8,
+    "Ca": 0.99,
+    "CO": 0.5,
+    "SVR": 8062,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 146.598,
+        "map": 64.248,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.014759518577372734,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0007651107713309752,
+          "renalInjury": 0.00016409755267179566,
+          "compensatoryReserve": 0.9989706693757736
+        }
+      },
+      {
+        "t": 180,
+        "hr": 142.419,
+        "map": 54.465,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.1637706821695217,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.006562431984928994,
+          "renalInjury": 0.0018681118694004112,
+          "compensatoryReserve": 0.9681904186589626
+        }
+      },
+      {
+        "t": 300,
+        "hr": 141.063,
+        "map": 54.523,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.195449588425035,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.01239052936208205,
+          "renalInjury": 0.0037922288873976475,
+          "compensatoryReserve": 0.933137021516835
+        }
+      },
+      {
+        "t": 600,
+        "hr": 140.128,
+        "map": 58.039,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.187652460074992,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.02341570079994523,
+          "renalInjury": 0.007619315063148204,
+          "compensatoryReserve": 0.8977458403311225
+        }
+      },
+      {
+        "t": 900,
+        "hr": 140.658,
+        "map": 60.052,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.1641089729758952,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.030086329018916984,
+          "renalInjury": 0.010080658679483058,
+          "compensatoryReserve": 0.8976624756608975
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "dexmedetomidine+methadone+propofol",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 60.3,
+    "time": 174,
+    "maxHR": 145.9,
+    "HRatMinMAP": 99.3,
+    "Ca": 0.94,
+    "CO": 0.27,
+    "SVR": 16669,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 130.34,
+        "map": 67.015,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.016768436193507725,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0007833073883544285,
+          "renalInjury": 0.00017063406507489655,
+          "compensatoryReserve": 0.9988083346076839
+        }
+      },
+      {
+        "t": 180,
+        "hr": 99.009,
+        "map": 60.529,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.214842742098651,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.006547318993962145,
+          "renalInjury": 0.0018525943887935607,
+          "compensatoryReserve": 0.9560601251573283
+        }
+      },
+      {
+        "t": 300,
+        "hr": 93.331,
+        "map": 63.391,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.24639742020484803,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0.00035507156997548656,
+          "hepaticInjury": 0.013543515220272905,
+          "renalInjury": 0.004786865580454564,
+          "compensatoryReserve": 0.9127283032533247
+        }
+      },
+      {
+        "t": 600,
+        "hr": 94.503,
+        "map": 69.284,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.23607477438648075,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0.001379306648275323,
+          "hepaticInjury": 0.027483636257634496,
+          "renalInjury": 0.01131137939465512,
+          "compensatoryReserve": 0.8703301653524133
+        }
+      },
+      {
+        "t": 900,
+        "hr": 99.607,
+        "map": 72.342,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.2061394906345407,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0.0013744313641648825,
+          "hepaticInjury": 0.032991735389155986,
+          "renalInjury": 0.01311250605573213,
+          "compensatoryReserve": 0.8702932854866361
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "midazolam+propofol",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 60.9,
+    "time": 92,
+    "maxHR": 153.6,
+    "HRatMinMAP": 151.6,
+    "Ca": 1,
+    "CO": 0.54,
+    "SVR": 8427,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 150.269,
+        "map": 65.877,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.012980846322102838,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0005888006841238097,
+          "renalInjury": 0.00008935241346839115,
+          "compensatoryReserve": 0.9990981955108496
+        }
+      },
+      {
+        "t": 180,
+        "hr": 153.562,
+        "map": 61.598,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.11754002948106965,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00502458006199356,
+          "renalInjury": 0.0009535938848589613,
+          "compensatoryReserve": 0.9755926311816066
+        }
+      },
+      {
+        "t": 300,
+        "hr": 152.383,
+        "map": 65.032,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.11978965226014165,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.009294186485204551,
+          "renalInjury": 0.0018512237289115092,
+          "compensatoryReserve": 0.9559502728350853
+        }
+      },
+      {
+        "t": 600,
+        "hr": 149.869,
+        "map": 71.093,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.08897741854858791,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.016701518669391274,
+          "renalInjury": 0.003434686465321954,
+          "compensatoryReserve": 0.9493964679575575
+        }
+      },
+      {
+        "t": 900,
+        "hr": 148.161,
+        "map": 73.647,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.05432944017799731,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.020039074090513254,
+          "renalInjury": 0.004157878681461043,
+          "compensatoryReserve": 0.9530445544798085
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "atropine",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 78.1,
+    "time": 2,
+    "maxHR": 169.2,
+    "HRatMinMAP": 145.1,
+    "Ca": 1,
+    "CO": 0.61,
+    "SVR": 9651,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 154.128,
+        "map": 83.19,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00001852761643202231,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00018490397311107234,
+          "renalInjury": 0.00004843385661511755,
+          "compensatoryReserve": 0.999998760830416
+        }
+      },
+      {
+        "t": 180,
+        "hr": 168.649,
+        "map": 90.791,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.000011237567417417115,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0027866171009488035,
+          "renalInjury": 0.0008883870775249054,
+          "compensatoryReserve": 0.9999988407481987
+        }
+      },
+      {
+        "t": 300,
+        "hr": 169.016,
+        "map": 90.818,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0000068159291792512015,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005572190386746831,
+          "renalInjury": 0.001898463976610158,
+          "compensatoryReserve": 0.9999989155118426
+        }
+      },
+      {
+        "t": 600,
+        "hr": 166.215,
+        "map": 89.293,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00000195279640491481,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.01069076027231729,
+          "renalInjury": 0.0038642313650957692,
+          "compensatoryReserve": 0.9999990820005942
+        }
+      },
+      {
+        "t": 900,
+        "hr": 163.248,
+        "map": 87.768,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 5.594855372994278e-7,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.013435240375761884,
+          "renalInjury": 0.005014664075641977,
+          "compensatoryReserve": 0.9999992229302794
+        }
+      }
+    ]
+  },
+  {
+    "species": "feline",
+    "protocol": "atropine+ketamine",
+    "baseHR": 145,
+    "baseMAP": 80,
+    "minMAP": 78.1,
+    "time": 2,
+    "maxHR": 174.2,
+    "HRatMinMAP": 145.1,
+    "Ca": 1,
+    "CO": 0.61,
+    "SVR": 9651,
+    "pH": 7.37,
+    "lactate": 1.2,
+    "arrest": false,
+    "early": [
+      {
+        "t": 60,
+        "hr": 159.745,
+        "map": 103.222,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00001852761643202231,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.00048492039585634094,
+          "renalInjury": 0.00010085178256361585,
+          "compensatoryReserve": 0.999998760830416
+        }
+      },
+      {
+        "t": 180,
+        "hr": 173.812,
+        "map": 131.647,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.000011237567417417115,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.005029114430441745,
+          "renalInjury": 0.001431228478749815,
+          "compensatoryReserve": 0.9999988407481987
+        }
+      },
+      {
+        "t": 300,
+        "hr": 173.191,
+        "map": 131.179,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.0000068159291792512015,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.009656505005466361,
+          "renalInjury": 0.002961033793013689,
+          "compensatoryReserve": 0.9999989155118426
+        }
+      },
+      {
+        "t": 600,
+        "hr": 169.555,
+        "map": 116.848,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 0.00000195279640491481,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.018102366670340795,
+          "renalInjury": 0.005890889397675971,
+          "compensatoryReserve": 0.9999990820005942
+        }
+      },
+      {
+        "t": 900,
+        "hr": 166.284,
+        "map": 108.728,
+        "ischemia": 0,
+        "regulation": {
+          "cellularOxygenUtilizationFraction": 1,
+          "cellularHypoxia": 5.594855372994278e-7,
+          "myocardialStress": 0,
+          "arrhythmogenicBurden": 0,
+          "endothelialDysfunction": 0,
+          "hepaticInjury": 0.0225340405445609,
+          "renalInjury": 0.007537254793879031,
+          "compensatoryReserve": 0.9999992229302794
+        }
+      }
+    ]
+  }
+]

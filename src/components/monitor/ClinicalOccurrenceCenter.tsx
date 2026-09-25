@@ -19,7 +19,7 @@ const formatTime = (seconds = 0): string => {
 export const ClinicalOccurrenceCenter: React.FC<ClinicalOccurrenceCenterProps> = ({ isOpen, items, onClose, onClear }) => (
   <>
     {isOpen && <button aria-label="Fechar histórico" className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[1px]" onClick={onClose} />}
-    <aside className={`fixed right-0 top-0 z-50 h-full w-full max-w-md border-l border-[#2b2b2b] bg-[#0b0b0b] shadow-2xl transition-transform duration-300 ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+    <aside inert={!isOpen} aria-hidden={!isOpen} aria-label="Histórico de ocorrências" className={`fixed right-0 top-0 z-50 h-full w-full max-w-md border-l border-[#2b2b2b] bg-[#0b0b0b] shadow-2xl transition-transform duration-300 ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
       <div className="flex items-center justify-between border-b border-[#252525] p-4">
         <div>
           <div className="flex items-center gap-2 text-sm font-bold text-white"><BellRing className="h-4 w-4 text-amber-400" /> Histórico de ocorrências</div>

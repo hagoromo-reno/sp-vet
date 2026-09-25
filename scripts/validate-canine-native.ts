@@ -69,6 +69,7 @@ try {
     activeDrugs: [],
     equipment: {
       oxygenFlowLMin: 0,
+      nitrousOxideFlowLMin: 0,
       vaporizerType: 'isoflurane',
       vaporizerDialPct: 0,
       isVaporizerOn: false,
@@ -85,6 +86,11 @@ try {
         pipPressureLimitCmH2O: 18,
         inspiratoryPausePct: 10,
       },
+      circuitType: 'circle_rebreathing_adult',
+      activeFluidType: 'Ringer com lactato',
+      totalFluidsInfusedMl: 0,
+      fluidRateMlPerHour: 0,
+      isFluidPumpRunning: false,
     },
     surgicalStimulus: 0,
   };

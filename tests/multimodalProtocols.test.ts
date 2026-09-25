@@ -9,14 +9,14 @@ import {
 import { calculateAdministration } from '../src/engine/drugAdministration';
 import { VETERINARY_DRUG_DATABASE } from '../src/data/drugDatabase';
 
-test('Protocolo Multimodal: Cetamina em CRI atinge steady-state e washout gradual', () => {
+test('Cetamina em CRI sem ataque acumula gradualmente e mantém washout após interrupção', () => {
   const patient = createHealthyValidationPatient('canine');
   const state = createSimulationState(patient);
 
   const ketamineDef = VETERINARY_DRUG_DATABASE.find((d) => d.id === 'ketamine')!;
   assert.ok(ketamineDef.recommendedCriDose?.canine, 'Cetamina deve ter dose CRI cadastrada para canino');
 
-  // Iniciar CRI de Cetamina a 20 mcg/kg/min
+  // Start the catalog maintenance rate without inventing an unprescribed loading dose.
   administerDrug(state, 'ketamine', 'typical', { route: 'CRI' });
   const criDose = state.doses.find((d) => d.drugId === 'ketamine' && d.isCRI);
   assert.ok(criDose, 'Dose CRI de Cetamina deve estar ativa');
@@ -26,8 +26,12 @@ test('Protocolo Multimodal: Cetamina em CRI atinge steady-state e washout gradua
   advanceSimulation(state, 300, { dtSeconds: 1 });
   const activeKetamine = state.doses.find((d) => d.drugId === 'ketamine');
   assert.ok(activeKetamine, 'Cetamina deve permanecer em fármacos ativos durante a infusão');
-  assert.ok(activeKetamine.currentCe > 0.40, `Cetamina deve acumular no sítio efetor Ce; observado: ${activeKetamine.currentCe}`);
-  assert.ok(state.vitals.cellularState.nociceptiveInhibition > 0.25, 'Cetamina em CRI deve promover analgesia multimodal');
+  assert.ok(activeKetamine.currentCe > 0 && activeKetamine.currentCe < 0.4, 'Manutenção isolada não equivale imediatamente a uma dose de indução');
+  const loaded = createSimulationState(patient);
+  administerDrug(loaded, 'ketamine', 'typical', { route: 'IV' });
+  administerDrug(loaded, 'ketamine', 'typical', { route: 'CRI' });
+  advanceSimulation(loaded, 300, { dtSeconds: 1 });
+  assert.ok(loaded.vitals.cellularState.nociceptiveInhibition > state.vitals.cellularState.nociceptiveInhibition, 'Ataque explícito produz maior efeito inicial que manutenção isolada');
 
   // Interromper CRI e verificar washout gradual
   const doseBeforeStop = state.doses.find((d) => d.drugId === 'ketamine')!;
@@ -419,5 +423,35 @@ test('Cinética Fisiológica da Dor: Crescendo Gradual e Regressão Suave Pós-E
   assert.ok(
     hrAfterWashout < hrJustAfterRelief - 8,
     `Após 20 segundos sem estímulo, a FC deve ter regredido progressivamente; pico: ${peakHr}, após 20s: ${hrAfterWashout}`
+  );
+});
+
+test('Dissociação Nociceptiva: Paciente Sedado/Hipnotizado sem Analgesia responde com Taquicardia e Hipertensão', () => {
+  const patient = createHealthyValidationPatient('canine');
+  const state = createSimulationState(patient);
+
+  // Indução com Propofol isolado (hipnose profunda / inconsciente, mas SEM analgésico)
+  administerDrug(state, 'propofol', 'typical', { route: 'IV' });
+  advanceSimulation(state, 60, { dtSeconds: 1 });
+
+  // Paciente está inconsciente (Plano cirúrgico / perda de consciência)
+  assert.ok(state.vitals.consciousnessScore <= 30, `Paciente sob propofol deve estar inconsciente; observado: ${state.vitals.consciousnessScore}`);
+  const preStimHr = state.vitals.heartRate;
+  const preStimMap = state.vitals.meanArterialPressure;
+
+  // Aplica estímulo nociceptivo (pinçamento interdigital / dor aguda)
+  advanceSimulation(state, 10, { dtSeconds: 1, surgicalStimulation: 0.8 });
+
+  const postStimHr = state.vitals.heartRate;
+  const postStimMap = state.vitals.meanArterialPressure;
+
+  // O sistema nervoso autônomo subcortical responde mesmo sob hipnose profunda!
+  assert.ok(
+    postStimHr > preStimHr + 10,
+    `Paciente inconsciente sem analgesia deve apresentar taquicardia reflexa ao estímulo; basal: ${preStimHr}, pós: ${postStimHr}`
+  );
+  assert.ok(
+    postStimMap > preStimMap + 7,
+    `Paciente inconsciente sem analgesia deve apresentar elevação simpática de PAM; basal: ${preStimMap}, pós: ${postStimMap}`
   );
 });

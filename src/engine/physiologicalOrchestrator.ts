@@ -1,8 +1,12 @@
+import { antimuscarinicSignals } from './antimuscarinicSystems';
+import { fluidPhysiologicalSignals } from './fluidTherapy';
 import type { BiologicalState, PatientProfile, VitalSigns } from '../types/simulator';
 import type { ReceptorStateSnapshot } from './cellularReceptors';
 import { DrugInteractionEffectsEngine } from './drugInteractionEffects';
 import { HomeostaticFeedbackEngine } from './homeostaticFeedbackEngine';
 import { ToxicologyEngine } from './toxicologyEngine';
+import { getOxygenDeliveryDeficit } from './oxygenTransport';
+import { getPatientReserveCapacity } from './patientReserve';
 import {
   aggregatePhysiologicalSignals,
   type PhysiologicalModifiers,
@@ -32,6 +36,8 @@ export class PhysiologicalOrchestrator {
     previousVitals?: VitalSigns
   ): PhysiologicalOrchestrationResult {
     const signals = [
+      ...antimuscarinicSignals(patient, state, receptors),
+      ...fluidPhysiologicalSignals(state),
       ...DrugInteractionEffectsEngine.evaluate(patient, receptors),
       ...ToxicologyEngine.evaluate(patient, state, receptors),
       ...HomeostaticFeedbackEngine.evaluate(patient, state, previousVitals),
@@ -52,7 +58,7 @@ export class PhysiologicalOrchestrator {
     // lowest regional perfusion is retained as a smaller local-organ component;
     // using it alone would incorrectly label isolated renal hypoperfusion as
     // near-total whole-body hypoxia.
-    const deliveryDeficit = clamp((10 - state.organPerfusion.oxygenDeliveryMlKgMin) / 10);
+    const deliveryDeficit = getOxygenDeliveryDeficit(patient.species, state.organPerfusion.oxygenDeliveryMlKgMin);
     const regionalPerfusionDeficit = clamp(
       1 - Math.min(
         state.organPerfusion.cerebralFraction,
@@ -71,8 +77,10 @@ export class PhysiologicalOrchestrator {
     const sustainedCellularInjury = Math.max(0, previous.cellularHypoxia - 0.22);
     const hepaticInjuryTarget = clamp(sustainedCellularInjury * 0.55 + state.biotransformation.hepaticEnzymeSaturation * 0.12);
     const renalInjuryTarget = clamp(sustainedCellularInjury * 0.62 + state.biotransformation.renalTransportSaturation * 0.15);
-    const stressLoad = clamp(cellularHypoxiaTarget * 0.55 + myocardialStressTarget * 0.45);
-    const reserveTarget = clamp(1 - stressLoad * 0.9);
+    const debt = state.organPerfusion.cumulativeOxygenDebt;
+    const stressLoad = clamp(cellularHypoxiaTarget * 0.55 + myocardialStressTarget * 0.25 + debt * 0.6);
+    const capacity = getPatientReserveCapacity(patient);
+    const reserveTarget = capacity * clamp(1 - stressLoad * 1.15, 0.08, 1);
 
     const nextRegulation: BiologicalState['systemicRegulation'] = {
       cellularOxygenUtilizationFraction: approach(
@@ -84,10 +92,10 @@ export class PhysiologicalOrchestrator {
       cellularHypoxia: approach(previous.cellularHypoxia, cellularHypoxiaTarget, dtSeconds, cellularHypoxiaTarget > previous.cellularHypoxia ? 18 : 240),
       myocardialStress: approach(previous.myocardialStress, myocardialStressTarget, dtSeconds, myocardialStressTarget > previous.myocardialStress ? 12 : 180),
       arrhythmogenicBurden: approach(previous.arrhythmogenicBurden, modifiers.arrhythmogenicBurden, dtSeconds, modifiers.arrhythmogenicBurden > previous.arrhythmogenicBurden ? 5 : 90),
-      endothelialDysfunction: approach(previous.endothelialDysfunction, clamp(utilizationDeficit * 0.45), dtSeconds, utilizationDeficit > 0.2 ? 120 : 1200),
+      endothelialDysfunction: approach(previous.endothelialDysfunction, clamp(utilizationDeficit * 0.45 + debt * 0.45 + sustainedCellularInjury * 0.3), dtSeconds, stressLoad > 0.2 ? 180 : 1800),
       hepaticInjury: approach(previous.hepaticInjury, hepaticInjuryTarget, dtSeconds, hepaticInjuryTarget > previous.hepaticInjury ? 900 : 7200),
       renalInjury: approach(previous.renalInjury, renalInjuryTarget, dtSeconds, renalInjuryTarget > previous.renalInjury ? 1200 : 10800),
-      compensatoryReserve: approach(previous.compensatoryReserve, reserveTarget, dtSeconds, reserveTarget < previous.compensatoryReserve ? 300 : 1800),
+      compensatoryReserve: approach(previous.compensatoryReserve, reserveTarget, dtSeconds, reserveTarget < previous.compensatoryReserve ? 240 * capacity : 1800),
     };
 
     return {

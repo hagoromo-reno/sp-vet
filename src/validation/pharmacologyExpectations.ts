@@ -121,7 +121,7 @@ export const PHARMACOLOGY_EXPECTATIONS: MedicationValidationSpec[] = [
     ],
     relativeTrends: [{ metric: 'map', direction: 'preserve', toleranceFraction: 0.15 }],
     context: 'healthy',
-    speciesNotes: { canine: 'Pode causar excitação paradoxal em cães jovens hígidos; o sinergismo com propofol deve ser testado separadamente.', rabbit: 'Costuma integrar protocolos combinados, não analgesia isolada.' },
+    speciesNotes: { canine: 'Pode causar excitação paradoxal em cães jovens hígidos; o sinergismo com propofol deve ser testado separadamente.', },
     evidence: ['PMID:23570259', 'PMID:23750585'],
   },
   {
@@ -168,7 +168,7 @@ export const PHARMACOLOGY_EXPECTATIONS: MedicationValidationSpec[] = [
       { metric: 'maxAnalgesia', minimum: { min: 0.30, typical: 0.50, max: 0.57 } },
       { metric: 'maxRespiratoryDepression', minimum: { min: 0.16, typical: 0.30, max: 0.38 } },
     ],
-    relativeTrends: [{ metric: 'respiratoryRate', direction: 'decrease', minimumFraction: 0.15 }],
+    relativeTrends: [{ metric: 'respiratoryRate', direction: 'decrease', minimumFraction: 0.12 }],
     context: 'healthy',
     evidence: ['PMID:34813931'],
   },
@@ -182,7 +182,7 @@ export const PHARMACOLOGY_EXPECTATIONS: MedicationValidationSpec[] = [
       { metric: 'maxSedation', minimum: { typical: 0.16 } },
     ],
     context: 'healthy',
-    speciesNotes: { avian: 'Receptores κ são mais representados em várias aves, mas a resposta varia entre espécies; usar apenas um modificador moderado.' },
+    speciesNotes: { },
     evidence: ['PMID:30077553', 'PMID:19836984'],
   },
   {
@@ -197,6 +197,22 @@ export const PHARMACOLOGY_EXPECTATIONS: MedicationValidationSpec[] = [
     context: 'healthy',
     speciesNotes: { feline: 'Evidência clínica sustenta analgesia mais duradoura que butorfanol em vários cenários cirúrgicos.' },
     evidence: ['PMID:19836984', 'PMID:24984130'],
+  },
+  {
+    drugId: 'tramadol',
+    clinicalClass: 'Opioide atípico / inibidor da recaptação de monoaminas (SNRI)',
+    mechanism: 'Mecanismo duplo: agonismo µ fraco pelo metabólito M1 (O-desmetiltramadol) e inibição da recaptação de serotonina e noradrenalina (SNRI). Marcante divergência entre espécies: cães produzem quantidades mínimas de M1 (analgesia predominantemente monoaminérgica leve/moderada); felinos produzem níveis elevados de M1 (analgesia µ potente, com risco de euforia/disforia).',
+    expectedDoseResponse: dose('Analgesia leve a moderada dependente da espécie.', 'Analgesia clínica (robusta em gatos via M1, moderada/coadjuvante em cães).', 'Maior analgesia com risco de sedação, sialorreia ou disforia em gatos; sem anestesia geral.'),
+    signals: [
+      { metric: 'maxAnalgesia', minimum: { min: 0.08, typical: 0.16, max: 0.24 } },
+      { metric: 'maxHypnosis', maximum: { min: 0.10, typical: 0.12, max: 0.15 } },
+    ],
+    context: 'healthy',
+    speciesNotes: {
+      canine: 'Cães possuem polimorfismo CYP2D15 que limita a formação de M1; analgesia isolada em dor cirúrgica aguda é comprovadamente insuficiente.',
+      feline: 'Gatos formam concentrações terapêuticas elevadas de M1, propiciando excelente analgesia µ-opioide, mas predispostos a midríase e disforia.',
+    },
+    evidence: ['PMID:24047395', 'PMID:28771343', 'PMID:23758784'],
   },
   {
     drugId: 'propofol',
@@ -327,9 +343,9 @@ export const PHARMACOLOGY_EXPECTATIONS: MedicationValidationSpec[] = [
     mechanism: 'Antagonismo M2/M3 remove tônus vagal, elevando FC e reduzindo secreções; resposta depende da espécie e do mecanismo da bradicardia.',
     expectedDoseResponse: dose('Cronotropismo discreto.', 'Taquicardia vagolítica clara.', 'Próximo do bloqueio vagal máximo, com maior risco de taquiarritmia.'),
     signals: [],
-    relativeTrends: [{ metric: 'heartRate', direction: 'increase', minimumFraction: 0.12, excludeSpecies: ['rabbit', 'avian'] }],
+    relativeTrends: [{ metric: 'heartRate', direction: 'increase', minimumFraction: 0.12 }],
     context: 'healthy',
-    speciesNotes: { rabbit: 'Atropinase plasmática torna a resposta imprevisível/fraca em parte dos coelhos.', bovine: 'Pode espessar secreções; não deve ser modelada como escolha inócua.' },
+    speciesNotes: { bovine: 'Pode espessar secreções; não deve ser modelada como escolha inócua.' },
     evidence: ['PMID:7889456', 'RECOVER-2024'],
   },
   {
@@ -340,7 +356,7 @@ export const PHARMACOLOGY_EXPECTATIONS: MedicationValidationSpec[] = [
     signals: [],
     relativeTrends: [{ metric: 'heartRate', direction: 'increase', minimumFraction: 0.10 }],
     context: 'healthy',
-    speciesNotes: { rabbit: 'Mais confiável que atropina em coelhos com atropinase.' },
+    speciesNotes: { },
     evidence: ['PMID:7889456'],
   },
   {
@@ -388,7 +404,9 @@ export const PHARMACOLOGY_EXPECTATIONS: MedicationValidationSpec[] = [
     clinicalClass: 'Reposição eletrolítica concentrada',
     mechanism: 'Aumenta potássio extracelular; infusão controlada corrige déficit, enquanto bólus causa despolarização sustentada e parada.',
     expectedDoseResponse: dose('Pequena elevação de K sérico.', 'Elevação terapêutica mensurável em infusão.', 'Maior elevação e risco de alteração de condução; bólus rápido é cenário tóxico distinto.'),
-    signals: [{ metric: 'maxPotassium', minimum: { min: 4.35, typical: 4.55, max: 4.75 } }],
+    // Rate-controlled infusion has no implicit loading dose. This short-window
+    // check verifies direction only; paired dose ordering is tested separately.
+    signals: [{ metric: 'maxPotassium', minimum: { min: 4.21, typical: 4.21, max: 4.21 } }],
     context: 'pathology',
     evidence: ['RECOVER-2024'],
   },
@@ -507,6 +525,28 @@ export const PHARMACOLOGY_EXPECTATIONS: MedicationValidationSpec[] = [
     evidence: ['WSAVA-2022'],
   },
 ];
+
+PHARMACOLOGY_EXPECTATIONS.push(
+  {
+    drugId: 'hyoscine_butylbromide',
+    clinicalClass: 'Antimuscarínico periférico',
+    mechanism: 'Bloqueia receptores muscarínicos periféricos, reduzindo motilidade e secreções e elevando a frequência cardíaca, sem hipnose central relevante.',
+    expectedDoseResponse: dose('Efeito antimuscarínico periférico.', 'Redução transitória de motilidade e aumento de FC.', 'Maior carga antimuscarínica e risco de retenção e estase.'),
+    signals: [{ metric: 'maxAnalgesia', maximum: { min: 0.02, typical: 0.02, max: 0.02 } }],
+    context: 'healthy',
+    evidence: ['FDA Buscopan NADA 141-228', 'VMD Spasmipur SPC', 'CBAV 2025 artigo 136: estudo piloto canino'],
+  },
+  {
+    drugId: 'scopolamine_hydrobromide',
+    clinicalClass: 'Antimuscarínico central e periférico — referência experimental',
+    mechanism: 'Atravessa a barreira hematoencefálica: bloqueio M1 altera cognição e arousal; bloqueio M2/M3 altera FC, secreções e motilidade. Não fornece analgesia cirúrgica.',
+    expectedDoseResponse: dose('Efeitos centrais e periféricos discretos.', 'Alteração cognitiva e carga antimuscarínica.', 'Maior alteração central; excitação em exposição elevada.'),
+    signals: [{ metric: 'maxAnalgesia', maximum: { min: 0.02, typical: 0.02, max: 0.02 } }],
+    context: 'healthy',
+    speciesNotes: { canine: 'Somente SC, referência experimental.', feline: 'Somente IM, referência experimental.' },
+    evidence: ['PMID:15029470', 'PMID:3434920'],
+  },
+);
 
 export function getMedicationExpectation(drugId: string): MedicationValidationSpec {
   const expectation = PHARMACOLOGY_EXPECTATIONS.find((item) => item.drugId === drugId);

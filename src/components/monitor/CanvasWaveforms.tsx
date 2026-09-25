@@ -533,13 +533,16 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
             droppedBeatCountRef.current = (droppedBeatCountRef.current + 1) % 4;
           }
 
-          // Pulse audio beep trigger (synchronized with SpO2 and pulse presence)
+          // Pulse audio beep trigger (synchronized with SpO2 and mechanical pulse presence)
           if (
             vitals.cardiacRhythm !== 'asystole' &&
             vitals.cardiacRhythm !== 'pulseless_electrical_activity' &&
-            vitals.pulseOximetrySpO2 > 0
+            vitals.cardiacRhythm !== 'ventricular_fibrillation' &&
+            !vitals.isDead &&
+            vitals.pulseOximetrySpO2 > 0 &&
+            vitals.meanArterialPressure > 15
           ) {
-            AudioSynthesizer.playPulseBeep(vitals.pulseOximetrySpO2);
+            AudioSynthesizer.playPulseBeep(vitals.pulseOximetrySpO2, isPvcBeatRef.current);
           }
         }
 
@@ -594,11 +597,11 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
             const plethVal = calculatePleth(pHeart, vitals);
             const plethY = plethBaseY - plethVal * plethMaxH;
 
-            // 3. Capnogram Y coordinate (Calibrated 0-60 mmHg with continuous smooth transition)
+            // 3. Capnogram Y coordinate (Calibrated 0-70 mmHg with continuous smooth transition)
             const targetEt = (vitals.isDead || vitals.respiratoryRate === 0) ? 0 : vitals.etCO2;
             smoothedEtco2Ref.current += (targetEt - smoothedEtco2Ref.current) * Math.min(1.0, subDt * 2.5);
             const capnoValMmHg = calculateCapnogram(pResp, vitals, smoothedEtco2Ref.current);
-            const normCapno = Math.min(1.0, Math.max(0, capnoValMmHg / 55.0));
+            const normCapno = Math.min(1.0, Math.max(0, capnoValMmHg / 70.0));
             const capnoY = capnoBaseY - normCapno * capnoMaxH;
 
             // 4. Arterial Pressure Y coordinate (Calibrated 0-200 mmHg)
@@ -717,25 +720,25 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
       className="relative w-full h-full bg-[#050505] rounded-xl overflow-hidden border border-[#222222] shadow-2xl select-none"
     >
       {/* ----------------- TRACK 1: ECG (GREEN) ----------------- */}
-      <div className="absolute top-2 left-3 z-10 flex items-center space-x-2 pointer-events-none">
+      <div className="absolute top-2 left-3 z-10 flex items-center space-x-2 pointer-events-none waveform-label">
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
         <span className="text-xs font-bold font-mono-code tracking-wider text-emerald-400">
-          II · ECG (1.0 mV/cm)
+          ECG · II (1.0 mV/cm)
         </span>
         <span className="text-[11px] px-1.5 py-0.2 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono-code">
           {vitals.cardiacRhythm.replace(/_/g, ' ').toUpperCase()}
         </span>
       </div>
-      <div className="absolute top-2 right-3 z-10 flex items-center space-x-3 text-[10px] text-[#737373] font-mono-code pointer-events-none">
+      <div className="waveform-settings absolute top-2 right-3 z-10 flex items-center space-x-3 text-[10px] text-[#737373] font-mono-code pointer-events-none">
         <span>Filtro: DIAG (0.05-150Hz)</span>
         <span>Ganho: x1.0</span>
       </div>
 
       {/* ----------------- TRACK 2: PLETH (CYAN) ----------------- */}
-      <div className="absolute top-[26%] left-3 z-10 flex items-center space-x-2 pointer-events-none">
+      <div className="absolute top-[26%] left-3 z-10 flex items-center space-x-2 pointer-events-none waveform-label">
         <span className="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
         <span className="text-xs font-bold font-mono-code tracking-wider text-cyan-400">
-          PLETH · SpO₂ OXIMETRIA
+          SpO₂ · Pletismografia
         </span>
         <span className="text-[11px] px-1.5 py-0.2 rounded bg-cyan-950/60 border border-cyan-800/50 text-cyan-300 font-mono-code">
           PI: {vitals.perfusionIndex}%
@@ -746,10 +749,10 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
       </div>
 
       {/* ----------------- TRACK 3: CAPNOGRAPHY (YELLOW) ----------------- */}
-      <div className="absolute top-[51%] left-3 z-10 flex items-center space-x-2 pointer-events-none">
+      <div className="absolute top-[51%] left-3 z-10 flex items-center space-x-2 pointer-events-none waveform-label">
         <span className="w-2.5 h-2.5 rounded-full bg-yellow-400"></span>
         <span className="text-xs font-bold font-mono-code tracking-wider text-yellow-400">
-          CO₂ · CAPNÓGRAFO (mmHg)
+          CO₂ · Capnografia (mmHg)
         </span>
         {equipment?.intubationStatus === 'intubated_tracheal' ? (
           <span className="text-[11px] px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-mono-code font-bold flex items-center gap-1">
@@ -763,22 +766,22 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
         ) : (
           <span className="text-[11px] px-1.5 py-0.2 rounded bg-yellow-950/60 border border-yellow-800/50 text-yellow-300 font-mono-code flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
-            AMOSTRAGEM ESPONTÂNEA / NÃO INTUBADO · {vitals.capnogramType === 'normal' ? 'EtCO₂ ATIVO' : vitals.capnogramType.replace(/_/g, ' ').toUpperCase()}
+            ESPONTÂNEO (NASAL) · {vitals.capnogramType === 'normal' ? 'ATIVO' : vitals.capnogramType.replace(/_/g, ' ').toUpperCase()}
           </span>
         )}
       </div>
-      {/* Capnography scale tick markers (0, 20, 40 mmHg) */}
+      {/* Capnography scale tick markers (0, 30, 60 mmHg) */}
       <div className="absolute top-[52%] right-3 z-10 flex flex-col items-end text-[9px] text-[#888888] font-mono-code pointer-events-none space-y-2">
-        <span>50 mmHg —</span>
-        <span>25 mmHg —</span>
+        <span>60 mmHg —</span>
+        <span>30 mmHg —</span>
         <span>0 mmHg —</span>
       </div>
 
       {/* ----------------- TRACK 4: ARTERIAL LINE (RED) ----------------- */}
-      <div className="absolute top-[76%] left-3 z-10 flex items-center space-x-2 pointer-events-none">
+      <div className="absolute top-[76%] left-3 z-10 flex items-center space-x-2 pointer-events-none waveform-label">
         <span className="w-2.5 h-2.5 rounded-full bg-red-400"></span>
         <span className="text-xs font-bold font-mono-code tracking-wider text-red-400">
-          ART · PAI PRESSÃO ARTERIAL INVASIVA (mmHg)
+          PAI · Pressão invasiva (mmHg)
         </span>
         <span className="text-[11px] px-1.5 py-0.2 rounded bg-red-950/60 border border-red-800/50 text-red-300 font-mono-code">
           Escala 0-180

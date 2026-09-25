@@ -28,6 +28,7 @@ export interface SpeciesCellularConfig {
   opioidManiaSusceptibility: boolean; // Feline morphine mania / hyperthermia
   normalPhysiologicalSecondDegreeAVBlock: boolean; // Equine physiological Mobitz I at rest
   normalPhysiologicalSinusArrhythmia: boolean; // Canine respiratory sinus arrhythmia
+  tramadolM1ConversionEfficiency: number; // Conversion to active M1 O-desmethyltramadol (high in cats, low in dogs)
 }
 
 export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig> = {
@@ -59,6 +60,7 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
     opioidManiaSusceptibility: false,
     normalPhysiologicalSecondDegreeAVBlock: false,
     normalPhysiologicalSinusArrhythmia: true,
+    tramadolM1ConversionEfficiency: 0.15, // Dogs produce very little M1 (mostly inactive M2)
   },
   feline: {
     species: 'feline',
@@ -88,6 +90,7 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
     opioidManiaSusceptibility: true, // High mu agonists provoke CNS excitation, hyperthermia, mydriasis
     normalPhysiologicalSecondDegreeAVBlock: false,
     normalPhysiologicalSinusArrhythmia: false,
+    tramadolM1ConversionEfficiency: 0.85, // Felines efficiently produce active M1 O-desmethyltramadol with potent mu-analgesia
   },
   equine: {
     species: 'equine',
@@ -117,6 +120,7 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
     opioidManiaSusceptibility: true,
     normalPhysiologicalSecondDegreeAVBlock: true, // Mobitz I (Wenckebach) is normal in healthy resting horse
     normalPhysiologicalSinusArrhythmia: false,
+    tramadolM1ConversionEfficiency: 0.40,
   },
   bovine: {
     species: 'bovine',
@@ -149,64 +153,7 @@ export const SPECIES_CELLULAR_CONFIGS: Record<SpeciesType, SpeciesCellularConfig
     opioidManiaSusceptibility: false,
     normalPhysiologicalSecondDegreeAVBlock: false,
     normalPhysiologicalSinusArrhythmia: false,
-  },
-  rabbit: {
-    species: 'rabbit',
-    cardiacOutputMlKgMin: 240,
-    anatomicDeadSpaceMlKg: 4.0,
-    dynamicComplianceMlKgCmH2O: 1.0,
-    functionalResidualCapacityMlKg: 32,
-    oxygenConsumptionMlKgMin: 8.0,
-    muOpioidSensitivityFactor: 0.9,
-    kappaOpioidSensitivityFactor: 1,
-    gabaSensitivityFactor: 1.05,
-    nmdaSensitivityFactor: 1.05,
-    atropineResponseFactor: 0.2,
-    restingVagalTone: 0.20,
-    splenicContractionReserve: 0.04,
-    alpha2DReceptorExpression: false,
-    alpha2SensitivityFactor: 0.8,
-    ugt1a6Deficiency: false,
-    glucuronidationClearanceMultiplier: 1.4,
-    laryngealReflexSensitivity: 3.5,
-    lidocaineIvCardiotoxicityThresholdMgKg: 4.0,
-    criticalMapThresholdMmHg: 55,
-    recumbencyPulmonaryShuntBasePct: 6.0,
-    ruminalFermentationGasRateLPerHour: 0,
-    continuousSalivaProductionLPerDay: 0.2,
-    atropineSalivaryContraindication: false,
-    opioidManiaSusceptibility: false,
-    normalPhysiologicalSecondDegreeAVBlock: false,
-    normalPhysiologicalSinusArrhythmia: false,
-  },
-  avian: {
-    species: 'avian',
-    cardiacOutputMlKgMin: 320,
-    anatomicDeadSpaceMlKg: 4.5,
-    dynamicComplianceMlKgCmH2O: 1.8,
-    functionalResidualCapacityMlKg: 90,
-    oxygenConsumptionMlKgMin: 12.0,
-    muOpioidSensitivityFactor: 0.8,
-    kappaOpioidSensitivityFactor: 1.15,
-    gabaSensitivityFactor: 1,
-    nmdaSensitivityFactor: 0.95,
-    atropineResponseFactor: 0.85,
-    restingVagalTone: 0.15,
-    splenicContractionReserve: 0.02,
-    alpha2DReceptorExpression: false,
-    alpha2SensitivityFactor: 0.7,
-    ugt1a6Deficiency: false,
-    glucuronidationClearanceMultiplier: 1.8,
-    laryngealReflexSensitivity: 2.0,
-    lidocaineIvCardiotoxicityThresholdMgKg: 3.0,
-    criticalMapThresholdMmHg: 60,
-    recumbencyPulmonaryShuntBasePct: 4.0,
-    ruminalFermentationGasRateLPerHour: 0,
-    continuousSalivaProductionLPerDay: 0.05,
-    atropineSalivaryContraindication: false,
-    opioidManiaSusceptibility: false,
-    normalPhysiologicalSecondDegreeAVBlock: false,
-    normalPhysiologicalSinusArrhythmia: false,
+    tramadolM1ConversionEfficiency: 0.35,
   },
 };
 

@@ -1,3 +1,4 @@
+import { getSpeciesDrugRoutes } from '../engine/drugAdministration';
 import { VETERINARY_DRUG_DATABASE } from '../data/drugDatabase';
 import { SPECIES_DATABASE } from '../data/speciesData';
 import { calculateAdministration, getRoutePharmacokinetics, getSpeciesDoseRange } from '../engine/drugAdministration';
@@ -67,8 +68,6 @@ const VALIDATION_WEIGHTS_KG: Record<SpeciesType, number> = {
   feline: 4.5,
   equine: 500,
   bovine: 500,
-  rabbit: 2.5,
-  avian: 0.5,
 };
 
 /** Standardized ASA-I patient used for paired pharmacology experiments. */
@@ -81,7 +80,7 @@ export function createHealthyValidationPatient(species: SpeciesType): PatientPro
     name: `Controle ${profile.namePt}`,
     species,
     breed: 'Paciente padronizado',
-    ageYears: species === 'equine' || species === 'bovine' ? 6 : species === 'avian' ? 4 : 3,
+    ageYears: species === 'equine' || species === 'bovine' ? 6 : 3,
     ageMonths: 0,
     weightKg,
     gender: 'Indeterminado',
@@ -211,8 +210,8 @@ export function createActiveDose(
 ): ActiveDrugDose {
   const drug = VETERINARY_DRUG_DATABASE.find((item) => item.id === drugId);
   if (!drug) throw new Error(`Fármaco não encontrado: ${drugId}`);
-  const route = options.route || preferredRoute(drug.id, drug.supportedRoutes, drug.doseUnit);
-  if (!drug.supportedRoutes.includes(route)) {
+  const route = options.route || preferredRoute(drug.id, getSpeciesDrugRoutes(drug, patient.species), drug.doseUnit);
+  if (!getSpeciesDrugRoutes(drug, patient.species).includes(route)) {
     throw new Error(`Via ${route} não suportada para ${drug.name}`);
   }
 

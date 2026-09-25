@@ -50,7 +50,7 @@ export const DeathReportModal: React.FC<DeathReportModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-red-300/80 mt-0.5 font-sans">
-                Laudo Necroscópico & Fisiopatológico · Open VetSim v2.5
+                Laudo Necroscópico & Fisiopatológico · SimPet v2.5
               </p>
             </div>
           </div>

@@ -5,7 +5,7 @@ import type {
   VitalSigns,
 } from '../types/simulator';
 
-export const PHYSIOLOGY_PROTOCOL_VERSION = '1.0.0' as const;
+export const PHYSIOLOGY_PROTOCOL_VERSION = '1.2.0' as const;
 export const CANINE_MODEL_ID = 'canine-adult-whole-body-alpha' as const;
 
 export type PhysiologyExecutionMode = 'shadow' | 'authoritative';
@@ -76,10 +76,14 @@ export interface PhysiologyStepInputs {
     | 'isCRI'
     | 'criRatePerKgMin'
     | 'isInfusionRunning'
-  >>;
+  > & {
+    drugName: string;
+    nativeAction: PulseDrugActionInput;
+  }>;
   equipment: Pick<
     AnesthesiaEquipmentState,
     | 'oxygenFlowLMin'
+    | 'nitrousOxideFlowLMin'
     | 'vaporizerType'
     | 'vaporizerDialPct'
     | 'isVaporizerOn'
@@ -89,8 +93,57 @@ export interface PhysiologyStepInputs {
     | 'ventilatorMode'
     | 'isVentilatorActive'
     | 'ventilatorSettings'
+    | 'circuitType'
+    | 'activeFluidType'
+    | 'totalFluidsInfusedMl'
+    | 'fluidRateMlPerHour'
+    | 'isFluidPumpRunning'
   >;
   surgicalStimulus: number;
+  surgicalProcedure?: {
+    id: string;
+    name: string;
+    tissueLayer: string;
+  };
+  hybridPharmacology?: HybridPharmacologyInput;
+}
+
+export interface PulseDrugActionInput {
+  status: 'native' | 'hybrid' | 'unsupported';
+  reasonPt?: string;
+  pulseSubstance?: string;
+  mode?: 'bolus' | 'infusion';
+  route?: ActiveDrugDose['route'];
+  totalMassMg?: number;
+  solutionVolumeMl?: number;
+  concentrationMgMl?: number;
+  administrationDurationSeconds?: number;
+  infusionRateMlPerMin?: number;
+  infusionRunning?: boolean;
+}
+
+export interface HybridPharmacologyInput {
+  modelVersion: string;
+  activeDrugIds: string[];
+  modifiers: {
+    heartRateFraction: number;
+    meanBloodPressureFraction: number;
+    respirationRateFraction: number;
+    tidalVolumeFraction: number;
+    sedationDelta: number;
+    neuromuscularBlockDelta: number;
+    bronchodilationDelta: number;
+    nociceptiveInhibition: number;
+  };
+}
+
+export type PharmacologyCoverageMode = 'native_pbpk_pd' | 'hybrid_veterinary_pd' | 'unsupported';
+
+export interface PharmacologyCoverageEntry {
+  drugId: string;
+  drugName: string;
+  mode: PharmacologyCoverageMode;
+  reasonPt: string;
 }
 
 export interface CirculatingSubstanceSnapshot {
@@ -116,6 +169,12 @@ export interface PhysiologySnapshot {
     profileVersion: string;
     passedChecks: string[];
     failedChecks: string[];
+  };
+  integration?: {
+    appliedDomains: string[];
+    unsupportedInputs: Array<{ id: string; reasonPt: string }>;
+    pharmacologyCoverage?: PharmacologyCoverageEntry[];
+    hybridModelVersion?: string;
   };
   cardiovascular: {
     heartRate: Quantity;

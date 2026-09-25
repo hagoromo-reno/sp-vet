@@ -1,6 +1,7 @@
-export type SpeciesType = 'canine' | 'feline' | 'equine' | 'bovine' | 'rabbit' | 'avian';
+export type SpeciesType = 'canine' | 'feline' | 'equine' | 'bovine';
 
-export type ASAStatus = 'I' | 'II' | 'III' | 'IV' | 'V' | 'E';
+export type ASAStatus = 'I' | 'II' | 'III' | 'IV' | 'V' | 'I-E' | 'II-E' | 'III-E' | 'IV-E' | 'V-E' | 'E';
+
 
 export type CardiacRhythm = 
   | 'sinus'
@@ -106,6 +107,27 @@ export interface ActiveSurgicalProcedure extends SurgicalProcedureDefinition {
   endsAtSimTime: number;
 }
 
+export type NociceptiveTestKind =
+  | 'pinch_interdigital'
+  | 'pressure_periosteal'
+  | 'visceral_traction'
+  | 'pinch_tail_cutaneous';
+
+export interface NociceptiveTestDefinition {
+  id: NociceptiveTestKind;
+  name: string;
+  description: string;
+  intensity: number;
+  durationSeconds: number;
+  type: 'somatic_superficial' | 'somatic_deep' | 'visceral';
+  targetTissue: string;
+}
+
+export interface ActiveNociceptiveTest extends NociceptiveTestDefinition {
+  startedAtSimTime: number;
+  endsAtSimTime: number;
+}
+
 export interface FastBolusConsequences {
   apneaRisk: number; // 0 to 1
   hypotensionSeverity: number; // 0 to 1
@@ -128,6 +150,7 @@ export interface DrugReceptorProfile {
   beta1?: TargetAffinity;
   beta2?: TargetAffinity;
   // Cholinergic receptors
+  m1?: TargetAffinity; // Central muscarinic signaling; distinct from peripheral M2/M3
   m2?: TargetAffinity;
   m3?: TargetAffinity;
   nm?: TargetAffinity; // Neuromuscular nicotinic
@@ -164,7 +187,19 @@ export interface SpeciesCellularParticularity {
   intensity: number; // 0 to 1
 }
 
+export interface HemodynamicDrivers {
+  preloadRatio: number;
+  vascularResistanceRatio: number;
+  contractilityRatio: number;
+  nodalDeltaBpm: number;
+  baroreflexDeltaBpm: number;
+  systemicDeltaBpm: number;
+  otherDeltaBpm: number;
+  targetHeartRate: number;
+}
+
 export interface CellularBiophysicsState {
+  hemodynamicDrivers?: HemodynamicDrivers;
   cAMPMyocardial: number; // normalized baseline 1.0 (Gs vs Gi balance)
   cAMPVascular: number; // normalized baseline 1.0
   intracellularCalcium: number; // normalized baseline 1.0 (inotropic state)
@@ -197,6 +232,7 @@ export interface DrugDefinition {
   id: string;
   name: string;
   brandName?: string;
+  aliases?: string[];
   category: DrugCategory;
   description: string;
   defaultConcentrationMgMl: number; // mg/ml (or mcg/ml, or % for fluids/inhalants)
@@ -209,16 +245,12 @@ export interface DrugDefinition {
     feline?: { min: number; max: number; typical: number };
     equine?: { min: number; max: number; typical: number };
     bovine?: { min: number; max: number; typical: number };
-    rabbit?: { min: number; max: number; typical: number };
-    avian?: { min: number; max: number; typical: number };
   };
   recommendedCriDose?: {
     canine?: { min: number; max: number; typical: number };
     feline?: { min: number; max: number; typical: number };
     equine?: { min: number; max: number; typical: number };
     bovine?: { min: number; max: number; typical: number };
-    rabbit?: { min: number; max: number; typical: number };
-    avian?: { min: number; max: number; typical: number };
   };
   criDoseUnit?: 'mcg/kg/min' | 'mg/kg/h' | 'mcg/kg/h' | 'mg/kg/min' | 'ml/kg/h';
   supportedRoutes: DrugRoute[];
@@ -265,11 +297,30 @@ export interface DrugDefinition {
     isBovineHyperSensitive?: boolean;
     isDirectVasodilator?: boolean;
     hasCyanideToxicityRisk?: boolean;
+    isAtypicalOpioidSNRI?: boolean;
+    isTramadol?: boolean;
+    isHighSelectivityAlpha2?: boolean;
+    isLowSelectivityAlpha2?: boolean;
+    causesDirectMyocardialDepression?: boolean;
+    causesArrhythmogenicityIncrease?: boolean;
+    isPhenothiazine?: boolean;
+    causesSplenicSequestration?: boolean;
+    causesHypothermiaPredisposition?: boolean;
+    causesEpinephrineReversalVulnerability?: boolean;
+    causesParadoxicalExcitationRisk?: boolean;
+    isLipophilicPropyleneGlycolVehicle?: boolean;
+    causesCentralVagalBradycardia?: boolean;
+    hasCeilingEffect?: boolean;
+    hasSlowReceptorDissociation?: boolean;
   };
   biotransformation?: Partial<DrugBiotransformationProfile>;
+  evidenceNote?: string;
+  experimentalRegimen?: boolean;
+  speciesRoutes?: Partial<Record<SpeciesType, DrugRoute[]>>;
 }
 
 export interface ActiveDrugDose {
+  preparation?: import('../data/drugFormulations').DrugPreparation;
   id: string;
   drugId: string;
   drugName: string;
@@ -323,6 +374,8 @@ export interface DrugBiotransformationProfile {
   apparentCentralVolumeLKg: number;
   lipidSolubility: number;
   activeMetabolite?: string;
+  /** Fraction of clearance occurring in extra-hepatic organs (e.g. pulmonary, renal parenchymal). */
+  extrahepaticClearanceFraction?: number;
 }
 
 export interface PatientProfile {
@@ -355,15 +408,42 @@ export interface PatientProfile {
     glucoseMgDl?: number;
   };
   pathologyConditions: {
+    hepaticDysfunctionSeverity?: number; // 0 to 1 intrinsic functional impairment
+    renalDysfunctionSeverity?: number; // 0 to 1 intrinsic functional impairment
     hypovolemiaSeverity?: number; // 0 (none) to 1 (severe shock)
     hyperkalemiaSeverity?: number; // 0 to 1
     brachycephalicObstruction?: boolean;
     cardiacFailureDCM?: boolean;
+    cardiacCompromiseSeverity?: number; // 0 to 1
     sepsisVasodilation?: boolean;
     hypothermiaSusceptible?: boolean;
     gastricDilatationVolvulus?: boolean;
     traumaHemorrhage?: boolean;
     fetalDepressionRisk?: boolean;
+  };
+  clinicalAssessment?: {
+    isEmergency?: boolean;
+    cardiacCompromise?: 'none' | 'mild' | 'moderate' | 'severe';
+    cardiacAuscultation?: string;
+    respiratoryCompromise?: 'none' | 'mild' | 'moderate' | 'severe';
+    respiratoryAuscultation?: string;
+    hemorrhageSeverity?: 'none' | 'mild' | 'moderate' | 'severe';
+    autoCalculatedAsa?: ASAStatus;
+    asaManualOverride?: boolean;
+    asaJustification?: string;
+  };
+  labMarkers?: {
+    creatinineMgDl?: number;
+    ureaMgDl?: number;
+    sdmaUgDl?: number;
+    urineSpecificGravity?: number;
+    oliguriaAnuria?: 'normal' | 'oliguria' | 'anuria';
+    altUl?: number;
+    alpUl?: number;
+    astUl?: number;
+    totalBilirubinMgDl?: number;
+    albuminGDl?: number;
+    ptStatus?: 'normal' | 'prolonged';
   };
 }
 
@@ -395,6 +475,12 @@ export interface BiologicalState {
     sympatheticDrive: number;
     parasympatheticDrive: number;
     catecholamineReserve: number;
+    norepinephrineSynaptic?: number;
+    epinephrinePlasma?: number;
+    acetylcholineSynaptic?: number;
+    gabaTone?: number;
+    glutamateTone?: number;
+    vagalArousalModulation?: number;
   };
   organPerfusion: {
     cerebralFraction: number;
@@ -418,6 +504,29 @@ export interface BiologicalState {
     wholeBloodCentralMl: number;
     effectiveCirculatingExpansionMl: number;
     currentHematocritPct: number;
+    interstitialMl?: number;
+    eliminatedMl?: number;
+    deliveredMl?: number;
+    currentDeliveryMlPerHour?: number;
+    sodiumExcessMmol?: number;
+    chlorideExcessMmol?: number;
+    baseDeficitMmol?: number;
+    sodiumMmolL?: number;
+    chlorideMmolL?: number;
+    fluidBaseDeficitMmolL?: number;
+    glucoseInputMg?: number;
+    pulmonaryEdemaSeverity?: number;
+    congestionSeverity?: number;
+    renalOutputMlKgHour?: number;
+    lastDeliveryMl?: number;
+    freeWaterMl?: number;
+  };
+  visceral?: {
+    gutMotilityFraction: number;
+    secretionsFraction: number;
+    urinaryRetentionMl: number;
+    gutStasisSeconds: number;
+    centralAntimuscarinicBurden: number;
   };
   metabolic: {
     bloodGlucoseMgDl: number;
@@ -624,6 +733,9 @@ export interface AnesthesiaEquipmentState {
   fluidRateMlPerHour: number;
   totalFluidsInfusedMl: number;
   isFluidPumpRunning: boolean;
+  /** Finite, independently composed fluid challenges. Pausing the simulation pauses delivery. */
+  fluidBoluses?: { id: string; fluidName: string; volumeMl: number; durationSec: number; deliveredMl: number; isRunning: boolean }[];
+  fluidTemperatureC?: number;
   warmingBlanketActive: boolean;
   warmingBlanketTempC: number;
 }
