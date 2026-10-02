@@ -207,15 +207,21 @@ export class PKPDEngine {
 
       // Retain active doses
       // A dose must NEVER be discarded while it is still being infused (!isFullyDelivered)
-      // or during transit lag. Once delivered, keep it while circulating in plasma (newCp > 0.0001)
-      // or in the biophase effect compartment (newCe > 0.0001), or while CRI is active.
+      // or during transit lag. Once delivered, keep it while there is pharmacologically
+      // meaningful drug anywhere in the system: plasma (Cp), biophase (Ce), rapid/deep
+      // peripheral compartments, or absorption depot. The retention threshold is set high
+      // enough (0.001 for central, 0.005 for peripheral) to prune short-acting drugs
+      // (e.g. propofol, ephedrine) whose redistribution traces linger for hours without
+      // clinical significance, while preserving tracking during the active washout phase.
+      const totalPeripheralAmount = (pkCompartments?.rapidPeripheralAmountNormalized || 0)
+        + (pkCompartments?.deepPeripheralAmountNormalized || 0);
+      const hasRelevantBody = newCp > 0.001
+        || newCe > 0.001
+        || totalPeripheralAmount > 0.005
+        || (pkCompartments?.absorptionDepotAmountNormalized || 0) > 0.002;
       if (
         !isFullyDelivered ||
-        newCp > 0.0001 ||
-        newCe > 0.0001 ||
-        (pkCompartments?.rapidPeripheralAmountNormalized || 0) > 0.0001 ||
-        (pkCompartments?.deepPeripheralAmountNormalized || 0) > 0.0001 ||
-        (pkCompartments?.absorptionDepotAmountNormalized || 0) > 0.0001 ||
+        hasRelevantBody ||
         transitLagRemaining > 0 ||
         priorTransitLag > 0 ||
         bolusShockRemainingSec > 0 ||

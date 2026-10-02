@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import type { DrugExposureAnalysis } from '../../engine/exposureAnalysis';
 import {
   Activity,
   AlertTriangle,
@@ -16,6 +17,7 @@ import {
 import { VETERINARY_DRUG_DATABASE } from '../../data/drugDatabase';
 import { analyzeDrugExposure } from '../../engine/exposureAnalysis';
 import { analyzePatientDrugKinetics } from '../../engine/biotransformationEngine';
+import type { PatientDrugKinetics } from '../../engine/biotransformationEngine';
 import { getRoutePharmacokinetics } from '../../engine/drugAdministration';
 import type { ActiveDrugDose, AnesthesiaEquipmentState, PatientProfile, VitalSigns } from '../../types/simulator';
 import { formatDecimal, formatSpecies } from '../../utils/formatters';
@@ -56,6 +58,58 @@ const organEffectSummary = (drugId: string): string => {
   if (drug.effectDepth > 0.1) effects.push('hipnose/sedação ↑');
   if (drug.muscleRelaxation > 0.15) effects.push('relaxamento ↑');
   return effects.slice(0, 3).join(' · ') || 'efeito sistêmico discreto';
+};
+
+/**
+ * Badge indicating the current clinical effect status of a drug.
+ * Uses distinct visual styles for active, subtherapeutic, and no-effect states.
+ */
+const ClinicalEffectBadge: React.FC<{ analysis: DrugExposureAnalysis }> = ({ analysis }) => {
+  if (analysis.clinicalEffectStatus === 'em trânsito') {
+    return (
+      <span className="px-1.5 py-0.2 rounded text-[9px] font-mono-code font-bold bg-amber-950 text-amber-300 border border-amber-700/60">
+        EM TRÂNSITO
+      </span>
+    );
+  }
+  if (analysis.isEffectActive) {
+    return (
+      <span className="px-1.5 py-0.2 rounded text-[9px] font-mono-code font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60">
+        EFEITO ATIVO
+      </span>
+    );
+  }
+  if (analysis.clinicalEffectStatus === 'efeito subterapêutico') {
+    return (
+      <span className="px-1.5 py-0.2 rounded text-[9px] font-mono-code font-bold bg-zinc-800 text-amber-400 border border-amber-800/40">
+        SUBTERAPÊUTICO
+      </span>
+    );
+  }
+  return (
+    <span className="px-1.5 py-0.2 rounded text-[9px] font-mono-code font-bold bg-zinc-800 text-zinc-500 border border-zinc-700/40">
+      SEM EFEITO
+    </span>
+  );
+};
+
+/**
+ * Compute distribution percentages as fractions of the total delivered amount
+ * (including already eliminated drug). This gives a much more intuitive picture
+ * than only showing the fraction of remaining drug in each compartment.
+ */
+const computeDistributionWithEliminated = (
+  kinetics: PatientDrugKinetics,
+  analysis: DrugExposureAnalysis,
+): { centralPct: number; rapidPct: number; deepPct: number; depotPct: number; elimPct: number } => {
+  const elim = analysis.eliminatedFraction;
+  const bodyFraction = 1 - elim;
+  const centralPct = Math.round(kinetics.centralFraction * bodyFraction * 100);
+  const rapidPct = Math.round(kinetics.rapidTissueFraction * bodyFraction * 100);
+  const deepPct = Math.round(kinetics.deepTissueFraction * bodyFraction * 100);
+  const depotPct = Math.round(kinetics.depotFraction * bodyFraction * 100);
+  const elimPct = Math.round(elim * 100);
+  return { centralPct, rapidPct, deepPct, depotPct, elimPct };
 };
 
 export const CirculatingDrugsPanel: React.FC<CirculatingDrugsPanelProps> = ({
@@ -197,13 +251,24 @@ export const CirculatingDrugsPanel: React.FC<CirculatingDrugsPanelProps> = ({
             const concentration = kinetics.estimatedPlasmaConcentration;
             const freeConcentration = kinetics.estimatedFreeConcentration;
             const concentrationDigits = concentration !== undefined && concentration < 0.1 ? 3 : 2;
+            const isResidual = !analysis.isEffectActive;
+
+            // Compute distribution fractions including eliminated portion for full picture
+            const distribWithElim = computeDistributionWithEliminated(kinetics, analysis);
 
             return (
-              <div key={dose.id} className="rounded-xl border border-zinc-800 bg-[#141416] p-3 transition hover:border-zinc-700 space-y-2.5">
+              <div
+                key={dose.id}
+                className={`rounded-xl border p-3 transition space-y-2.5 ${
+                  isResidual
+                    ? 'border-zinc-800/50 bg-[#111113] opacity-75'
+                    : 'border-zinc-800 bg-[#141416] hover:border-zinc-700'
+                }`}
+              >
                 {/* Drug name & status row */}
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-sm font-bold text-white truncate flex items-center gap-1.5">
+                    <div className="text-sm font-bold text-white truncate flex items-center gap-1.5 flex-wrap">
                       <span>{dose.drugName}</span>
                       {drug.category === 'antagonist_reversal' && (
                         <span className="px-1.5 py-0.2 rounded bg-purple-950 text-purple-200 text-[10px] font-mono-code border border-purple-700 font-bold">
@@ -215,10 +280,12 @@ export const CirculatingDrugsPanel: React.FC<CirculatingDrugsPanelProps> = ({
                           CRI
                         </span>
                       )}
+                      {/* Clinical effect status badge */}
+                      <ClinicalEffectBadge analysis={analysis} />
                     </div>
                     <div className="text-[11px] text-zinc-400 font-mono-code mt-0.5 flex items-center gap-2 flex-wrap">
                       <span>{analysis.phaseLabel} · via {dose.route}</span>
-                      <span className="text-emerald-300 font-bold">Ce: {dose.currentCe.toFixed(3)}×</span>
+                      <span className={analysis.isEffectActive ? 'text-emerald-300 font-bold' : 'text-zinc-500'}>Ce: {dose.currentCe.toFixed(3)}×</span>
                       <span className="text-cyan-300">Cp: {dose.currentCp.toFixed(3)}×</span>
                       <span>· {Math.round(route.bioavailability * 100)}% biodisp.</span>
                     </div>
@@ -250,7 +317,7 @@ export const CirculatingDrugsPanel: React.FC<CirculatingDrugsPanelProps> = ({
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="font-mono-code text-lg font-black text-cyan-400">
+                    <div className={`font-mono-code text-lg font-black ${isResidual ? 'text-zinc-500' : 'text-cyan-400'}`}>
                       {concentration === undefined ? `${dose.currentCp.toFixed(3)} idx` : `${formatDecimal(concentration, concentrationDigits)} µg/mL`}
                     </div>
                     <div className="text-[10px] text-zinc-500 font-mono-code">
@@ -259,43 +326,58 @@ export const CirculatingDrugsPanel: React.FC<CirculatingDrugsPanelProps> = ({
                   </div>
                 </div>
 
-                {/* Multicompartment Distribution Progress Bar */}
+                {/* Multicompartment Distribution Progress Bar (with eliminated) */}
                 <div className="space-y-1">
                   <div className="flex justify-between text-[10px] text-zinc-400 font-mono-code">
-                    <span>Distribuição compartimental</span>
-                    <span>bioacumulação {kinetics.bioaccumulationLabel}</span>
+                    <span>Distribuição · Destino do fármaco administrado</span>
+                    <span>{Math.round(analysis.eliminatedFraction * 100)}% eliminado</span>
                   </div>
                   <div className="flex h-2.5 overflow-hidden rounded-full bg-zinc-800">
-                    <div className="bg-cyan-400" style={{ width: `${kinetics.centralFraction * 100}%` }} title="Central / Plasma" />
-                    <div className="bg-emerald-400" style={{ width: `${kinetics.rapidTissueFraction * 100}%` }} title="Tecidos Rápidos" />
-                    <div className="bg-violet-400" style={{ width: `${kinetics.deepTissueFraction * 100}%` }} title="Tecidos Profundos" />
-                    <div className="bg-amber-400" style={{ width: `${kinetics.depotFraction * 100}%` }} title="Depósito" />
+                    <div className="bg-cyan-400" style={{ width: `${distribWithElim.centralPct}%` }} title="Plasma / Central" />
+                    <div className="bg-emerald-400" style={{ width: `${distribWithElim.rapidPct}%` }} title="Tecidos de Equilíbrio Rápido (VRG / músculo)" />
+                    <div className="bg-violet-400" style={{ width: `${distribWithElim.deepPct}%` }} title="Tecidos Profundos (gordura / osso)" />
+                    <div className="bg-amber-400" style={{ width: `${distribWithElim.depotPct}%` }} title="Depósito de Absorção" />
+                    <div className="bg-zinc-600" style={{ width: `${distribWithElim.elimPct}%` }} title="Eliminado (metabolismo + excreção)" />
                   </div>
-                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-zinc-400 font-mono-code pt-0.5">
+                  <div className="grid grid-cols-3 gap-x-2 gap-y-0.5 text-[10px] text-zinc-400 font-mono-code pt-0.5">
                     <span className="flex items-center gap-1">
                       <span className="h-2 w-2 rounded-full bg-cyan-400 inline-block" />
-                      Central: <b className="text-zinc-200">{Math.round(kinetics.centralFraction * 100)}%</b>
+                      Plasma: <b className="text-zinc-200">{distribWithElim.centralPct}%</b>
                     </span>
                     <span className="flex items-center gap-1">
                       <span className="h-2 w-2 rounded-full bg-emerald-400 inline-block" />
-                      Rápido: <b className="text-zinc-200">{Math.round(kinetics.rapidTissueFraction * 100)}%</b>
+                      Tec. rápidos: <b className="text-zinc-200">{distribWithElim.rapidPct}%</b>
                     </span>
                     <span className="flex items-center gap-1">
                       <span className="h-2 w-2 rounded-full bg-violet-400 inline-block" />
-                      Profundo: <b className="text-zinc-200">{Math.round(kinetics.deepTissueFraction * 100)}%</b>
+                      Tec. profundos: <b className="text-zinc-200">{distribWithElim.deepPct}%</b>
                     </span>
+                    {distribWithElim.depotPct > 0 && (
+                      <span className="flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-amber-400 inline-block" />
+                        Absorção: <b className="text-zinc-200">{distribWithElim.depotPct}%</b>
+                      </span>
+                    )}
                     <span className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-amber-400 inline-block" />
-                      Depósito: <b className="text-zinc-200">{Math.round(kinetics.depotFraction * 100)}%</b>
+                      <span className="h-2 w-2 rounded-full bg-zinc-600 inline-block" />
+                      Eliminado: <b className="text-zinc-200">{distribWithElim.elimPct}%</b>
                     </span>
                   </div>
                 </div>
 
                 {/* Clinical effect & organ targets */}
                 <div className="border-t border-zinc-800/80 pt-2 text-[11px] space-y-1 font-mono-code leading-relaxed">
-                  <div className="text-emerald-300">
-                    <span className="text-zinc-400">Ação:</span> {mechanismSummary(dose.drugId)} · {organEffectSummary(dose.drugId)}
-                  </div>
+                  {analysis.isEffectActive ? (
+                    <div className="text-emerald-300">
+                      <span className="text-zinc-400">Ação:</span> {mechanismSummary(dose.drugId)} · {organEffectSummary(dose.drugId)}
+                    </div>
+                  ) : (
+                    <div className="text-zinc-500 italic">
+                      {analysis.clinicalEffectStatus === 'efeito subterapêutico'
+                        ? 'Concentração subterapêutica – efeito clínico direto negligível; redistribuição/eliminação em curso.'
+                        : 'Sem efeito clínico direto sobre o paciente. Traços residuais em eliminação.'}
+                    </div>
+                  )}
                   <div className="text-zinc-300 text-[10px]">
                     <span className="text-zinc-400">Depuração:</span> hepática {Math.round(kinetics.profile.hepaticClearanceFraction * 100)}% · renal {Math.round(kinetics.profile.renalClearanceFraction * 100)}% · capacidade {Math.round(kinetics.effectiveClearance * 100)}%
                   </div>
@@ -460,47 +542,67 @@ export const CirculatingDrugsPanel: React.FC<CirculatingDrugsPanelProps> = ({
               <div className="rounded-xl border border-dashed border-zinc-700/60 p-4 text-center text-xs text-zinc-400 bg-zinc-900/40">
                 Nenhum fármaco em circulação ativa no momento.
                 <div className="text-[11px] text-zinc-500 mt-1">
-                  Administre fármacos na aba Farmacopeia para inspecionar a cinética plasmática ($C_p$) e de biofase ($C_e$).
+                  Administre fármacos na aba Farmacopeia para inspecionar a cinética plasmática (Cp) e de biofase (Ce).
                 </div>
               </div>
             ) : (
-              activeDoses.map((dose) => (
-                <div
-                  key={dose.id}
-                  className="rounded-xl border border-zinc-800 bg-[#101416] p-3 space-y-2 font-mono-code"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs text-white">{dose.drugName}</span>
-                    <span className="rounded bg-zinc-800 px-2 py-0.5 text-[9px] text-zinc-300">
-                      {dose.dosePerKg} {dose.route}
-                    </span>
-                  </div>
+              activeDoses.map((dose) => {
+                const drug = VETERINARY_DRUG_DATABASE.find((item) => item.id === dose.drugId);
+                const analysis = drug ? analyzeDrugExposure(dose, drug) : undefined;
+                const isResidual = analysis ? !analysis.isEffectActive : false;
+                return (
+                  <div
+                    key={dose.id}
+                    className={`rounded-xl border p-3 space-y-2 font-mono-code ${
+                      isResidual
+                        ? 'border-zinc-800/50 bg-[#0d0d0f] opacity-70'
+                        : 'border-zinc-800 bg-[#101416]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-white">{dose.drugName}</span>
+                        {analysis && <ClinicalEffectBadge analysis={analysis} />}
+                      </div>
+                      <span className="rounded bg-zinc-800 px-2 py-0.5 text-[9px] text-zinc-300">
+                        {dose.dosePerKg} {dose.route}
+                      </span>
+                    </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="rounded bg-zinc-900/80 p-2 border border-zinc-800">
-                      <div className="text-[10px] uppercase text-zinc-400">Plasma (Cp)</div>
-                      <div className="text-sm font-black text-cyan-300">
-                        {(dose.currentCp ?? 0).toFixed(3)}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded bg-zinc-900/80 p-2 border border-zinc-800">
+                        <div className="text-[10px] uppercase text-zinc-400">Plasma (Cp)</div>
+                        <div className={`text-sm font-black ${isResidual ? 'text-zinc-500' : 'text-cyan-300'}`}>
+                          {(dose.currentCp ?? 0).toFixed(3)}
+                        </div>
+                      </div>
+
+                      <div className="rounded bg-zinc-900/80 p-2 border border-zinc-800">
+                        <div className="text-[10px] uppercase text-zinc-400">Sítio efetor (Ce)</div>
+                        <div className={`text-sm font-bold ${isResidual ? 'text-zinc-500' : 'text-emerald-300'}`}>
+                          {(dose.currentCe ?? 0).toFixed(3)}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="rounded bg-zinc-900/80 p-2 border border-zinc-800">
-                      <div className="text-[10px] uppercase text-zinc-400">Biofase / Cérebro (Ce)</div>
-                      <div className="text-sm font-bold text-emerald-300">
-                        {(dose.currentCe ?? 0).toFixed(3)}
+                    {dose.pkCompartments && (
+                      <div className="space-y-1.5 border-t border-zinc-800/80 pt-1.5">
+                        <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                          <span>V₂ Tec. rápidos: <b className="text-zinc-200">{(dose.pkCompartments.rapidPeripheralAmountNormalized ?? 0).toFixed(3)}</b></span>
+                          <span>V₃ Tec. profundos: <b className="text-zinc-200">{(dose.pkCompartments.deepPeripheralAmountNormalized ?? 0).toFixed(3)}</b></span>
+                          <span>Dep: <b className="text-emerald-300">{(dose.pkCompartments.effectiveClearanceMultiplier || 1).toFixed(2)}x</b></span>
+                        </div>
+                        {analysis && (
+                          <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                            <span>Eliminado: <b className="text-zinc-200">{Math.round(analysis.eliminatedFraction * 100)}%</b></span>
+                            <span>{analysis.phaseLabel}</span>
+                          </div>
+                        )}
                       </div>
-                    </div>
+                    )}
                   </div>
-
-                  {dose.pkCompartments && (
-                    <div className="flex items-center justify-between text-[10px] text-zinc-400 border-t border-zinc-800/80 pt-1.5">
-                      <span>V₂ Rápido: <b className="text-zinc-200">{(dose.pkCompartments.rapidPeripheralAmountNormalized ?? 0).toFixed(2)}</b></span>
-                      <span>V₃ Profundo: <b className="text-zinc-200">{(dose.pkCompartments.deepPeripheralAmountNormalized ?? 0).toFixed(2)}</b></span>
-                      <span>Depuração: <b className="text-emerald-300">{(dose.pkCompartments.effectiveClearanceMultiplier || 1).toFixed(2)}x</b></span>
-                    </div>
-                  )}
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

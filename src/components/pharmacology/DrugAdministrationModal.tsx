@@ -711,13 +711,18 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
               const definition = VETERINARY_DRUG_DATABASE.find((drug) => drug.id === dose.drugId);
               const effectOccupancy = hillResponse(dose.currentCe);
               const exposure = definition ? analyzeDrugExposure(dose, definition) : undefined;
+              const isResidual = exposure ? !exposure.isEffectActive : false;
               return (
                 <div
                   key={dose.id}
-                  className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl flex items-center justify-between text-xs"
+                  className={`p-3 rounded-xl flex items-center justify-between text-xs ${
+                    isResidual
+                      ? 'bg-zinc-950/60 border border-zinc-800/50 opacity-70'
+                      : 'bg-zinc-950 border border-zinc-800'
+                  }`}
                 >
                   <div className="pr-2 truncate">
-                    <div className="font-bold text-white flex items-center gap-1.5 truncate">
+                    <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
                       <span>{dose.drugName}</span>
                       {definition?.category === 'antagonist_reversal' && (
                         <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 border border-purple-600 text-purple-200 font-mono-code font-bold">
@@ -727,6 +732,18 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                       {inTransit && (
                         <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-950 border border-amber-600 text-amber-300 font-mono-code">
                           Trânsito: {Math.ceil(dose.transitLagRemainingSec || 0)}s
+                        </span>
+                      )}
+                      {/* Clinical effect status badge */}
+                      {exposure && !inTransit && (
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono-code font-bold ${
+                          exposure.isEffectActive
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60'
+                            : exposure.clinicalEffectStatus === 'efeito subterapêutico'
+                              ? 'bg-zinc-800 text-amber-400 border border-amber-800/40'
+                              : 'bg-zinc-800 text-zinc-500 border border-zinc-700/40'
+                        }`}>
+                          {exposure.isEffectActive ? 'ATIVO' : exposure.clinicalEffectStatus === 'efeito subterapêutico' ? 'SUBTERAP.' : 'S/ EFEITO'}
                         </span>
                       )}
                     </div>
@@ -739,22 +756,32 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                     {/* Visual Ce Bar */}
                     <div className="w-32 bg-zinc-800 h-1.5 rounded-full mt-2 overflow-hidden">
                       <div
-                        className="h-full bg-emerald-400 transition-all duration-300"
+                        className={`h-full transition-all duration-300 ${isResidual ? 'bg-zinc-600' : 'bg-emerald-400'}`}
                         style={{ width: `${Math.round(effectOccupancy * 100)}%` }}
                       />
                     </div>
+                    {exposure && (
+                      <div className="text-[10px] text-zinc-500 mt-0.5 font-mono-code">
+                        {Math.round(exposure.eliminatedFraction * 100)}% eliminado
+                      </div>
+                    )}
                   </div>
 
                   <div className="text-right shrink-0 font-mono-code">
-                    <span className="text-xs text-emerald-300 font-bold block">
+                    <span className={`text-xs font-bold block ${isResidual ? 'text-zinc-500' : 'text-emerald-300'}`}>
                       Ce: {dose.currentCe.toFixed(2)}×
                     </span>
-                    <span className="text-[10px] text-cyan-300 block">
+                    <span className={`text-[10px] block ${isResidual ? 'text-zinc-500' : 'text-cyan-300'}`}>
                       Cp: {dose.currentCp.toFixed(2)}×
                     </span>
                     {exposure && (
-                      <span className="text-[10px] text-amber-300 block">
+                      <span className={`text-[10px] block ${isResidual ? 'text-zinc-500' : 'text-amber-300'}`}>
                         {exposure.phaseLabel}
+                      </span>
+                    )}
+                    {exposure?.estimatedEffectMinutesRemaining !== undefined && (
+                      <span className="text-[10px] text-amber-300 block font-semibold">
+                        ~{formatDecimal(exposure.estimatedEffectMinutesRemaining, 0)} min restantes
                       </span>
                     )}
                     {dose.isCRI && dose.isInfusionRunning !== false && (
