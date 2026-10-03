@@ -139,12 +139,21 @@ export class DynamicInteractionsEngine {
 
     // 13. Multi-Modal Balanced Analgesia Synergy (Opioid + Alpha-2 + NMDA Antagonist)
     if (receptors.muOpioidDrive > 0.30 && receptors.alpha2Drive > 0.25 && receptors.nmdaBlockade > 0.20) {
-      interactions.push({
-        title: 'Analgesia Multimodal Preventiva Balanceada (Tríade O-A-K)',
-        severity: 'info',
-        description: 'Excelente sinergismo analgésico espinal e supraespinal com bloqueio de wind-up nociceptivo e estabilização hemodinâmica completa.',
-        pharmacologyMechanism: 'Ação sinérgica: ativação de receptores mu e alfa-2 pré-sinápticos reduzindo liberação de substância P e glutamato no corno dorsal, associada ao bloqueio pós-sináptico dos receptores NMDA pela cetamina.',
-      });
+      if (activeIds.has('ketamine')) {
+        interactions.push({
+          title: 'Analgesia Multimodal Preventiva Balanceada (Tríade O-A-K)',
+          severity: 'info',
+          description: 'Excelente sinergismo analgésico espinal e supraespinal com bloqueio de wind-up nociceptivo e estabilização hemodinâmica completa.',
+          pharmacologyMechanism: 'Ação sinérgica: ativação de receptores mu e alfa-2 pré-sinápticos reduzindo liberação de substância P e glutamato no corno dorsal, associada ao bloqueio pós-sináptico dos receptores NMDA pela cetamina.',
+        });
+      } else if (activeIds.has('methadone')) {
+        interactions.push({
+          title: 'Neuroleptanalgesia com Bloqueio NMDA Intrínseco (Alfa-2 + Metadona)',
+          severity: 'info',
+          description: 'Excelente sinergismo analgésico espinal e supraespinal com bloqueio de wind-up nociceptivo proporcionado pelo componente antagonista NMDA intrínseco da metadona combinado ao agonista alfa-2.',
+          pharmacologyMechanism: 'Ação sinérgica: ativação de receptores mu e alfa-2 pré-sinápticos reduzindo liberação de substância P e glutamato no corno dorsal, associada ao bloqueio dos receptores NMDA exercido pela própria molécula de metadona.',
+        });
+      }
     }
 
     // 14. Ephedrine Hemodynamic Restoration in Inhalant-Induced Hypotension
