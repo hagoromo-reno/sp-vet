@@ -26,8 +26,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
     dismissConcurrentNotice,
   } = useAuth();
 
-  const [email, setEmail] = useState('admin@spvet.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen && !concurrentDisconnected && !subscriptionError) {
@@ -162,20 +162,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
           <div className="p-3 rounded-xl bg-[#11121c] border border-[#1f2130] text-[11px] text-zinc-400 space-y-1.5">
             <div className="flex items-center gap-1.5 font-bold text-zinc-300">
               <Info className="w-3.5 h-3.5 text-cyan-400" />
-              Contas de Acesso Cadastradas no Banco:
-            </div>
-            <div className="flex justify-between items-center text-[10px] font-mono">
-              <span>Admin Master:</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('admin@spvet.com');
-                  setPassword('admin123');
-                }}
-                className="text-emerald-400 hover:underline cursor-pointer"
-              >
-                admin@spvet.com (admin123)
-              </button>
+              Acesso de Avaliação / Demonstração:
             </div>
             <div className="flex justify-between items-center text-[10px] font-mono">
               <span>Free Trial (7 dias):</span>
