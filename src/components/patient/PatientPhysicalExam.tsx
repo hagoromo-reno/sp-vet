@@ -16,6 +16,7 @@ import {
 } from '../../types/simulator';
 import { SURGICAL_PROCEDURES } from '../../data/surgicalProcedures';
 import { NOCICEPTIVE_TESTS } from '../../data/nociceptiveTests';
+import { PatientSedationPanel } from './PatientSedationFacies';
 import {
   Activity,
   AlertOctagon,
@@ -44,6 +45,7 @@ interface PatientPhysicalExamProps {
   onStartNociceptiveTest?: (test: NociceptiveTestDefinition) => void;
   onStopNociceptiveTest?: () => void;
   simTimeSeconds?: number;
+  onOpenConsciousnessBoard?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +188,7 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
   onStartNociceptiveTest,
   onStopNociceptiveTest,
   simTimeSeconds = 0,
+  onOpenConsciousnessBoard,
 }) => {
   const [activeTestMessage, setActiveTestMessage] = useState<string | null>(null);
   const [selectedTestLimb, setSelectedTestLimb] = useState<AnatomicalRegion>('pelvic_limb');
@@ -339,7 +342,14 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
         )}
       </div>
 
-      {/* 2. DEDICATED NOCICEPTIVE PAIN SENSITIVITY TESTING SECTION */}
+      {/* 2. PATIENT SEDATION FACIES & VISUAL CLINICAL INSPECTION */}
+      <PatientSedationPanel
+        vitals={vitals}
+        patient={patient}
+        onOpenConsciousnessBoard={onOpenConsciousnessBoard}
+      />
+
+      {/* 3. DEDICATED NOCICEPTIVE PAIN SENSITIVITY TESTING SECTION */}
       <div className="rounded-xl border border-amber-500/40 bg-gradient-to-br from-amber-950/25 to-[#141018] p-3.5 space-y-3 shadow-lg">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 pb-2">
           <div className="flex items-center space-x-2">

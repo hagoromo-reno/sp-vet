@@ -15,6 +15,7 @@ import {
   Moon,
   Zap,
 } from 'lucide-react';
+import { PatientSedationAvatar } from '../patient/PatientSedationFacies';
 
 interface AnestheticDepthBoardProps {
   isOpen: boolean;
@@ -91,16 +92,19 @@ export const AnestheticDepthBoard: React.FC<AnestheticDepthBoardProps> = ({
         <div className="p-6 overflow-y-auto space-y-6 text-xs text-[#d0d0dc]">
           {/* Main Stage Ribbon */}
           <div className="p-4 rounded-xl bg-gradient-to-r from-purple-950/40 via-[#14141e] to-indigo-950/40 border border-purple-500/30 flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="space-y-1">
-              <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider font-mono">
-                Estágio Atual de Guedel
-              </span>
-              <h3 className="text-xl font-extrabold text-white">
-                {stage}
-              </h3>
-              <p className="text-xs text-[#a5a5bb]">
-                Condutância GABA-A gCl⁻: <strong className="text-cyan-300 font-mono">{vitals.cellularState?.chlorideConductanceGabaA ?? 0.08} mS</strong> · Escore de Profundidade: <strong className="text-purple-300 font-mono">{depthScore}/100</strong>
-              </p>
+            <div className="flex items-center gap-3.5">
+              <PatientSedationAvatar vitals={vitals} patient={patient} size="lg" showLabel={false} />
+              <div className="space-y-1">
+                <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider font-mono">
+                  Estágio Atual de Guedel & Fácies
+                </span>
+                <h3 className="text-xl font-extrabold text-white">
+                  {stage}
+                </h3>
+                <p className="text-xs text-[#a5a5bb]">
+                  Condutância GABA-A gCl⁻: <strong className="text-cyan-300 font-mono">{vitals.cellularState?.chlorideConductanceGabaA ?? 0.08} mS</strong> · Escore de Profundidade: <strong className="text-purple-300 font-mono">{depthScore}/100</strong>
+                </p>
+              </div>
             </div>
 
             <div className="flex items-center gap-3">

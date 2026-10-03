@@ -1016,7 +1016,7 @@ export default function App() {
   return (
     <div className="vetsim-app min-h-screen flex flex-col">
       <SimulationHeader
-        patient={patient} paused={isSimPaused} speed={simSpeed} time={formatSimTime(simTimeSeconds)}
+        patient={patient} vitals={vitals} paused={isSimPaused} speed={simSpeed} time={formatSimTime(simTimeSeconds)}
         consciousness={vitals.consciousnessScore ?? 100} eventCount={eventLogs.length}
         occurrenceCount={clinicalOccurrenceHistory.length}
         onPause={() => recording.recorder.current!.run.status === 'active' ? setIsSimPaused(prev => !prev) : handleResetSimulation()} onSpeed={setSimSpeed} onReset={handleResetSimulation}
@@ -1203,6 +1203,7 @@ export default function App() {
                 onStartNociceptiveTest={handleStartNociceptiveTest}
                 onStopNociceptiveTest={handleStopNociceptiveTest}
                 simTimeSeconds={simTimeSeconds}
+                onOpenConsciousnessBoard={() => setIsDepthBoardOpen(true)}
               />
             )}
 

@@ -15,12 +15,14 @@ import {
   LogOut,
   User,
 } from 'lucide-react';
-import { PatientProfile } from '../types/simulator';
+import { PatientProfile, VitalSigns } from '../types/simulator';
 import { formatSpecies } from '../utils/formatters';
 import { useAuth } from '../context/AuthContext';
+import { PatientSedationAvatar } from './patient/PatientSedationFacies';
 
 interface SimulationHeaderProps {
   patient: PatientProfile;
+  vitals?: VitalSigns;
   paused: boolean;
   speed: number;
   time: string;
@@ -142,24 +144,39 @@ export function SimulationHeader(props: SimulationHeaderProps) {
       </header>
 
       <div className="patient-context">
-        <button
-          className="patient-selector cursor-pointer"
-          onClick={props.onPatient}
-          title="Trocar paciente ou cenário clínico"
-        >
-          <FolderHeart size={23} />
-          <span>
-            <small>Paciente atual</small>
-            <strong>
-              {props.patient.name}{' '}
-              <span>
-                · {formatSpecies(props.patient.species)} · {props.patient.weightKg} kg · ASA{' '}
-                {props.patient.asa}
-              </span>
-            </strong>
-          </span>
-          <ChevronRight size={17} />
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="patient-selector cursor-pointer"
+            onClick={props.onPatient}
+            title="Trocar paciente ou cenário clínico"
+          >
+            <FolderHeart size={23} />
+            <span>
+              <small>Paciente atual</small>
+              <strong>
+                {props.patient.name}{' '}
+                <span>
+                  · {formatSpecies(props.patient.species)} · {props.patient.weightKg} kg · ASA{' '}
+                  {props.patient.asa}
+                </span>
+              </strong>
+            </span>
+            <ChevronRight size={17} />
+          </button>
+
+          {/* Visual 4-Stage Sedation Facies Avatar */}
+          {props.vitals && (
+            <div className="pl-1 sm:pl-2 border-l border-zinc-700/60 hidden sm:flex items-center">
+              <PatientSedationAvatar
+                vitals={props.vitals}
+                patient={props.patient}
+                size="md"
+                showLabel={true}
+                onClick={props.onConsciousness}
+              />
+            </div>
+          )}
+        </div>
 
         <nav className="context-tools flex items-center gap-1.5" aria-label="Consultas do caso">
           {props.onSavePerspective && (
