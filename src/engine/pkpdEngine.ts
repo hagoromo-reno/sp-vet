@@ -215,10 +215,26 @@ export class PKPDEngine {
       // clinical significance, while preserving tracking during the active washout phase.
       const totalPeripheralAmount = (pkCompartments?.rapidPeripheralAmountNormalized || 0)
         + (pkCompartments?.deepPeripheralAmountNormalized || 0);
-      const hasRelevantBody = newCp > 0.001
-        || newCe > 0.001
-        || totalPeripheralAmount > 0.005
-        || (pkCompartments?.absorptionDepotAmountNormalized || 0) > 0.002;
+      const totalDelivered = Math.max(0.000001, (pkCompartments?.cumulativeDeliveredNormalized || 1));
+      const eliminatedFraction = (pkCompartments?.cumulativeEliminatedNormalized || 0) / totalDelivered;
+      const doseElapsedMinutes = deliveryElapsed / 60;
+      const drugHalfLifeBeta = drugDef.halfLifeBeta || 60;
+      const elapsedHalfLives = doseElapsedMinutes / Math.max(1, drugHalfLifeBeta);
+      const isSubstantiallyCleared = isFullyDelivered
+        && !dose.isCRI
+        && (
+          (eliminatedFraction >= 0.90 && newCp < 0.02 && newCe < 0.02) ||
+          (eliminatedFraction >= 0.94 && newCp < 0.03 && newCe < 0.03) ||
+          (elapsedHalfLives >= 6 && newCp < 0.03 && newCe < 0.03) ||
+          (newCp < 0.002 && newCe < 0.002)
+        );
+
+      const hasRelevantBody = !isSubstantiallyCleared && (
+        newCp > 0.003 ||
+        newCe > 0.003 ||
+        totalPeripheralAmount > 0.04 ||
+        (pkCompartments?.absorptionDepotAmountNormalized || 0) > 0.004
+      );
       if (
         !isFullyDelivered ||
         hasRelevantBody ||
@@ -856,6 +872,55 @@ export class PKPDEngine {
         surgicalTolerancePct = Math.round(Math.min(95, 45 + receptors.localNeuralBlockade * 45 + analgesiaPct * 0.15));
       } else {
         surgicalTolerancePct = Math.round(Math.min(45, analgesiaPct * 0.45));
+      }
+    }
+
+    // Severe physiological insults (critical hypothermia, severe hypercapnic narcosis, acute hypoxia)
+    // depress central nervous system activity and protective reflexes independently of pharmacological agents:
+    const activeTempC = previousVitals?.bodyTemperatureC ?? patient.baselineVitals.tempC;
+    const priorPaCO2 = previousVitals?.cellularState?.paCO2 ?? 40;
+    const priorSpO2 = previousVitals?.spO2 ?? 98;
+
+    if (!isAlreadyDead && !isAlreadyArrested) {
+      if (activeTempC < 28.5) {
+        // Deep hypothermic coma / stupor (< 28.5 °C)
+        consciousnessScore = Math.min(consciousnessScore, 10);
+        guedelStage = 'Estágio III Plano 3 (Profundo)';
+        palpebralReflex = 'absent';
+        cornealReflex = 'sluggish';
+        jawTone = 'flaccid';
+      } else if (activeTempC < 32.0) {
+        // Moderate-to-severe hypothermia (28.5 - 32.0 °C)
+        consciousnessScore = Math.min(consciousnessScore, 30);
+        if (guedelStage === 'Estágio I (Consciente / Alerta)' || guedelStage === 'Estágio I (Sedação Leve / Abatimento)') {
+          guedelStage = 'Estágio III Plano 1 (Leve)';
+        }
+        if (palpebralReflex === 'brisk') palpebralReflex = 'sluggish';
+        if (cornealReflex === 'brisk') cornealReflex = 'moderate';
+      } else if (activeTempC < 35.0) {
+        // Moderate hypothermia (32.0 - 35.0 °C)
+        consciousnessScore = Math.min(consciousnessScore, 55);
+        if (guedelStage === 'Estágio I (Consciente / Alerta)') {
+          guedelStage = 'Estágio I (Sedação Leve / Abatimento)';
+        }
+        if (palpebralReflex === 'brisk') palpebralReflex = 'moderate';
+      } else if (activeTempC < 36.5) {
+        // Mild hypothermia (35.0 - 36.5 °C)
+        consciousnessScore = Math.min(consciousnessScore, 80);
+      }
+
+      // CO2 Narcosis: PaCO2 > 65 mmHg exerts central anesthetic-like depression
+      if (priorPaCO2 > 65) {
+        const co2Depression = Math.min(70, (priorPaCO2 - 60) * 2.0);
+        consciousnessScore = Math.min(consciousnessScore, Math.max(15, 100 - co2Depression));
+        if (consciousnessScore < 50 && guedelStage === 'Estágio I (Consciente / Alerta)') {
+          guedelStage = 'Estágio I (Sedação Profunda / Neuroleptanalgesia)';
+        }
+      }
+
+      // Hypoxemic depression
+      if (priorSpO2 < 75) {
+        consciousnessScore = Math.min(consciousnessScore, 25);
       }
     }
 

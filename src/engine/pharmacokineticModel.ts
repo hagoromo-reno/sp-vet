@@ -111,18 +111,17 @@ export class PharmacokineticModel {
     const alpha = Math.LN2 / Math.max(0.1, drug.halfLifeAlpha);
     const beta = Math.LN2 / Math.max(0.2, drug.halfLifeBeta);
 
+    const k12 = Math.max(0.001, (alpha - beta) * 0.52);
+    const k21k12Ratio = Math.max(0.18, 0.55 - lipidSolubility * 0.35);
+    const k21 = Math.max(0.001, k12 * k21k12Ratio);
+
+    const deepUptakeFactor = Math.max(0.10, 0.10 + lipidSolubility * 0.18);
+    const k13 = Math.max(0.0002, beta * deepUptakeFactor);
+    const k31 = Math.max(0.0008, beta * Math.max(0.20, 0.35 - lipidSolubility * 0.15));
+
     const hepaticFraction = bioProfile.hepaticClearanceFraction;
     const k10Factor = hepaticFraction > 0.7 ? 0.95 : hepaticFraction > 0.3 ? 0.82 : 0.70;
     const k10 = Math.max(0.0005, beta * k10Factor * clearance);
-
-    const k12 = Math.max(0.001, (alpha - beta) * 0.52);
-    const k21k12Ratio = Math.max(0.15, 0.55 - lipidSolubility * 0.35);
-    const k21 = Math.max(0.001, k12 * k21k12Ratio);
-
-    const deepUptakeFactor = Math.max(0.12, 0.10 + lipidSolubility * 0.22);
-    const k13 = Math.max(0.0002, beta * deepUptakeFactor);
-    const deepReturnFactor = Math.max(0.03, 0.10 - lipidSolubility * 0.065);
-    const k31 = Math.max(0.0001, beta * deepReturnFactor);
 
     // Tissue return already produces context dependence. Stopping the pump must
     // not instantaneously change intrinsic clearance.

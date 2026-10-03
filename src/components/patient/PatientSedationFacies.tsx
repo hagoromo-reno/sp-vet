@@ -136,8 +136,12 @@ export function getSedationStageInfo(vitals?: VitalSigns): SedationStageInfo {
   const depth = vitals.anestheticDepthScore ?? 0;
   const centralSedation = vitals.cellularState?.centralSedation ?? vitals.biologicalState?.neurological?.sedativeDepth ?? 0;
   const hypnotic = vitals.cellularState?.hypnoticEffect ?? vitals.biologicalState?.neurological?.hypnoticDepth ?? 0;
+  const temp = vitals.bodyTemperatureC ?? 38.0;
+  const etco2 = vitals.etCO2 ?? 38;
+  const spo2 = vitals.spO2 ?? 98;
+  const palpebral = vitals.palpebralReflex;
 
-  // 1. Stage 4: Surgical Anesthesia / Deep Sedation / Coma / Arrest
+  // 1. Stage 4: Surgical Anesthesia / Deep Sedation / Severe Hypothermic Coma / Arrest / Absent Reflexes
   if (
     isDeadOrArrest ||
     stage === 'Estágio III Plano 2 (Cirúrgico)' ||
@@ -145,12 +149,15 @@ export function getSedationStageInfo(vitals?: VitalSigns): SedationStageInfo {
     stage === 'Estágio IV (Depressão Bulbar / Parada)' ||
     consciousness < 25 ||
     depth >= 55 ||
-    hypnotic >= 0.50
+    hypnotic >= 0.50 ||
+    temp < 30.0 || // Critical hypothermia (< 30 °C produces hypothermic coma/stupor)
+    (etco2 >= 75 && spo2 < 85) || // Extreme hypercapnic narcosis & hypoxia
+    (palpebral === 'absent' && (hypnotic >= 0.35 || temp < 32.0 || depth >= 40))
   ) {
     return SEDATION_STAGES[4];
   }
 
-  // 2. Stage 3: Moderate Sedation / Neuroleptanalgesia / Light Surgical
+  // 2. Stage 3: Moderate Sedation / Neuroleptanalgesia / Moderate Hypothermia / CO2 Narcosis
   if (
     stage === 'Estágio I (Sedação Profunda / Neuroleptanalgesia)' ||
     stage === 'Estágio II (Excitação/Delírio)' ||
@@ -158,23 +165,31 @@ export function getSedationStageInfo(vitals?: VitalSigns): SedationStageInfo {
     stage === 'Anestesia Dissociativa (Reflexos Preservados)' ||
     (consciousness < 55 && consciousness >= 25) ||
     centralSedation >= 0.40 ||
-    depth >= 30
+    depth >= 30 ||
+    temp < 34.0 || // Moderate hypothermia (30-34 °C produces marked somnolence/stupor)
+    etco2 >= 62 || // Significant CO2 narcosis
+    spo2 < 78 || // Severe hypoxemia
+    palpebral === 'absent'
   ) {
     return SEDATION_STAGES[3];
   }
 
-  // 3. Stage 2: Light Sedation / Tranquilization / Drowsiness
+  // 3. Stage 2: Light Sedation / Tranquilization / Drowsiness / Mild Hypothermia / Sluggish Reflexes
   if (
     stage === 'Estágio I (Sedação Leve / Abatimento)' ||
-    (consciousness < 82 && consciousness >= 55) ||
+    (consciousness < 85 && consciousness >= 55) ||
     centralSedation >= 0.16 ||
     hypnotic >= 0.12 ||
-    depth >= 15
+    depth >= 15 ||
+    temp < 36.5 || // Mild hypothermia produces apathy, shivering or somnolence
+    etco2 >= 55 || // Moderate hypercapnia
+    spo2 < 90 || // Hypoxemia
+    palpebral === 'sluggish'
   ) {
     return SEDATION_STAGES[2];
   }
 
-  // 4. Stage 1: Awake / Alert / Baseline
+  // 4. Stage 1: Awake / Alert / Baseline (strictly requires normal temperature, oxygenation and brisk reflexes)
   return SEDATION_STAGES[1];
 }
 
