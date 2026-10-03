@@ -13,6 +13,7 @@ export const NOCICEPTIVE_TESTS: NociceptiveTestDefinition[] = [
     durationSeconds: 6,
     type: 'somatic_superficial',
     targetTissue: 'Pele e membrana interdigital (Fibras A-delta & C)',
+    targetRegion: 'pelvic_limb',
   },
   {
     id: 'pressure_periosteal',
@@ -22,6 +23,7 @@ export const NOCICEPTIVE_TESTS: NociceptiveTestDefinition[] = [
     durationSeconds: 6,
     type: 'somatic_deep',
     targetTissue: 'Periósteo e coxim profundo (Nociceptores somáticos de limiar elevado)',
+    targetRegion: 'pelvic_limb',
   },
   {
     id: 'visceral_traction',
@@ -31,6 +33,7 @@ export const NOCICEPTIVE_TESTS: NociceptiveTestDefinition[] = [
     durationSeconds: 8,
     type: 'visceral',
     targetTissue: 'Peritônio visceral e mesentério (Fibras C aferentes autonômicas)',
+    targetRegion: 'abdomen_flank',
   },
   {
     id: 'pinch_tail_cutaneous',
@@ -40,5 +43,6 @@ export const NOCICEPTIVE_TESTS: NociceptiveTestDefinition[] = [
     durationSeconds: 5,
     type: 'somatic_superficial',
     targetTissue: 'Prega cutânea do flanco / cauda (Mecanonociceptores superficiais)',
+    targetRegion: 'perineum_tail',
   },
 ];

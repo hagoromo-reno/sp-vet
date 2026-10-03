@@ -336,18 +336,28 @@ export default function App() {
       if (activeSurgicalProcedure && newSimTime >= activeSurgicalProcedure.endsAtSimTime) {
         setActiveSurgicalProcedure(null);
       }
-      const activeSurgicalStimulus = activeSurgicalProcedure
+      let activeSurgicalStimulus = activeSurgicalProcedure
         && newSimTime < activeSurgicalProcedure.endsAtSimTime
         ? activeSurgicalProcedure.intensity
         : 0;
+      if (activeSurgicalProcedure && activeSurgicalStimulus > 0) {
+        const targetReg = activeSurgicalProcedure.targetRegion || 'abdomen_flank';
+        const block = vitals.cellularState?.regionalBlockByRegion?.[targetReg] ?? vitals.cellularState?.localNeuralBlockade ?? 0;
+        activeSurgicalStimulus *= Math.max(0, 1 - block * 1.15);
+      }
 
       if (activeNociceptiveTest && newSimTime >= activeNociceptiveTest.endsAtSimTime) {
         setActiveNociceptiveTest(null);
       }
-      const activeNociceptiveStimulus = activeNociceptiveTest
+      let activeNociceptiveStimulus = activeNociceptiveTest
         && newSimTime < activeNociceptiveTest.endsAtSimTime
         ? activeNociceptiveTest.intensity
         : 0;
+      if (activeNociceptiveTest && activeNociceptiveStimulus > 0) {
+        const targetReg = activeNociceptiveTest.targetRegion || 'pelvic_limb';
+        const block = vitals.cellularState?.regionalBlockByRegion?.[targetReg] ?? vitals.cellularState?.localNeuralBlockade ?? 0;
+        activeNociceptiveStimulus *= Math.max(0, 1 - block * 1.15);
+      }
 
       const combinedNoxiousStimulus = Math.max(activeSurgicalStimulus, activeNociceptiveStimulus);
 

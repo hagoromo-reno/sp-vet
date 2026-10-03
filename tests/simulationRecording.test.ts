@@ -39,8 +39,8 @@ for (const sp of species) {
     assert.equal(limits.isAudioMuted, true);
     if (sp === 'equine') assert.equal(limits.mapLow, 70);
   });
-  test(`${sp}: minutos sem deriva nas velocidades 1×, 2× e 5×, sem duplicação em pausa`, () => {
-    for (const dt of [.1, .2, .5]) {
+  test(`${sp}: minutos sem deriva nas velocidades 1×, 2×, 5× e 10×, sem duplicação em pausa`, () => {
+    for (const dt of [.1, .2, .5, 1.0]) {
       const { o, recorder } = fixture(sp);
       for (let t = dt; t < 180.00001; t += dt) recorder.observe({ ...o, simTimeSeconds: t });
       assert.deepEqual(recorder.run.snapshots.map(s => s.scheduledSimTimeSeconds), [0, 60, 120, 180]);

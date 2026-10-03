@@ -4,6 +4,7 @@ import { EMERGENCY_DRUG_IDS } from '../../data/emergencyDrugs';
 import {
   ActiveDrugDose,
   AdministrationSpeed,
+  AnatomicalBlockSite,
   DrugCategory,
   DrugDefinition,
   DrugRoute,
@@ -83,6 +84,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
   const customConcentrationMgMl = preparation.concentrationMgMl;
   const [isCRI, setIsCRI] = useState(false);
   const [deliverySeconds, setDeliverySeconds] = useState(60);
+  const [selectedBlockSite, setSelectedBlockSite] = useState<AnatomicalBlockSite>('epidural_lumbosacral');
   const [adminSuccessMsg, setAdminSuccessMsg] = useState<string | null>(null);
   const [adminErrorMsg, setAdminErrorMsg] = useState<string | null>(null);
 
@@ -215,6 +217,7 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
       drugName: selectedDrug.name,
       category: selectedDrug.category,
       route: selectedRoute,
+      blockSite: (selectedRoute === 'Local' || selectedRoute === 'Epidural') ? selectedBlockSite : undefined,
       administrationSpeed: isCRI ? 'infusion_cri' : adminSpeed,
       doseAmount: totalDoseAmount,
       dosePerKg: customDosePerKg,
@@ -648,6 +651,8 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
                   const routeIsCri = route === 'CRI';
                   setIsCRI(routeIsCri);
                   setAdminSpeed(routeIsCri ? 'infusion_cri' : 'bolus_slow');
+                  if (route === 'Epidural') setSelectedBlockSite('epidural_lumbosacral');
+                  else if (route === 'Local') setSelectedBlockSite('local_incision');
                 }}
                 className="bg-zinc-900 text-white text-xs rounded border border-zinc-700 font-mono-code w-full px-2 py-1 mt-1 focus:outline-none focus:border-emerald-500"
               >
@@ -659,6 +664,41 @@ export const DrugAdministrationModal: React.FC<DrugAdministrationModalProps> = (
               </select>
             </div>
           </div>
+
+          {(selectedRoute === 'Local' || selectedRoute === 'Epidural') && (
+            <div className="p-3 bg-gradient-to-r from-amber-950/40 to-zinc-950 rounded-lg border border-amber-500/50 mb-3 animate-fadeIn">
+              <span className="text-[11px] text-amber-300 block font-bold flex items-center gap-1.5 mb-1">
+                <span>🎯</span> Direcionamento Anatômico do Bloqueio:
+              </span>
+              <select
+                value={selectedBlockSite}
+                onChange={(e) => setSelectedBlockSite(e.target.value as AnatomicalBlockSite)}
+                className="bg-zinc-900 text-amber-200 text-xs rounded border border-amber-600/60 font-mono-code w-full px-2.5 py-1.5 focus:outline-none focus:border-amber-400"
+              >
+                {selectedRoute === 'Epidural' ? (
+                  <>
+                    <option value="epidural_lumbosacral">Epidural Lombossacra (L7-S1) — Membros Pélvicos, Períneo & Abdômen Caudal</option>
+                    <option value="epidural_sacrococcygeal">Epidural Sacrococcígea / Caudal — Cauda, Ânus, Vulva & Períneo</option>
+                    <option value="epidural_thoracolumbar">Epidural Toracolombar Segmentar — Parede Abdominal e Flanco</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="local_incision">Infiltração da Incisão Cirúrgica / Parede Abdominal / Flanco</option>
+                    <option value="block_femoral_sciatic">Bloqueio de Membro Pélvico (Femoral + Isquiático)</option>
+                    <option value="block_brachial_plexus">Bloqueio de Membro Torácico (Plexo Braquial / RUMM)</option>
+                    <option value="block_head_dental">Bloqueio Cabeça / Face (Maxilar, Mandibular, Retrobulbar)</option>
+                    <option value="block_intercostal">Bloqueio Intercostal / Parede Torácica</option>
+                    <option value="block_inverted_l">Bloqueio em L invertido / Flanco (Ruminantes/Grandes)</option>
+                    <option value="block_perineal">Bloqueio Perineal / Pudendo / Peniano</option>
+                  </>
+                )}
+              </select>
+              <div className="text-[10px] text-zinc-400 mt-1.5 flex items-center gap-1">
+                <span className="text-emerald-400 font-bold">✓ Bloqueio direcionado:</span>
+                <span>Interrompe seletivamente o reflexo nociceptivo e o arco de retirada na região indicada.</span>
+              </div>
+            </div>
+          )}
 
           {/* Administration Button */}
           <div className="pt-1">

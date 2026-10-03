@@ -86,6 +86,39 @@ export type DrugConcentrationPhase =
   | 'washout'
   | 'residual';
 
+export type AnatomicalBlockSite =
+  | 'epidural_lumbosacral'
+  | 'epidural_sacrococcygeal'
+  | 'epidural_thoracolumbar'
+  | 'local_incision'
+  | 'block_femoral_sciatic'
+  | 'block_brachial_plexus'
+  | 'block_head_dental'
+  | 'block_intercostal'
+  | 'block_inverted_l'
+  | 'block_perineal';
+
+export type AnatomicalRegion =
+  | 'pelvic_limb'
+  | 'thoracic_limb'
+  | 'perineum_tail'
+  | 'abdomen_flank'
+  | 'head_face'
+  | 'thorax';
+
+export const BLOCK_SITE_COVERAGE: Record<AnatomicalBlockSite, AnatomicalRegion[]> = {
+  epidural_lumbosacral: ['pelvic_limb', 'perineum_tail', 'abdomen_flank'],
+  epidural_sacrococcygeal: ['perineum_tail'],
+  epidural_thoracolumbar: ['abdomen_flank'],
+  local_incision: ['abdomen_flank'],
+  block_femoral_sciatic: ['pelvic_limb'],
+  block_brachial_plexus: ['thoracic_limb'],
+  block_head_dental: ['head_face'],
+  block_intercostal: ['thorax'],
+  block_inverted_l: ['abdomen_flank'],
+  block_perineal: ['perineum_tail'],
+};
+
 export type SurgicalProcedureKind =
   | 'skin_incision'
   | 'muscle_dissection'
@@ -100,6 +133,7 @@ export interface SurgicalProcedureDefinition {
   intensity: number;
   durationSeconds: number;
   tissueLayer: 'cutaneous' | 'muscular' | 'periosteal' | 'visceral' | 'mixed';
+  targetRegion?: AnatomicalRegion;
 }
 
 export interface ActiveSurgicalProcedure extends SurgicalProcedureDefinition {
@@ -121,6 +155,7 @@ export interface NociceptiveTestDefinition {
   durationSeconds: number;
   type: 'somatic_superficial' | 'somatic_deep' | 'visceral';
   targetTissue: string;
+  targetRegion?: AnatomicalRegion;
 }
 
 export interface ActiveNociceptiveTest extends NociceptiveTestDefinition {
@@ -326,6 +361,7 @@ export interface ActiveDrugDose {
   drugName: string;
   category: DrugCategory;
   route: DrugRoute;
+  blockSite?: AnatomicalBlockSite;
   administrationSpeed?: AdministrationSpeed;
   doseAmount: number; // in mg, mcg, etc.
   dosePerKg: number; // in mg/kg or mcg/kg

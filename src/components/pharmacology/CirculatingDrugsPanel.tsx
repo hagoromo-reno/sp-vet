@@ -282,6 +282,11 @@ export const CirculatingDrugsPanel: React.FC<CirculatingDrugsPanelProps> = ({
                       )}
                       {/* Clinical effect status badge */}
                       <ClinicalEffectBadge analysis={analysis} />
+                      {dose.blockSite && (
+                        <span className="px-1.5 py-0.2 rounded bg-amber-950 text-amber-300 text-[10px] font-mono-code border border-amber-700/60 font-semibold" title={`Sítio do bloqueio: ${dose.blockSite}`}>
+                          🎯 {dose.blockSite.replace('epidural_', 'Epidural ').replace('block_', 'Bloqueio ').replace('local_', 'Local ')}
+                        </span>
+                      )}
                     </div>
                     <div className="text-[11px] text-zinc-400 font-mono-code mt-0.5 flex items-center gap-2 flex-wrap">
                       <span>{analysis.phaseLabel} · via {dose.route}</span>

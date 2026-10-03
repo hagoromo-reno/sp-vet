@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   ActiveNociceptiveTest,
   ActiveSurgicalProcedure,
+  AnatomicalRegion,
   CardiacRhythm,
   CapillaryRefillTime,
   EyePosition,
@@ -187,6 +188,7 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
   simTimeSeconds = 0,
 }) => {
   const [activeTestMessage, setActiveTestMessage] = useState<string | null>(null);
+  const [selectedTestLimb, setSelectedTestLimb] = useState<AnatomicalRegion>('pelvic_limb');
 
   // Biophysical states derived from engine
   const cellular = vitals.cellularState;
@@ -214,13 +216,25 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
     setActiveTestMessage(`Reflexo Palpebral: ${palpebralInfo.label.toUpperCase()} — ${palpebralInfo.desc}`);
   };
 
-  const testPedal = () => {
-    const pedalInfo = formatPedalReflex(vitals.pedalReflex);
+  const testPedal = (targetLimb?: AnatomicalRegion) => {
+    const limb = targetLimb || selectedTestLimb;
+    const isPelvicBlocked = (cellular?.regionalBlockByRegion?.pelvic_limb ?? 0) > 0.45;
+    const isThoracicBlocked = (cellular?.regionalBlockByRegion?.thoracic_limb ?? 0) > 0.45;
+    const isTargetBlocked = limb === 'pelvic_limb' ? isPelvicBlocked : isThoracicBlocked;
+    const limbName = limb === 'pelvic_limb' ? 'Membro Pélvico (Pata Traseira)' : 'Membro Torácico (Pata Dianteira)';
+
     if (isNmbaParalyzed) {
-      setActiveTestMessage(`Reflexo Podal: AUSENTE POR PARALISIA NMBA — Paciente sob bloqueador neuromuscular (atracúrio). O membro não retrai devido à paralisia da placa motora, independente da sensação dolorosa.`);
-    } else {
-      setActiveTestMessage(`Reflexo Podal (Retirada Nociceptiva): ${pedalInfo.label.toUpperCase()} — ${pedalInfo.desc}`);
+      setActiveTestMessage(`Reflexo Podal (${limbName}): AUSENTE POR PARALISIA NMBA — Paciente sob bloqueador neuromuscular (atracúrio). O membro não retrai devido à paralisia da placa motora.`);
+      return;
     }
+
+    if (isTargetBlocked) {
+      setActiveTestMessage(`Reflexo Podal (${limbName}): AUSENTE / BLOQUEADO 🎯 — Aferência e arco reflexo espinhal de retirada completamente abolidos pelo bloqueio neural regional ativo! Nocicepção somática local interrompida com sucesso.`);
+      return;
+    }
+
+    const pedalInfo = formatPedalReflex(vitals.pedalReflex);
+    setActiveTestMessage(`Reflexo Podal (${limbName}): ${pedalInfo.label.toUpperCase()} — ${pedalInfo.desc}${isPelvicBlocked && limb === 'thoracic_limb' ? ' (Nota: o membro pélvico está sob bloqueio anestésico regional).' : ''}`);
   };
 
   const testCRT = () => {
@@ -359,17 +373,67 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
           )}
         </div>
 
+        {/* Anatomical Targeting for Limb Nociceptive Tests */}
+        <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800 text-xs">
+          <div className="flex items-center gap-1.5 text-zinc-300 font-medium">
+            <span>📍 Direcionamento do Teste Álgico / Reflexo:</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedTestLimb('pelvic_limb')}
+              className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                selectedTestLimb === 'pelvic_limb'
+                  ? 'bg-amber-600 text-white shadow'
+                  : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+              }`}
+            >
+              <span>Pata Traseira (Membro Pélvico)</span>
+              {(cellular?.regionalBlockByRegion?.pelvic_limb ?? 0) > 0.45 && (
+                <span className="px-1 py-0.2 rounded bg-emerald-950 text-emerald-300 text-[9px] border border-emerald-600 font-bold">
+                  BLOQUEADO 🛡️
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setSelectedTestLimb('thoracic_limb')}
+              className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                selectedTestLimb === 'thoracic_limb'
+                  ? 'bg-amber-600 text-white shadow'
+                  : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+              }`}
+            >
+              <span>Pata Dianteira (Membro Torácico)</span>
+              {(cellular?.regionalBlockByRegion?.thoracic_limb ?? 0) > 0.45 && (
+                <span className="px-1 py-0.2 rounded bg-emerald-950 text-emerald-300 text-[9px] border border-emerald-600 font-bold">
+                  BLOQUEADO 🛡️
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
         {/* 4 Standardized Pain Test Buttons */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
           {NOCICEPTIVE_TESTS.map((test) => {
             const isSelected = activeNociceptiveTest?.id === test.id;
+            const isLimbTest = test.id === 'pinch_interdigital' || test.id === 'pressure_periosteal';
+            const resolvedTarget = isLimbTest ? selectedTestLimb : test.targetRegion;
+            const isTargetBlocked = (cellular?.regionalBlockByRegion?.[resolvedTarget || 'pelvic_limb'] ?? 0) > 0.45;
             return (
               <button
                 key={test.id}
-                onClick={() => onStartNociceptiveTest?.(test)}
+                onClick={() => onStartNociceptiveTest?.({
+                  ...test,
+                  targetRegion: resolvedTarget,
+                  name: isLimbTest
+                    ? `${test.name} (${resolvedTarget === 'pelvic_limb' ? 'Membro Pélvico' : 'Membro Torácico'})`
+                    : test.name
+                })}
                 className={`rounded-xl border p-2.5 text-left transition relative cursor-pointer ${
                   isSelected
                     ? 'border-amber-400 bg-amber-950/70 text-white ring-2 ring-amber-400/50 shadow-lg shadow-amber-950/60'
+                    : isTargetBlocked
+                    ? 'border-emerald-600/50 bg-[#101814] text-[#d8e8dc] hover:border-emerald-500'
                     : 'border-[#2e2638] bg-[#16121e]/80 text-[#d8d0e0] hover:border-amber-600/70 hover:bg-[#20182a]'
                 }`}
                 title={test.description}
@@ -384,10 +448,15 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
                   </span>
                 </div>
                 <div className="text-[10px] text-zinc-400 leading-tight">
-                  {test.targetTissue}
+                  {isLimbTest
+                    ? `Alvo: ${resolvedTarget === 'pelvic_limb' ? 'Membro Pélvico' : 'Membro Torácico'} · ${test.targetTissue}`
+                    : test.targetTissue}
                 </div>
-                <div className="text-[9px] text-zinc-500 font-mono mt-1">
-                  Duração: {test.durationSeconds}s · Tipo: {test.type === 'visceral' ? 'Visceral' : 'Somático'}
+                <div className="text-[9px] text-zinc-500 font-mono mt-1 flex items-center justify-between">
+                  <span>Duração: {test.durationSeconds}s</span>
+                  {isTargetBlocked && (
+                    <span className="text-emerald-400 font-bold">🛡️ Dessensibilizado</span>
+                  )}
                 </div>
                 {isSelected && (
                   <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
@@ -401,112 +470,132 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
         </div>
 
         {/* Dynamic Pain Sensitivity Real-Time Diagnostic Box */}
-        {activeNociceptiveTest && (
-          <div className="rounded-xl border border-amber-500/50 bg-[#120d18] p-3 space-y-2.5 animate-fadeIn font-mono-code text-xs">
-            <div className="flex items-center justify-between border-b border-amber-500/30 pb-1.5">
-              <div className="flex items-center gap-2">
-                <Flame className="w-4 h-4 text-amber-400 animate-bounce" />
-                <span className="font-bold text-amber-200 uppercase">
-                  Estímulo Álgico Ativo: {activeNociceptiveTest.name}
-                </span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-900 text-amber-100 font-bold border border-amber-600">
-                  Restam {testSecondsRemaining}s
-                </span>
+        {activeNociceptiveTest && (() => {
+          const testTarget = activeNociceptiveTest.targetRegion || 'pelvic_limb';
+          const isStimulusRegionBlocked = (cellular?.regionalBlockByRegion?.[testTarget] ?? 0) > 0.40;
+          return (
+            <div className="rounded-xl border border-amber-500/50 bg-[#120d18] p-3 space-y-2.5 animate-fadeIn font-mono-code text-xs">
+              <div className="flex items-center justify-between border-b border-amber-500/30 pb-1.5">
+                <div className="flex items-center gap-2">
+                  <Flame className="w-4 h-4 text-amber-400 animate-bounce" />
+                  <span className="font-bold text-amber-200 uppercase">
+                    Estímulo Álgico Ativo: {activeNociceptiveTest.name}
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-900 text-amber-100 font-bold border border-amber-600">
+                    Restam {testSecondsRemaining}s
+                  </span>
+                </div>
+
+                {/* Analgesia Status Pill */}
+                <div className="flex items-center gap-1.5">
+                  {isStimulusRegionBlocked ? (
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-400 text-emerald-300 font-bold text-[10px]">
+                      <ShieldCheck className="w-3 h-3" /> Bloqueio Regional Efetivo (100% Protegido)
+                    </span>
+                  ) : hasEffectiveAnalgesia ? (
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-500 text-emerald-300 font-bold text-[10px]">
+                      <ShieldCheck className="w-3 h-3" /> Analgesia Eficaz (Protegido)
+                    </span>
+                  ) : hasPartialAnalgesia ? (
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-950 border border-amber-500 text-amber-300 font-bold text-[10px]">
+                      <AlertTriangle className="w-3 h-3" /> Analgesia Parcial
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-950 border border-rose-500 text-rose-200 font-bold text-[10px] animate-pulse">
+                      <ShieldAlert className="w-3 h-3" /> FALHA ANALGÉSICA (Desprotegido)
+                    </span>
+                  )}
+                </div>
               </div>
 
-              {/* Analgesia Status Pill */}
-              <div className="flex items-center gap-1.5">
-                {hasEffectiveAnalgesia ? (
-                  <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-500 text-emerald-300 font-bold text-[10px]">
-                    <ShieldCheck className="w-3 h-3" /> Analgesia Eficaz (Protegido)
-                  </span>
-                ) : hasPartialAnalgesia ? (
-                  <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-950 border border-amber-500 text-amber-300 font-bold text-[10px]">
-                    <AlertTriangle className="w-3 h-3" /> Analgesia Parcial
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-950 border border-rose-500 text-rose-200 font-bold text-[10px] animate-pulse">
-                    <ShieldAlert className="w-3 h-3" /> FALHA ANALGÉSICA (Desprotegido)
-                  </span>
-                )}
+              {/* Detailed Triple Axis Clinical Evaluation */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
+                {/* 1. Somatic / Motor Response */}
+                <div className="p-2 rounded-lg bg-zinc-900/90 border border-zinc-800 space-y-1">
+                  <div className="text-[10px] font-bold text-zinc-400 uppercase flex items-center gap-1">
+                    <Hand className="w-3 h-3 text-cyan-400" />
+                    1. Resposta Somática (Motora)
+                  </div>
+                  <div className="text-zinc-200 font-sans">
+                    {isStimulusRegionBlocked ? (
+                      <span className="text-emerald-300 font-bold">
+                        Reflexo de retirada completamente abolido pelo bloqueio neural regional nesta região ({testTarget === 'pelvic_limb' ? 'Membro Pélvico' : testTarget === 'thoracic_limb' ? 'Membro Torácico' : 'Região anatômica bloqueada'}).
+                      </span>
+                    ) : isNmbaParalyzed ? (
+                      <span className="text-amber-300 font-bold">
+                        Sem reflexo de retirada por PARALISIA NMBA (Atracúrio). O animal sente dor mas não consegue mover o membro.
+                      </span>
+                    ) : vitals.pedalReflex === 'absent' ? (
+                      <span className="text-emerald-300">
+                        Membro flácido, reflexo de flexão abolido (plano cirúrgico profundo ou analgesia local plena).
+                      </span>
+                    ) : vitals.pedalReflex === 'sluggish' ? (
+                      <span className="text-amber-300">
+                        Retirada lenta e tardia do membro (plano cirúrgico superficial).
+                      </span>
+                    ) : (
+                      <span className="text-rose-300 font-bold">
+                        Retirada vigorosa e imediata do membro com tentativa de flexão e fuga!
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Autonomic / Sympathetic Response (The user's core clinical requirement) */}
+                <div className="p-2 rounded-lg bg-zinc-900/90 border border-zinc-800 space-y-1">
+                  <div className="text-[10px] font-bold text-zinc-400 uppercase flex items-center gap-1">
+                    <Heart className="w-3 h-3 text-rose-400" />
+                    2. Resposta Autonômica (Tronco Encefálico)
+                  </div>
+                  <div className="text-zinc-200 font-sans">
+                    {isStimulusRegionBlocked ? (
+                      <span className="text-emerald-300 font-bold">
+                        BLOQUEIO NEURAL REGIONAL EFETIVO 🎯: Nocicepção interrompida na raiz nervosa. As fibras aferentes A-delta/C foram silenciadas, impedindo a resposta simpática (FC e PAM permanecem perfeitamente estáveis).
+                      </span>
+                    ) : hasEffectiveAnalgesia ? (
+                      <span className="text-emerald-300">
+                        Estabilidade autonômica excelente: FC, PAM e FR mantêm-se estáveis sob o estímulo álgico.
+                      </span>
+                    ) : isNociceptiveBreakthroughSurging ? (
+                      <span className="text-rose-300 font-bold">
+                        DISPARO SIMPÁTICO ATIVO: O tronco encefálico e a medula reconheceram o estímulo! Taquicardia (FC {Math.round(vitals.heartRate)} bpm) e hipertensão reflexas, {isHypnotizedOrSedated ? 'apesar de o animal estar sedado/hipnotizado.' : 'com paciente alerta.'}
+                      </span>
+                    ) : (
+                      <span className="text-amber-300">
+                        Discreto estresse simpático residual (analgesia parcial moderando o pico autonômico).
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Clinical Conduct Recommendation */}
+                <div className="p-2 rounded-lg bg-zinc-900/90 border border-zinc-800 space-y-1">
+                  <div className="text-[10px] font-bold text-zinc-400 uppercase flex items-center gap-1">
+                    <AlertOctagon className="w-3 h-3 text-amber-400" />
+                    3. Conduta Sugerida
+                  </div>
+                  <div className="text-zinc-300 font-sans">
+                    {isStimulusRegionBlocked ? (
+                      <span className="text-emerald-300">
+                        Excelente bloqueio locorregional alcançado. Permite realização do procedimento com grande estabilidade hemodinâmica e menor exigência de anestésicos sistêmicos.
+                      </span>
+                    ) : hasEffectiveAnalgesia ? (
+                      <span className="text-emerald-300">
+                        Plano analgésico adequado para iniciar a incisão e manipulação cirúrgica com segurança.
+                      </span>
+                    ) : (
+                      <span className="text-amber-200">
+                        {isHypnotizedOrSedated
+                          ? 'Paciente necessita de analgésico sistêmico (ex: Fentanil, Metadona) ou infiltração local de Lidocaína antes de iniciar a cirurgia.'
+                          : 'Aprofundar a anestesia geral e instituir analgesia multimodal antes da incisão cirúrgica.'}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
-
-            {/* Detailed Triple Axis Clinical Evaluation */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
-              {/* 1. Somatic / Motor Response */}
-              <div className="p-2 rounded-lg bg-zinc-900/90 border border-zinc-800 space-y-1">
-                <div className="text-[10px] font-bold text-zinc-400 uppercase flex items-center gap-1">
-                  <Hand className="w-3 h-3 text-cyan-400" />
-                  1. Resposta Somática (Motora)
-                </div>
-                <div className="text-zinc-200 font-sans">
-                  {isNmbaParalyzed ? (
-                    <span className="text-amber-300 font-bold">
-                      Sem reflexo de retirada por PARALISIA NMBA (Atracúrio). O animal sente dor mas não consegue mover o membro.
-                    </span>
-                  ) : vitals.pedalReflex === 'absent' ? (
-                    <span className="text-emerald-300">
-                      Membro flácido, reflexo de flexão abolido (plano cirúrgico profundo ou analgesia local plena).
-                    </span>
-                  ) : vitals.pedalReflex === 'sluggish' ? (
-                    <span className="text-amber-300">
-                      Retirada lenta e tardia do membro (plano cirúrgico superficial).
-                    </span>
-                  ) : (
-                    <span className="text-rose-300 font-bold">
-                      Retirada vigorosa e imediata do membro com tentativa de flexão e fuga!
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* 2. Autonomic / Sympathetic Response (The user's core clinical requirement) */}
-              <div className="p-2 rounded-lg bg-zinc-900/90 border border-zinc-800 space-y-1">
-                <div className="text-[10px] font-bold text-zinc-400 uppercase flex items-center gap-1">
-                  <Heart className="w-3 h-3 text-rose-400" />
-                  2. Resposta Autonômica (Tronco Encefálico)
-                </div>
-                <div className="text-zinc-200 font-sans">
-                  {hasEffectiveAnalgesia ? (
-                    <span className="text-emerald-300">
-                      Estabilidade autonômica excelente: FC, PAM e FR mantêm-se estáveis sob o estímulo álgico.
-                    </span>
-                  ) : isNociceptiveBreakthroughSurging ? (
-                    <span className="text-rose-300 font-bold">
-                      DISPARO SIMPÁTICO ATIVO: O tronco encefálico e a medula reconheceram o estímulo! Taquicardia (FC {Math.round(vitals.heartRate)} bpm) e hipertensão reflexas, {isHypnotizedOrSedated ? 'apesar de o animal estar sedado/hipnotizado.' : 'com paciente alerta.'}
-                    </span>
-                  ) : (
-                    <span className="text-amber-300">
-                      Discreto estresse simpático residual (analgesia parcial moderando o pico autonômico).
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* 3. Clinical Conduct Recommendation */}
-              <div className="p-2 rounded-lg bg-zinc-900/90 border border-zinc-800 space-y-1">
-                <div className="text-[10px] font-bold text-zinc-400 uppercase flex items-center gap-1">
-                  <AlertOctagon className="w-3 h-3 text-amber-400" />
-                  3. Conduta Sugerida
-                </div>
-                <div className="text-zinc-300 font-sans">
-                  {hasEffectiveAnalgesia ? (
-                    <span className="text-emerald-300">
-                      Plano analgésico adequado para iniciar a incisão e manipulação cirúrgica com segurança.
-                    </span>
-                  ) : (
-                    <span className="text-amber-200">
-                      {isHypnotizedOrSedated
-                        ? 'Paciente necessita de analgésico sistêmico (ex: Fentanil, Metadona) ou infiltração local de Lidocaína antes de iniciar a cirurgia.'
-                        : 'Aprofundar a anestesia geral e instituir analgesia multimodal antes da incisão cirúrgica.'}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* 3. GRADED SURGICAL PROCEDURES */}
@@ -665,9 +754,35 @@ export const PatientPhysicalExam: React.FC<PatientPhysicalExamProps> = ({
           <div className="text-[10px] text-zinc-400 mt-0.5 truncate">
             {formatCardiacRhythmPt(vitals.cardiacRhythm)}
           </div>
-          <div className="text-[10px] text-[#8e8e9f] mt-2 pt-1.5 border-t border-[#1e1e2c] flex items-center justify-between">
-            <span>Reflexo Pedal (Retirada):</span>
-            <strong className="text-white font-mono">{formatPedalReflex(vitals.pedalReflex).label}</strong>
+          <div className="text-[10px] text-[#8e8e9f] mt-2 pt-1.5 border-t border-[#1e1e2c] space-y-1">
+            <div className="flex items-center justify-between">
+              <span>Reflexo Pedal (Pata Traseira):</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); testPedal('pelvic_limb'); }}
+                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded cursor-pointer ${
+                  (cellular?.regionalBlockByRegion?.pelvic_limb ?? 0) > 0.45
+                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                    : 'bg-zinc-800 hover:bg-zinc-700 text-white'
+                }`}
+                title="Clique para testar o reflexo podal no membro pélvico"
+              >
+                {(cellular?.regionalBlockByRegion?.pelvic_limb ?? 0) > 0.45 ? 'BLOQUEADO 🛡️' : formatPedalReflex(vitals.pedalReflex).label}
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Reflexo Pedal (Pata Dianteira):</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); testPedal('thoracic_limb'); }}
+                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded cursor-pointer ${
+                  (cellular?.regionalBlockByRegion?.thoracic_limb ?? 0) > 0.45
+                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                    : 'bg-zinc-800 hover:bg-zinc-700 text-white'
+                }`}
+                title="Clique para testar o reflexo podal no membro torácico"
+              >
+                {(cellular?.regionalBlockByRegion?.thoracic_limb ?? 0) > 0.45 ? 'BLOQUEADO 🛡️' : formatPedalReflex(vitals.pedalReflex).label}
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -740,7 +740,7 @@ export class PKPDEngine {
       gabaHypnosis * 100,
       receptors.hypnoticEffect * 100,
       receptors.dissociativeEffect * 82,
-      receptors.centralSedation * 68
+      receptors.centralSedation * 52
     )));
 
     let consciousnessScore = Math.round(biologicalState.neurological.corticalArousalPct);
@@ -819,7 +819,7 @@ export class PKPDEngine {
       jawTone = receptors.muscleRelaxation > 0.3 ? 'moderate' : 'rigid';
       pedalReflex = analgesiaPct > 60 ? 'moderate' : 'brisk';
       surgicalTolerancePct = Math.round(Math.min(55, 18 + analgesiaPct * 0.36));
-    } else if (sedation >= 0.38 || (sedation >= 0.20 && analgesiaPct >= 40) || receptors.alpha2Drive > 0.30) {
+    } else if (receptors.alpha2Drive > 0.28 || (sedation >= 0.25 && analgesiaPct >= 40 && receptors.muOpioidDrive > 0.20) || sedation >= 0.52) {
       // Deep Sedation / Neuroleptanalgesia (e.g. Dexmedetomidine, Xylazine, Acepromazine + Opioid)
       consciousnessScore = Math.max(8, Math.round(100 - sedation * 90 - generalHypnosis * 55 - analgesiaPct * 0.22));
       guedelStage = 'Estágio I (Sedação Profunda / Neuroleptanalgesia)';
@@ -827,17 +827,19 @@ export class PKPDEngine {
       palpebralReflex = sedation > 0.60 ? 'sluggish' : 'moderate';
       cornealReflex = 'brisk';
       jawTone = receptors.muscleRelaxation > 0.30 ? 'relaxed_surgical' : 'moderate';
-      pedalReflex = analgesiaPct > 50 ? 'sluggish' : 'moderate';
+      const pelvicBlock = receptors.regionalBlockByRegion?.pelvic_limb ?? receptors.localNeuralBlockade;
+      pedalReflex = pelvicBlock > 0.45 ? 'absent' : (analgesiaPct > 50 ? 'sluggish' : 'moderate');
       surgicalTolerancePct = Math.round(Math.min(92, 35 + sedation * 42 + analgesiaPct * 0.45));
     } else if (sedation >= 0.10 || receptors.bzdAllostericOccupancy >= 0.08 || generalHypnosis >= 0.08) {
-      // Tranquilization / Light Sedation
-      consciousnessScore = Math.max(35, Math.round(100 - sedation * 70 - generalHypnosis * 55));
+      // Tranquilization / Light Sedation (e.g. Acepromazine alone, Benzodiazepines alone)
+      consciousnessScore = Math.max(35, Math.round(100 - sedation * 70 - generalHypnosis * 50));
       guedelStage = 'Estágio I (Sedação Leve / Abatimento)';
       eyePosition = 'central_light';
       palpebralReflex = 'brisk';
       cornealReflex = 'brisk';
       jawTone = receptors.muscleRelaxation > 0.24 ? 'moderate' : 'rigid';
-      pedalReflex = analgesiaPct > 65 ? 'moderate' : 'brisk';
+      const pelvicBlock = receptors.regionalBlockByRegion?.pelvic_limb ?? receptors.localNeuralBlockade;
+      pedalReflex = pelvicBlock > 0.45 ? 'absent' : (analgesiaPct > 65 ? 'moderate' : 'brisk');
       surgicalTolerancePct = Math.round(Math.min(50, analgesiaPct * 0.38 + generalHypnosis * 15 + sedation * 18));
     } else {
       // Estágio I (Consciente / Alerta)
@@ -847,7 +849,8 @@ export class PKPDEngine {
       palpebralReflex = 'brisk';
       cornealReflex = 'brisk';
       jawTone = 'rigid';
-      pedalReflex = receptors.localNeuralBlockade > 0.45 ? 'absent' : (analgesiaPct > 65 ? 'moderate' : 'brisk');
+      const pelvicBlock = receptors.regionalBlockByRegion?.pelvic_limb ?? receptors.localNeuralBlockade;
+      pedalReflex = pelvicBlock > 0.45 ? 'absent' : (analgesiaPct > 65 ? 'moderate' : 'brisk');
       if (receptors.localNeuralBlockade > 0.35) {
         // High surgical tolerance in blocked field despite conscious patient
         surgicalTolerancePct = Math.round(Math.min(95, 45 + receptors.localNeuralBlockade * 45 + analgesiaPct * 0.15));

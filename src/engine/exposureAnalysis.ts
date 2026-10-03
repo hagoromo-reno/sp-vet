@@ -44,20 +44,37 @@ const getSubtherapeuticCutoffCe = (drug: DrugDefinition): number => {
   return 0.03;
 };
 
-export const estimateEffectOffsetMinutes = (concentration: number, drug: DrugDefinition, isInfusionRunning: boolean): number | undefined => {
+export const estimateEffectOffsetMinutes = (
+  concentration: number,
+  drug: DrugDefinition,
+  isInfusionRunning: boolean,
+  pkCompartments?: ActiveDrugDose['pkCompartments']
+): number | undefined => {
   if (isInfusionRunning) return undefined;
 
   const cutoffCe = getClinicalCutoffCe(drug);
   if (concentration <= cutoffCe) return undefined;
 
-  // Use the beta half-life directly for effect-site decay estimation, which
-  // is more pharmacokinetically accurate than deriving it from durationMinutes.
-  // For drugs with very short beta half-lives (propofol, ephedrine), this
-  // produces a much faster and more realistic offset estimate.
-  const effectiveHalfTime = Math.max(0.5, drug.halfLifeBeta);
+  // The clinical half-time for bolus offset is derived from drug.durationMinutes,
+  // representing the time a typical therapeutic dose (Ce ≈ 1.0) takes to drop below
+  // the clinical effect cutoff. Using beta elimination half-life alone overestimates
+  // single-bolus duration (e.g. acepromazine 240min beta leading to >860min estimated).
+  const nominalHalfTimesToCutoff = Math.max(1, Math.log2(1.0 / cutoffCe));
+  const bolusEffectiveHalfTime = Math.max(0.5, drug.durationMinutes / nominalHalfTimesToCutoff);
+
+  // If peripheral compartments are heavily loaded (e.g. following prolonged CRI or repeated boluses),
+  // the context-sensitive half-time shifts toward the terminal beta elimination half-life.
+  let effectiveHalfTime = bolusEffectiveHalfTime;
+  if (pkCompartments) {
+    const deepAmount = pkCompartments.deepPeripheralAmountNormalized || 0;
+    const centralAmount = Math.max(0.001, pkCompartments.centralAmountNormalized || 0.001);
+    const deepRatio = Math.min(1, deepAmount / (centralAmount * 3));
+    effectiveHalfTime = bolusEffectiveHalfTime * (1 - deepRatio * 0.45)
+      + Math.min(drug.halfLifeBeta, bolusEffectiveHalfTime * 2.0) * (deepRatio * 0.45);
+  }
 
   // log2(Ce / cutoff) half-times until clinical effect ceases
-  const halfTimesRemaining = Math.log2(concentration / cutoffCe);
+  const halfTimesRemaining = Math.max(0, Math.log2(concentration / cutoffCe));
   const remaining = effectiveHalfTime * halfTimesRemaining;
 
   return Math.max(0.5, Math.round(remaining * 10) / 10);
@@ -119,7 +136,7 @@ export const analyzeDrugExposure = (dose: ActiveDrugDose, drug: DrugDefinition):
     phaseLabel: PHASE_LABELS[phase],
     effectPercent: Math.max(0, Math.min(100, effectPercent)),
     plasmaPercentOfPeak: Math.max(0, Math.min(100, Math.round(dose.currentCp / peakCp * 100))),
-    estimatedEffectMinutesRemaining: estimateEffectOffsetMinutes(dose.currentCe, drug, isRunning),
+    estimatedEffectMinutesRemaining: estimateEffectOffsetMinutes(dose.currentCe, drug, isRunning, dose.pkCompartments),
     isEffectActive,
     clinicalEffectStatus,
     eliminatedFraction,

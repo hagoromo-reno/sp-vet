@@ -74,7 +74,7 @@ export function SimulationHeader(props: SimulationHeaderProps) {
               <span>{props.paused ? 'Retomar' : 'Pausar'}</span>
             </button>
             <div className="speed-control" role="group" aria-label="Velocidade da simulação">
-              {[1, 2, 5].map((speed) => (
+              {[1, 2, 5, 10].map((speed) => (
                 <button
                   key={speed}
                   aria-pressed={props.speed === speed}

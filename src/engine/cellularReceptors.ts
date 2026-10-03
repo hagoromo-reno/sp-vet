@@ -1,6 +1,8 @@
 import { FLUID_DRUG_NAMES } from './fluidTherapy';
 import {
   ActiveDrugDose,
+  AnatomicalRegion,
+  BLOCK_SITE_COVERAGE,
   DrugDefinition,
   PatientProfile,
 } from '../types/simulator';
@@ -43,6 +45,7 @@ export interface ReceptorStateSnapshot {
   nmdaBlockade: number;
   naVBlockade: number;
   localNeuralBlockade: number;
+  regionalBlockByRegion: Record<AnatomicalRegion, number>;
   caVBlockade: number;
   acheInhibition: number;
   nociceptiveInhibition: number;
@@ -460,14 +463,28 @@ export class CellularReceptorsEngine {
     const directGating = 1.48 * propofolSite + 1.48 * neurosteroidSite + 1.48 * etomidateChlorideSite + 0.86 * volatileSite;
     const gabaAChlorideConductance = 0.08 + directGating * allostericBZDMultiplier + 0.11 * clamp(bzdSite);
 
+    // D2 antagonism (neuroleptic / phenothiazine tranquilization) produces calm/tranquility with a clinical ceiling,
+    // avoiding non-physiological deep anesthesia from tranquilizer alone.
+    const d2Sedation = 0.46 * Math.abs(Math.min(0, rawD2));
+    const h1Sedation = 0.16 * Math.abs(Math.min(0, rawH1));
+    const alpha2Sedation = 0.45 * Math.max(0, rawAlpha2);
+    const opioidSedation = 0.12 * Math.max(0, rawMu) + 0.08 * Math.max(0, rawKappa);
+    const bzdSedation = 0.22 * clamp(bzdSite);
+
+    // Synergy: neuroleptanalgesia occurs when a tranquilizer (D2 block) and an opioid (mu-agonist) are paired
+    const neuroleptanalgesiaSynergy = (Math.abs(Math.min(0, rawD2)) > 0.20 && rawMu > 0.20)
+      ? 0.18 * Math.min(1, Math.abs(rawD2) * 1.5) * Math.min(1, rawMu * 1.5)
+      : 0;
+
     const receptorSedation = clamp(
-      0.5 * Math.abs(Math.min(0, rawD2)) +
-      0.18 * Math.abs(Math.min(0, rawH1)) +
-      0.45 * Math.max(0, rawAlpha2) +
-      0.12 * Math.max(0, rawMu) +
-      0.08 * Math.max(0, rawKappa) +
-      0.22 * clamp(bzdSite)
+      d2Sedation +
+      h1Sedation +
+      alpha2Sedation +
+      opioidSedation +
+      bzdSedation +
+      neuroleptanalgesiaSynergy
     );
+
     let centralSedation = combineEffects([...sedationEffects, receptorSedation]);
     if (speciesConfig.opioidManiaSusceptibility && rawMu > 0.45 && rawAlpha2 < 0.2 && propofolSite < 0.15 && neurosteroidSite < 0.15) {
       // Pure-mu opioids can cause dysphoria/excitation in cats and especially
@@ -503,14 +520,46 @@ export class CellularReceptorsEngine {
       ]) - respiratoryStimulation * 0.6
     );
 
+    const regionalBlockByRegion: Record<AnatomicalRegion, number> = {
+      pelvic_limb: 0,
+      thoracic_limb: 0,
+      perineum_tail: 0,
+      abdomen_flank: 0,
+      head_face: 0,
+      thorax: 0,
+    };
+
+    for (const dose of activeDoses) {
+      if (dose.currentCe <= 0.0001) continue;
+      const drugDef = VETERINARY_DRUG_DATABASE.find((item) => item.id === dose.drugId);
+      if (!drugDef) continue;
+      const isLocalOrEpidural = dose.route === 'Local' || dose.route === 'Epidural';
+      const isAnestheticBlocker = drugDef.category === 'local_anesthetic'
+        || Boolean(drugDef.receptorProfile?.naVChannelBlock && drugDef.receptorProfile.naVChannelBlock > 0.3)
+        || drugDef.supportedRoutes.includes('Local')
+        || drugDef.supportedRoutes.includes('Epidural');
+
+      if (isLocalOrEpidural && isAnestheticBlocker) {
+        const defaultSite = dose.route === 'Epidural' ? 'epidural_lumbosacral' : 'local_incision';
+        const site = dose.blockSite || defaultSite;
+        const covered = BLOCK_SITE_COVERAGE[site] || ['abdomen_flank'];
+        const potency = drugDef.receptorProfile?.naVChannelBlock || 0.85;
+        const blockStrength = clamp(hillResponse(dose.currentCe, 0.28, 1.8) * potency);
+        for (const reg of covered) {
+          regionalBlockByRegion[reg] = Math.max(regionalBlockByRegion[reg], blockStrength);
+        }
+      }
+    }
+
+    const maxRegionalBlock = Math.max(0, ...Object.values(regionalBlockByRegion));
     const mechanisticAnalgesicSignal =
       1.75 * Math.max(0, rawMu) +
       1.05 * Math.max(0, rawKappa) +
       1.1 * Math.max(0, rawAlpha2) +
       1.0 * Math.max(0, rawNMDA) +
-      3.2 * Math.max(0, rawLocalNaV);
+      3.2 * Math.max(rawLocalNaV, maxRegionalBlock);
     const mechanisticAnalgesia = hillResponse(mechanisticAnalgesicSignal, 1.0, 1.7);
-    const localNeuralBlockAfferent = hillResponse(rawLocalNaV, 0.28, 2.0);
+    const localNeuralBlockAfferent = Math.max(hillResponse(rawLocalNaV, 0.28, 2.0), maxRegionalBlock);
     const phenotypicAnalgesia = combineEffects(analgesicEffects);
     const nociceptiveInhibition = clamp(Math.max(mechanisticAnalgesia, phenotypicAnalgesia, localNeuralBlockAfferent));
 
@@ -612,7 +661,8 @@ export class CellularReceptorsEngine {
       kappaOpioidDrive: rawKappa,
       nmdaBlockade: clamp(rawNMDA),
       naVBlockade: clamp(rawSystemicNaV),
-      localNeuralBlockade: clamp(rawLocalNaV),
+      localNeuralBlockade: clamp(Math.max(rawLocalNaV, maxRegionalBlock)),
+      regionalBlockByRegion,
       caVBlockade: clamp(rawCaV),
       acheInhibition: clamp(rawAChE),
       nociceptiveInhibition,
