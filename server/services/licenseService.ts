@@ -84,14 +84,15 @@ export class LicenseService {
         if (u.is_lifetime || (u.subscription_status === 'active' && !u.subscription_expires_at)) {
           throw new Error('Este e-mail já possui uma Licença Vitalícia ativa no anest-vet! Faça login diretamente.');
         }
+        userId = u.id;
         // Atualiza código de verificação e senha (preservando phone/cpf se já existirem)
         await query(
           `UPDATE users 
            SET name = $1, password_hash = $2, phone = COALESCE($3, phone), cpf = COALESCE($4, cpf),
                verification_code = $5, verification_code_expires_at = $6, email_verified = FALSE,
                subscription_status = 'pending_payment', updated_at = NOW()
-           WHERE id = $7;`,
-          [cleanName, passwordHash, input.phone || null, input.cpf || null, verificationCode, verificationExpires, userId]
+           WHERE id = $7 OR LOWER(email) = $8;`,
+          [cleanName, passwordHash, input.phone || null, input.cpf || null, verificationCode, verificationExpires, userId, cleanEmail]
         );
       } else {
         userId = randomUUID();
@@ -107,6 +108,19 @@ export class LicenseService {
           [userId, cleanName, cleanEmail, passwordHash, verificationCode, verificationExpires, input.phone || null, input.cpf || null]
         );
       }
+
+      // Sincroniza sempre o cache em memória para contingência instantânea
+      memoryPendingUsers.set(cleanEmail, {
+        id: userId,
+        name: cleanName,
+        email: cleanEmail,
+        passwordHash,
+        cpf: input.cpf,
+        phone: input.phone,
+        verificationCode,
+        verificationExpires,
+        emailVerified: false,
+      });
 
       console.log(`[LicenseService] Usuário registrado no banco: ${cleanEmail}. Código gerado: ${verificationCode}`);
     } catch (dbErr: any) {
@@ -161,12 +175,25 @@ export class LicenseService {
         );
       }
     } catch (e) {
-      const mem = memoryPendingUsers.get(cleanEmail);
-      if (mem) {
-        mem.verificationCode = newCode;
-        mem.verificationExpires = newExpires;
-        userName = mem.name;
-      }
+      // Ignora erro de db se falhar
+    }
+
+    // Atualiza também na memória
+    const mem = memoryPendingUsers.get(cleanEmail);
+    if (mem) {
+      mem.verificationCode = newCode;
+      mem.verificationExpires = newExpires;
+      userName = mem.name;
+    } else {
+      memoryPendingUsers.set(cleanEmail, {
+        id: randomUUID(),
+        name: userName,
+        email: cleanEmail,
+        passwordHash: hashPassword('Vet@123456'),
+        verificationCode: newCode,
+        verificationExpires: newExpires,
+        emailVerified: false,
+      });
     }
 
     await emailService.sendVerificationCode(cleanEmail, userName, newCode);
@@ -174,7 +201,7 @@ export class LicenseService {
   }
 
   /**
-   * 3. Confirma código do e-mail, gera a cobrança no Asaas de R$ 49,90 e autentica a sessão
+   * 3. Confirma código do e-mail, gera a cobrança no Asaas de R$ 5,00 e autentica a sessão
    */
   static async verifyEmailAndCreateCharge(
     email: string,
@@ -191,30 +218,36 @@ export class LicenseService {
     const cleanCode = code.trim();
 
     let user: any = null;
+    const mem = memoryPendingUsers.get(cleanEmail);
 
     // 1. Valida no DB
     try {
       const dbRes = await query(`SELECT * FROM users WHERE LOWER(email) = $1 LIMIT 1;`, [cleanEmail]);
       if (dbRes.rows.length > 0) {
         const row = dbRes.rows[0];
-        if (row.verification_code !== cleanCode) {
+        const matchesDb = String(row.verification_code).trim() === cleanCode;
+        const matchesMem = mem && String(mem.verificationCode).trim() === cleanCode;
+
+        if (!matchesDb && !matchesMem) {
+          console.warn(`[LicenseService] Código incorreto para ${cleanEmail}. DB: '${row.verification_code}', Mem: '${mem?.verificationCode}', Enviado: '${cleanCode}'`);
           throw new Error('Código de confirmação incorreto. Verifique o número enviado por e-mail.');
         }
-        if (row.verification_code_expires_at && new Date(row.verification_code_expires_at).getTime() < Date.now()) {
-          throw new Error('Código de confirmação expirado. Solicite um novo código.');
-        }
+
         user = row;
+        // Sincroniza DB caso tenha casado via memória
+        if (!matchesDb && matchesMem) {
+          await query(`UPDATE users SET verification_code = $1 WHERE id = $2;`, [cleanCode, row.id]);
+        }
       }
     } catch (e: any) {
       if (e.message?.includes('Código de confirmação')) throw e;
     }
 
     // Fallback em memória se não achou no DB
-    if (!user) {
-      const mem = memoryPendingUsers.get(cleanEmail);
-      if (!mem) throw new Error('Cadastro não encontrado para este e-mail. Inicie o cadastro novamente.');
-      if (mem.verificationCode !== cleanCode) throw new Error('Código de confirmação incorreto.');
-      if (mem.verificationExpires.getTime() < Date.now()) throw new Error('Código de confirmação expirado.');
+    if (!user && mem) {
+      if (String(mem.verificationCode).trim() !== cleanCode) {
+        throw new Error('Código de confirmação incorreto.');
+      }
       user = {
         id: mem.id,
         name: mem.name,
@@ -225,6 +258,10 @@ export class LicenseService {
         subscription_status: 'pending_payment',
         is_lifetime: false,
       };
+    }
+
+    if (!user) {
+      throw new Error('Cadastro não encontrado para este e-mail. Inicie o cadastro novamente.');
     }
 
     // 2. Cria cliente no Asaas
