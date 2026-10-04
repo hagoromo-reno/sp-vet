@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   ShieldCheck,
@@ -17,6 +17,10 @@ import {
   ArrowRight,
   RefreshCw,
   Tag,
+  ExternalLink,
+  QrCode,
+  Copy,
+  KeyRound,
 } from 'lucide-react';
 
 interface LoginModalProps {
@@ -40,23 +44,89 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Buy License / Register state
+  // Buy License / Checkout Flow: 'form' -> 'waiting_payment' -> 'set_password'
+  const [buyStep, setBuyStep] = useState<'form' | 'waiting_payment' | 'set_password'>('form');
+
+  // Form Fields (Nome, Email e CPF obrigatórios)
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
-  const [regPassword, setRegPassword] = useState('');
   const [regCpf, setRegCpf] = useState('');
   const [regPhone, setRegPhone] = useState('');
-  const [showOptionalFields, setShowOptionalFields] = useState(false);
-  const [buyStep, setBuyStep] = useState<'form' | 'verify'>('form');
-  const [regCode, setRegCode] = useState('');
-  const [receivedCode, setReceivedCode] = useState<string | null>(null);
+
+  // Password Creation Fields (após pagamento confirmado)
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Order & Session State
+  const [orderToken, setOrderToken] = useState<string | null>(null);
+  const [orderData, setOrderData] = useState<any>(null);
+  const [isCopiedPix, setIsCopiedPix] = useState(false);
   const [buyError, setBuyError] = useState<string | null>(null);
   const [buySuccessMsg, setBuySuccessMsg] = useState<string | null>(null);
-  const [isSubmittingBuy, setIsSubmittingBuy] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingPayment, setIsCheckingPayment] = useState(false);
+
+  // Recupera sessão do pedido pendente ao carregar o modal (via cookie ou localStorage)
+  useEffect(() => {
+    const savedToken = localStorage.getItem('anest_order_token');
+    const query = savedToken ? `?token=${encodeURIComponent(savedToken)}` : '';
+    fetch(`/api/license/check-order-token${query}`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && data.ok) {
+          if (data.sessionToken) {
+            setOrderToken(data.sessionToken);
+            localStorage.setItem('anest_order_token', data.sessionToken);
+          }
+          setOrderData(data);
+          if (data.isConfirmed && !data.registrationCompleted) {
+            setBuyStep('set_password');
+            setActiveTab('buy');
+          } else if (!data.isConfirmed && !data.registrationCompleted) {
+            setBuyStep('waiting_payment');
+            setActiveTab('buy');
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Polling em tempo real a cada 2.5s enquanto aguarda pagamento no Asaas
+  useEffect(() => {
+    if (buyStep !== 'waiting_payment' || !orderToken) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/license/check-order-token?token=${encodeURIComponent(orderToken)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isConfirmed) {
+            setOrderData(data);
+            setBuyStep('set_password');
+            setBuySuccessMsg('Pagamento confirmado com sucesso pelo Banco Asaas! Agora crie a sua senha.');
+          }
+        }
+      } catch (err) {
+        // Silenciosamente ignora falhas pontuais de polling
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [buyStep, orderToken]);
 
   if (!isOpen && !concurrentDisconnected && !subscriptionError) {
     return null;
   }
+
+  // Formatador de CPF automático (000.000.000-00)
+  const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let v = e.target.value.replace(/\D/g, '');
+    if (v.length > 11) v = v.slice(0, 11);
+    v = v.replace(/(\d{3})(\d)/, '$1.$2');
+    v = v.replace(/(\d{3})(\d)/, '$1.$2');
+    v = v.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+    setRegCpf(v);
+  };
 
   // Submit Login
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -69,98 +139,121 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
     }
   };
 
-  // Submit Registration (Step 1)
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
+  // Etapa 1: Iniciar Pedido e Redirecionar para o Checkout Seguro do Asaas
+  const handleInitiateOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setBuyError(null);
     setBuySuccessMsg(null);
-    setIsSubmittingBuy(true);
 
+    const cleanCpf = regCpf.replace(/\D/g, '');
+    if (cleanCpf.length !== 11) {
+      setBuyError('Por favor, informe um CPF válido com 11 dígitos.');
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
-      const res = await fetch('/api/license/register', {
+      const res = await fetch('/api/license/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: regName || undefined,
-          email: regEmail,
-          password: regPassword || undefined,
-          cpf: regCpf || undefined,
-          phone: regPhone || undefined,
+          name: regName.trim(),
+          email: regEmail.trim(),
+          cpf: cleanCpf,
+          phone: regPhone.trim() || undefined,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.message || 'Erro ao processar cadastro para licença.');
+        throw new Error(data.message || 'Erro ao gerar pedido no Banco Asaas.');
       }
 
-      if (data.code) {
-        setReceivedCode(data.code);
-        setRegCode(data.code);
+      setOrderToken(data.orderToken);
+      setOrderData(data);
+      localStorage.setItem('anest_order_token', data.orderToken);
+
+      // Abre o checkout oficial do Asaas em nova aba
+      if (data.invoiceUrl) {
+        window.open(data.invoiceUrl, '_blank');
       }
 
-      setBuySuccessMsg('Código de confirmação gerado e enviado para seu e-mail!');
-      setBuyStep('verify');
+      setBuyStep('waiting_payment');
     } catch (err: any) {
-      setBuyError(err.message || 'Erro ao iniciar compra da licença.');
+      setBuyError(err.message || 'Erro ao iniciar transação no Asaas.');
     } finally {
-      setIsSubmittingBuy(false);
+      setIsSubmitting(false);
     }
   };
 
-  // Submit Email Verification (Step 2) -> Generates Asaas Charge
-  const handleVerifySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Checagem manual forçada do pagamento ("Já Paguei")
+  const handleManualCheckPayment = async () => {
+    if (!orderToken) return;
+    setIsCheckingPayment(true);
     setBuyError(null);
-    setBuySuccessMsg(null);
-    setIsSubmittingBuy(true);
-
     try {
-      const res = await fetch('/api/license/verify-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: regEmail,
-          code: regCode,
-        }),
-      });
-
+      const res = await fetch(`/api/license/check-order-token?token=${encodeURIComponent(orderToken)}`);
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Código incorreto ou expirado.');
-      }
-
-      // Autentica o usuário diretamente: App.tsx exibirá PendingPaymentScreen imediatamente com o PIX
-      setAuthSession(data.user, data.token);
-    } catch (err: any) {
-      setBuyError(err.message || 'Erro ao confirmar código de e-mail.');
-    } finally {
-      setIsSubmittingBuy(false);
-    }
-  };
-
-  // Reenviar código
-  const handleResendCode = async () => {
-    setBuyError(null);
-    setBuySuccessMsg(null);
-    try {
-      const res = await fetch('/api/license/resend-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: regEmail }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        if (data.code) {
-          setReceivedCode(data.code);
-          setRegCode(data.code);
-        }
-        setBuySuccessMsg(data.message || 'Novo código reenviado com sucesso para o seu e-mail!');
+      if (res.ok && data.isConfirmed) {
+        setOrderData(data);
+        setBuyStep('set_password');
+        setBuySuccessMsg('Pagamento confirmado com sucesso!');
       } else {
-        setBuyError(data.message || 'Erro ao reenviar código.');
+        setBuyError('Pagamento ainda não identificado pelo Asaas. Se já pagou, aguarde alguns instantes pela compensação.');
       }
     } catch (e: any) {
-      setBuyError(e.message || 'Erro de conexão com o servidor.');
+      setBuyError(e.message || 'Erro ao verificar status.');
+    } finally {
+      setIsCheckingPayment(false);
+    }
+  };
+
+  // Copia o código PIX para a área de transferência
+  const handleCopyPix = () => {
+    if (orderData?.pixCopiaCola) {
+      navigator.clipboard.writeText(orderData.pixCopiaCola);
+      setIsCopiedPix(true);
+      setTimeout(() => setIsCopiedPix(false), 3000);
+    }
+  };
+
+  // Etapa 3: Concluir Cadastro criando a Senha
+  const handleCompleteRegistration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBuyError(null);
+
+    if (!newPassword || newPassword.length < 6) {
+      setBuyError('A senha deve possuir pelo menos 6 caracteres.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setBuyError('As senhas digitadas não coincidem.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/license/complete-registration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderToken,
+          password: newPassword,
+          passwordConfirm: confirmPassword,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Erro ao concluir cadastro.');
+      }
+
+      localStorage.removeItem('anest_order_token');
+      setAuthSession(data.user, data.token);
+    } catch (err: any) {
+      setBuyError(err.message || 'Erro ao salvar senha e concluir cadastro.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -201,7 +294,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
                   : 'text-zinc-400 hover:text-white'
               }`}
             >
-              <Zap className="w-3.5 h-3.5" /> Comprar Licença Vitalícia
+              <Sparkles className="w-3.5 h-3.5" /> Comprar Licença Vitalícia
             </button>
             <button
               type="button"
@@ -251,7 +344,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
           )}
 
           {/* ======================================================== */}
-          {/* TAB 1: BUY LIFETIME LICENSE (ISCA DE COMPRA DE R$ 5,00)  */}
+          {/* TAB 1: BUY LIFETIME LICENSE (CHECKOUT SEGURO ASAAS)      */}
           {/* ======================================================== */}
           {activeTab === 'buy' && (
             <div className="space-y-4">
@@ -318,12 +411,27 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
                 </div>
               )}
 
-              {/* STEP 1: Registration Form */}
+              {/* ETAPA 1: Dados do Cliente (Nome, E-mail, CPF obrigatórios) */}
               {buyStep === 'form' && (
-                <form onSubmit={handleRegisterSubmit} className="space-y-3 text-xs">
+                <form onSubmit={handleInitiateOrder} className="space-y-3 text-xs">
                   <div>
                     <label className="text-zinc-300 font-semibold block mb-1">
-                      E-mail para Acesso e Ativação: <span className="text-emerald-400">*</span>
+                      Nome Completo do Médico Veterinário: <span className="text-emerald-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={3}
+                      value={regName}
+                      onChange={(e) => setRegName(e.target.value)}
+                      placeholder="Dr(a). Nome e Sobrenome"
+                      className="w-full bg-[#13141f] border border-[#27293d] focus:border-emerald-500 rounded-xl px-3 py-2.5 text-white focus:outline-none transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-zinc-300 font-semibold block mb-1">
+                      E-mail para Acesso e Envio da Licença: <span className="text-emerald-400">*</span>
                     </label>
                     <div className="relative">
                       <Mail className="w-4 h-4 text-emerald-500 absolute left-3 top-2.5" />
@@ -340,167 +448,221 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-zinc-400 block mb-1">Nome ou Apelido (Opcional):</label>
+                      <label className="text-zinc-300 font-semibold block mb-1">
+                        CPF do Titular: <span className="text-emerald-400">*</span>
+                      </label>
                       <input
                         type="text"
-                        value={regName}
-                        onChange={(e) => setRegName(e.target.value)}
-                        placeholder="Dr(a). Veterinário"
-                        className="w-full bg-[#13141f] border border-[#27293d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
+                        required
+                        maxLength={14}
+                        value={regCpf}
+                        onChange={handleCpfChange}
+                        placeholder="000.000.000-00"
+                        className="w-full bg-[#13141f] border border-[#27293d] focus:border-emerald-500 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none transition"
                       />
                     </div>
                     <div>
-                      <label className="text-zinc-400 block mb-1">Senha (Opcional - padrão: Vet@123456):</label>
+                      <label className="text-zinc-400 block mb-1">WhatsApp / Celular (Opcional):</label>
                       <div className="relative">
-                        <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+                        <Phone className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
                         <input
-                          type="password"
-                          minLength={6}
-                          value={regPassword}
-                          onChange={(e) => setRegPassword(e.target.value)}
-                          placeholder="Mínimo 6 caracteres"
-                          className="w-full bg-[#13141f] border border-[#27293d] rounded-xl pl-9 pr-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
+                          type="tel"
+                          value={regPhone}
+                          onChange={(e) => setRegPhone(e.target.value)}
+                          placeholder="(11) 90000-0000"
+                          className="w-full bg-[#13141f] border border-[#27293d] focus:border-emerald-500 rounded-xl pl-9 pr-3 py-2.5 text-white focus:outline-none transition"
                         />
                       </div>
                     </div>
                   </div>
 
-                  {/* Toggle para Campos Opcionais de CPF e Telefone */}
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setShowOptionalFields(!showOptionalFields)}
-                      className="text-[11px] text-zinc-400 hover:text-emerald-400 flex items-center gap-1 transition cursor-pointer py-1"
-                    >
-                      <span>{showOptionalFields ? '▲ Ocultar dados adicionais' : '▼ Informar WhatsApp / CPF (Opcional)'}</span>
-                    </button>
-                    {showOptionalFields && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2 pt-2 border-t border-[#1c1e30] animate-fadeIn">
-                        <div>
-                          <label className="text-zinc-400 block mb-1">CPF (Opcional):</label>
-                          <input
-                            type="text"
-                            value={regCpf}
-                            onChange={(e) => setRegCpf(e.target.value)}
-                            placeholder="000.000.000-00"
-                            className="w-full bg-[#13141f] border border-[#27293d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-zinc-400 block mb-1">WhatsApp / Celular (Opcional):</label>
-                          <div className="relative">
-                            <Phone className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
-                            <input
-                              type="tel"
-                              value={regPhone}
-                              onChange={(e) => setRegPhone(e.target.value)}
-                              placeholder="(11) 90000-0000"
-                              className="w-full bg-[#13141f] border border-[#27293d] rounded-xl pl-9 pr-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                  <div className="p-3 bg-[#131522] border border-[#23273e] rounded-xl text-zinc-300 text-[11px] flex items-start gap-2.5 mt-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span>
+                      Você será redirecionado para a página oficial do <strong>Banco Asaas</strong> para realizar o pagamento com total segurança. A sua senha de acesso será criada assim que o pagamento for confirmado!
+                    </span>
                   </div>
 
                   <button
                     type="submit"
-                    disabled={isSubmittingBuy}
+                    disabled={isSubmitting}
                     className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-black text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-950/50 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
                   >
-                    {isSubmittingBuy ? (
+                    {isSubmitting ? (
                       <>
-                        <RefreshCw className="w-4 h-4 animate-spin" /> Processando solicitação...
+                        <RefreshCw className="w-4 h-4 animate-spin" /> Conectando ao Banco Asaas...
                       </>
                     ) : (
                       <>
-                        Garantir Minha Licença por R$ 5,00 <ArrowRight className="w-4 h-4" />
+                        Ir para Pagamento Seguro no Asaas (R$ 5,00) <ArrowRight className="w-4 h-4" />
                       </>
                     )}
                   </button>
-
-                  <p className="text-[10px] text-zinc-500 text-center pt-1">
-                    Apenas o e-mail é obrigatório. Enviaremos o código de confirmação via servidor oficial SMTP.
-                  </p>
                 </form>
               )}
 
-              {/* STEP 2: Email Verification Code */}
-              {buyStep === 'verify' && (
-                <form onSubmit={handleVerifySubmit} className="space-y-4 text-xs">
-                  <div className="p-3 bg-[#131522] border border-[#23273e] rounded-xl text-zinc-300 space-y-1">
-                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <Mail className="w-4 h-4 text-emerald-400" />
-                      Confirmação de Segurança
+              {/* ETAPA 2: Aguardando Pagamento no Asaas com Reconhecimento em Tempo Real */}
+              {buyStep === 'waiting_payment' && (
+                <div className="space-y-4 text-xs animate-scaleUp">
+                  <div className="p-4 bg-emerald-950/30 border border-emerald-500/40 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-emerald-300 font-bold text-xs uppercase tracking-wider">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" /> Checkout Seguro Asaas Iniciado
+                      </div>
+                      <span className="text-[10px] bg-emerald-900/60 px-2 py-0.5 rounded text-white font-mono font-bold">
+                        R$ {orderData?.amount ? Number(orderData.amount).toFixed(2).replace('.', ',') : '5,00'}
+                      </span>
                     </div>
-                    <p className="text-[11px] text-zinc-400">
-                      Enviamos um código para <strong>{regEmail}</strong> pelo nosso servidor oficial (arbor.br@aol.com):
+                    <p className="text-[11px] text-zinc-300 leading-relaxed">
+                      Abrimos a tela de pagamento do <strong>Banco Asaas</strong> em uma nova aba. Conclua o pagamento por Cartão de Crédito, PIX ou Boleto para liberar seu acesso.
                     </p>
+
+                    {/* Botão de Redirecionamento Direto */}
+                    {orderData?.invoiceUrl && (
+                      <div className="pt-2">
+                        <a
+                          href={orderData.invoiceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 cursor-pointer"
+                        >
+                          <ExternalLink className="w-4 h-4" /> Abrir Página de Pagamento do Asaas
+                        </a>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Badge de Ativação Rápida */}
-                  {receivedCode && (
-                    <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs space-y-1">
-                      <div className="font-bold flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>Código Gerado:</span>
-                        <span className="font-mono text-white text-sm bg-emerald-900/80 px-2.5 py-0.5 rounded border border-emerald-500/60 font-black">
-                          {receivedCode}
-                        </span>
+                  {/* Alternativa PIX QR Code Direto */}
+                  {orderData?.pixQrCodeImage && (
+                    <div className="p-3 bg-[#0d0f18] border border-[#222538] rounded-xl space-y-2.5 text-center">
+                      <div className="text-[11px] font-bold text-zinc-300 flex items-center justify-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-teal-400" /> Ou Pague pelo PIX Agora
                       </div>
-                      <p className="text-[11px] text-zinc-300">
-                        O código já foi preenchido automaticamente para sua conveniência de teste!
-                      </p>
+                      <div className="bg-white p-2.5 rounded-lg inline-block shadow-md">
+                        <img
+                          src={orderData.pixQrCodeImage}
+                          alt="PIX QR Code Asaas"
+                          className="w-36 h-36 object-contain mx-auto"
+                        />
+                      </div>
+                      {orderData?.pixCopiaCola && (
+                        <div>
+                          <button
+                            type="button"
+                            onClick={handleCopyPix}
+                            className="w-full py-2 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 font-semibold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Copy className="w-3.5 h-3.5 text-emerald-400" />
+                            {isCopiedPix ? 'Chave PIX Copiada!' : 'Copiar Código PIX (Copia e Cola)'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  <div>
-                    <label className="text-zinc-400 block mb-1 uppercase tracking-wider text-[11px] font-bold">
-                      Código de 6 dígitos:
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      maxLength={6}
-                      autoFocus
-                      value={regCode}
-                      onChange={(e) => setRegCode(e.target.value.replace(/\D/g, ''))}
-                      placeholder="Ex: 849201"
-                      className="w-full bg-[#141624] border border-[#2b304c] focus:border-emerald-500 rounded-xl px-4 py-3 text-center text-2xl font-mono tracking-[8px] text-white focus:outline-none transition"
-                    />
+                  {/* Radar de Detecção em Tempo Real */}
+                  <div className="p-3 bg-[#111320] border border-[#202336] rounded-xl flex items-center gap-3">
+                    <div className="w-3 h-3 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                    <div className="text-[11px] text-zinc-300">
+                      Aguardando confirmação do pagamento... Esta tela reconhecerá automaticamente e liberará a criação da sua senha!
+                    </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 pt-1">
                     <button
-                      type="submit"
-                      disabled={isSubmittingBuy || regCode.length < 6}
-                      className="flex-1 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-black text-xs uppercase tracking-wider transition disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-emerald-950/50"
+                      type="button"
+                      onClick={handleManualCheckPayment}
+                      disabled={isCheckingPayment}
+                      className="flex-1 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      {isSubmittingBuy ? (
+                      {isCheckingPayment ? (
                         <>
-                          <RefreshCw className="w-4 h-4 animate-spin" /> Gerando cobrança Asaas...
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Verificando no Asaas...
                         </>
                       ) : (
                         <>
-                          Confirmar & Escolher Pagamento <ArrowRight className="w-4 h-4" />
+                          <RefreshCw className="w-3.5 h-3.5 text-emerald-400" /> Já Realizei o Pagamento
                         </>
                       )}
                     </button>
                     <button
                       type="button"
-                      onClick={handleResendCode}
-                      className="px-3 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 font-semibold text-xs transition cursor-pointer"
+                      onClick={() => setBuyStep('form')}
+                      className="px-3 py-2.5 rounded-xl bg-transparent hover:bg-zinc-900 text-zinc-400 hover:text-zinc-300 text-xs transition cursor-pointer"
                     >
-                      Reenviar
+                      Voltar
                     </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ETAPA 3: Criar Senha de Acesso (Apenas após o pagamento confirmado) */}
+              {buyStep === 'set_password' && (
+                <form onSubmit={handleCompleteRegistration} className="space-y-4 text-xs animate-scaleUp">
+                  <div className="p-4 bg-emerald-950/40 border border-emerald-500/50 rounded-xl space-y-1 text-center">
+                    <div className="w-10 h-10 mx-auto rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-1">
+                      <CheckCircle2 className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-sm font-black text-white">Pagamento Confirmado pelo Asaas! 🎉</h3>
+                    <p className="text-[11px] text-zinc-300">
+                      Sua licença vitalícia foi validada. Para concluir seu cadastro e acessar a aplicação, crie sua senha de acesso abaixo:
+                    </p>
+                    <div className="pt-1 text-[11px] text-emerald-300 font-mono font-bold">
+                      {orderData?.email || regEmail}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-zinc-300 font-semibold block mb-1">
+                      Crie sua Senha de Acesso: <span className="text-emerald-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-emerald-500 absolute left-3 top-2.5" />
+                      <input
+                        type="password"
+                        required
+                        minLength={6}
+                        autoFocus
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Mínimo 6 caracteres"
+                        className="w-full bg-[#13141f] border border-[#27293d] focus:border-emerald-500 rounded-xl pl-9 pr-3 py-2.5 text-white focus:outline-none transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-zinc-300 font-semibold block mb-1">
+                      Confirme sua Senha: <span className="text-emerald-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <KeyRound className="w-4 h-4 text-emerald-500 absolute left-3 top-2.5" />
+                      <input
+                        type="password"
+                        required
+                        minLength={6}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Repita a senha digitada"
+                        className="w-full bg-[#13141f] border border-[#27293d] focus:border-emerald-500 rounded-xl pl-9 pr-3 py-2.5 text-white focus:outline-none transition"
+                      />
+                    </div>
                   </div>
 
                   <button
-                    type="button"
-                    onClick={() => setBuyStep('form')}
-                    className="w-full text-center text-xs text-zinc-500 hover:text-zinc-400 underline cursor-pointer"
+                    type="submit"
+                    disabled={isSubmitting || newPassword.length < 6}
+                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-black text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-950/50 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
                   >
-                    Alterar dados de cadastro
+                    {isSubmitting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" /> Concluindo cadastro e ativando licença...
+                      </>
+                    ) : (
+                      <>
+                        Concluir Cadastro & Entrar no anest-vet <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
                 </form>
               )}

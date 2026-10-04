@@ -39,15 +39,6 @@ export const PendingPaymentScreen: React.FC = () => {
   // Selected Payment Method: 'credit_card' (default/featured), 'pix', 'boleto'
   const [selectedMethod, setSelectedMethod] = useState<'credit_card' | 'pix' | 'boleto'>('credit_card');
 
-  // Direct Credit Card Form State
-  const [cardHolderName, setCardHolderName] = useState('');
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardExpiryMonth, setCardExpiryMonth] = useState('');
-  const [cardExpiryYear, setCardExpiryYear] = useState('');
-  const [cardCcv, setCardCcv] = useState('');
-  const [cardCpf, setCardCpf] = useState('');
-  const [isProcessingCard, setIsProcessingCard] = useState(false);
-  const [cardError, setCardError] = useState<string | null>(null);
 
   // Busca dados da ordem e status do pagamento
   const fetchOrderStatus = useCallback(async () => {
@@ -130,49 +121,6 @@ export const PendingPaymentScreen: React.FC = () => {
     }
   };
 
-  // Processa pagamento direto com Cartão de Crédito
-  const handleCreditCardPay = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCardError(null);
-    setIsProcessingCard(true);
-
-    try {
-      const res = await fetch('/api/license/pay-credit-card', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          card: {
-            holderName: cardHolderName,
-            number: cardNumber.replace(/\s+/g, ''),
-            expiryMonth: cardExpiryMonth,
-            expiryYear: cardExpiryYear,
-            ccv: cardCcv,
-            cpfCnpj: cardCpf || user?.cpf || '000.000.000-00',
-            phone: user?.phone,
-          },
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Falha ao autorizar pagamento com cartão.');
-      }
-
-      if (data.result?.status === 'CONFIRMED' || data.result?.status === 'RECEIVED') {
-        setIsPaidSuccess(true);
-        setTimeout(() => refreshUser(), 2500);
-      } else {
-        await fetchOrderStatus();
-      }
-    } catch (err: any) {
-      setCardError(err.message || 'Cartão não autorizado pelo emissor. Verifique os dados ou utilize o checkout seguro.');
-    } finally {
-      setIsProcessingCard(false);
-    }
-  };
 
   // Reenviar código caso o e-mail não esteja verificado
   const handleResendCode = async () => {
@@ -569,149 +517,58 @@ export const PendingPaymentScreen: React.FC = () => {
                   {/* ======================================================== */}
                   {/* FORMA 1: CARTÃO DE CRÉDITO (DESTAQUE / MAIOR RENDIMENTO) */}
                   {/* ======================================================== */}
+                  {/* ======================================================== */}
+                  {/* FORMA 1: CARTÃO DE CRÉDITO (CHECKOUT SEGURO ASAAS)      */}
+                  {/* ======================================================== */}
                   {selectedMethod === 'credit_card' && (
                     <div className="space-y-4 animate-scaleUp">
-                      <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-600/40 flex items-start gap-3">
-                        <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
-                          <CreditCard className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold text-emerald-300 uppercase tracking-wide">
-                            Aprovação Imediata · Liberação Instantânea
-                          </div>
-                          <p className="text-[11px] text-zinc-300 mt-0.5">
-                            Pague no cartão de crédito em 1x de R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '5,00'} ou parcelado. Sua licença é liberada no mesmo segundo!
-                          </p>
-                        </div>
-                      </div>
-
-                      {cardError && (
-                        <div className="p-3 rounded-lg bg-red-950/50 border border-red-700/50 text-red-300 text-xs flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          <span>{cardError}</span>
-                        </div>
-                      )}
-
-                      {/* Formulário Integrado de Cartão */}
-                      <form onSubmit={handleCreditCardPay} className="space-y-3 text-xs">
-                        <div>
-                          <label className="text-zinc-400 block mb-1">Nome Impresso no Cartão:</label>
-                          <input
-                            type="text"
-                            required
-                            value={cardHolderName}
-                            onChange={(e) => setCardHolderName(e.target.value.toUpperCase())}
-                            placeholder="NOME COMO ESTA NO CARTAO"
-                            className="w-full bg-[#131522] border border-[#272b42] rounded-xl px-3 py-2 text-white font-mono uppercase focus:outline-none focus:border-emerald-500 transition"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="text-zinc-400 block mb-1">Número do Cartão de Crédito:</label>
-                          <div className="relative">
-                            <CreditCard className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
-                            <input
-                              type="text"
-                              required
-                              maxLength={19}
-                              value={cardNumber}
-                              onChange={(e) => {
-                                const v = e.target.value.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim();
-                                setCardNumber(v);
-                              }}
-                              placeholder="0000 0000 0000 0000"
-                              className="w-full bg-[#131522] border border-[#272b42] rounded-xl pl-9 pr-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 transition"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="text-zinc-400 block mb-1">Mês (MM):</label>
-                            <input
-                              type="text"
-                              required
-                              maxLength={2}
-                              value={cardExpiryMonth}
-                              onChange={(e) => setCardExpiryMonth(e.target.value.replace(/\D/g, ''))}
-                              placeholder="12"
-                              className="w-full bg-[#131522] border border-[#272b42] rounded-xl px-3 py-2 text-center text-white font-mono focus:outline-none focus:border-emerald-500 transition"
-                            />
+                      <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-600/40 space-y-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                            <CreditCard className="w-4 h-4" />
                           </div>
                           <div>
-                            <label className="text-zinc-400 block mb-1">Ano (AA/AAAA):</label>
-                            <input
-                              type="text"
-                              required
-                              maxLength={4}
-                              value={cardExpiryYear}
-                              onChange={(e) => setCardExpiryYear(e.target.value.replace(/\D/g, ''))}
-                              placeholder="28"
-                              className="w-full bg-[#131522] border border-[#272b42] rounded-xl px-3 py-2 text-center text-white font-mono focus:outline-none focus:border-emerald-500 transition"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-zinc-400 block mb-1">CVV:</label>
-                            <div className="relative">
-                              <Lock className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-2.5" />
-                              <input
-                                type="password"
-                                required
-                                maxLength={4}
-                                value={cardCcv}
-                                onChange={(e) => setCardCcv(e.target.value.replace(/\D/g, ''))}
-                                placeholder="123"
-                                className="w-full bg-[#131522] border border-[#272b42] rounded-xl pl-8 pr-2 py-2 text-center text-white font-mono focus:outline-none focus:border-emerald-500 transition"
-                              />
+                            <div className="text-xs font-bold text-emerald-300 uppercase tracking-wide">
+                              Ambiente Seguro Banco Asaas · Liberação Instantânea
+                            </div>
+                            <div className="text-[11px] text-zinc-300">
+                              Pagamento com Cartão de Crédito com total segurança e criptografia de ponta a ponta.
                             </div>
                           </div>
                         </div>
+                      </div>
 
-                        {!user?.cpf && (
-                          <div>
-                            <label className="text-zinc-400 block mb-1">CPF do Titular do Cartão:</label>
-                            <input
-                              type="text"
-                              required
-                              value={cardCpf}
-                              onChange={(e) => setCardCpf(e.target.value)}
-                              placeholder="000.000.000-00"
-                              className="w-full bg-[#131522] border border-[#272b42] rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 transition"
-                            />
-                          </div>
-                        )}
+                      <div className="p-4 bg-[#111320] border border-[#23273e] rounded-xl text-zinc-300 text-xs space-y-3">
+                        <p className="leading-relaxed">
+                          Para garantir a total segurança e conformidade PCI-DSS, os dados do seu cartão são inseridos diretamente no ambiente blindado do <strong>Banco Asaas</strong>.
+                        </p>
+                        <div className="flex items-center gap-2 text-[11px] text-emerald-400">
+                          <ShieldCheck className="w-4 h-4 shrink-0" />
+                          <span>Seus dados de cartão nunca passam nem ficam armazenados no nosso servidor.</span>
+                        </div>
+                      </div>
 
-                        <button
-                          type="submit"
-                          disabled={isProcessingCard}
-                          className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-black text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-950/50 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
+                      {order?.invoiceUrl ? (
+                        <a
+                          href={order.invoiceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full py-4 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-black text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 cursor-pointer"
                         >
-                          {isProcessingCard ? (
-                            <>
-                              <RefreshCw className="w-4 h-4 animate-spin" /> Processando no Banco Asaas...
-                            </>
-                          ) : (
-                            <>
-                              <ShieldCheck className="w-4 h-4" /> Pagar R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '5,00'} no Cartão & Liberar Acesso
-                            </>
-                          )}
-                        </button>
-                      </form>
-
-                      {/* Opção Alternativa: Abrir Checkout Asaas */}
-                      {order?.invoiceUrl && (
-                        <div className="pt-2 text-center">
-                          <a
-                            href={order.invoiceUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-emerald-400 underline transition cursor-pointer"
-                          >
-                            <span>Ou prefere pagar pelo Checkout Seguro Asaas na web?</span>
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
+                          <ExternalLink className="w-4 h-4" /> Abrir Pagamento com Cartão no Asaas (R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '5,00'})
+                        </a>
+                      ) : (
+                        <div className="p-3 bg-zinc-900 text-zinc-400 text-xs text-center rounded-xl">
+                          Gerando fatura segura do Asaas...
                         </div>
                       )}
+
+                      <div className="p-3 bg-[#0d0f1a] border border-[#1f2235] rounded-xl flex items-center gap-3">
+                        <div className="w-3 h-3 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                        <div className="text-[11px] text-zinc-300">
+                          Assim que o pagamento for concluído na página do Asaas, o sistema reconhece em tempo real e libera seu acesso automaticamente!
+                        </div>
+                      </div>
                     </div>
                   )}
 

@@ -63,6 +63,13 @@ export async function initDatabase(): Promise<boolean> {
         raw_asaas_data JSONB
       );
     `);
+    await runDdl(`ALTER TABLE license_orders ALTER COLUMN user_id DROP NOT NULL;`);
+    await runDdl(`ALTER TABLE license_orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);`);
+    await runDdl(`ALTER TABLE license_orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255);`);
+    await runDdl(`ALTER TABLE license_orders ADD COLUMN IF NOT EXISTS customer_cpf VARCHAR(50);`);
+    await runDdl(`ALTER TABLE license_orders ADD COLUMN IF NOT EXISTS session_token VARCHAR(255);`);
+    await runDdl(`ALTER TABLE license_orders ADD COLUMN IF NOT EXISTS registration_completed BOOLEAN DEFAULT FALSE;`);
+    await runDdl(`CREATE INDEX IF NOT EXISTS idx_license_orders_session_token ON license_orders(session_token);`);
     await runDdl(`CREATE INDEX IF NOT EXISTS idx_license_orders_user ON license_orders(user_id);`);
     await runDdl(`CREATE INDEX IF NOT EXISTS idx_license_orders_asaas ON license_orders(asaas_payment_id);`);
 

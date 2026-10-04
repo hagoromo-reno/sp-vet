@@ -51,10 +51,372 @@ export const memoryPendingUsers = new Map<
   }
 >();
 
+export interface StartCheckoutInput {
+  name: string;
+  email: string;
+  cpf: string;
+  phone?: string;
+}
+
+export interface CheckoutSessionResult {
+  ok: boolean;
+  orderId: string;
+  orderToken: string;
+  invoiceUrl: string;
+  pixQrCodeImage?: string;
+  pixCopiaCola?: string;
+  amount: number;
+  customerName: string;
+  customerEmail: string;
+  message: string;
+}
+
 export class LicenseService {
   /**
-   * 1. Inicia o cadastro do usuário para compra da licença promocional de R$ 49,90
-   * Gera código de 6 dígitos e envia pelo AOL SMTP.
+   * 1. Inicia o pedido de compra da licença vitalícia no Asaas (R$ 5,00)
+   * Exige Nome Completo, E-mail e CPF obrigatórios.
+   * Não cria a conta do usuário ainda; salva o pedido pendente e devolve a URL de checkout seguro do Asaas.
+   */
+  static async initiateOrder(input: StartCheckoutInput): Promise<CheckoutSessionResult> {
+    const cleanEmail = (input.email || '').trim().toLowerCase();
+    const cleanName = (input.name || '').trim();
+    const cleanCpf = (input.cpf || '').replace(/\D/g, '');
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('E-mail válido é obrigatório para continuar.');
+    }
+    if (!cleanName || cleanName.length < 3) {
+      throw new Error('Nome completo é obrigatório para a emissão da licença.');
+    }
+    if (!cleanCpf || cleanCpf.length !== 11) {
+      throw new Error('CPF válido com 11 dígitos é obrigatório para a transação no Asaas.');
+    }
+
+    // Verifica se já possui licença ativa
+    try {
+      const existingUser = await query(
+        `SELECT id, is_lifetime, subscription_status FROM users WHERE LOWER(email) = $1 LIMIT 1;`,
+        [cleanEmail]
+      );
+      if (existingUser.rows.length > 0) {
+        const u = existingUser.rows[0];
+        if (u.is_lifetime || (u.subscription_status === 'active' && !u.subscription_expires_at)) {
+          throw new Error('Este e-mail já possui uma Licença Vitalícia ativa no anest-vet! Faça login na aba "Já Sou Cadastrado".');
+        }
+      }
+    } catch (e: any) {
+      if (e.message?.includes('já possui uma Licença Vitalícia')) throw e;
+    }
+
+    // 1. Cadastra/localiza cliente no Asaas com garantia de CPF
+    const asaasCustomerId = await asaasService.findOrCreateCustomer({
+      name: cleanName,
+      email: cleanEmail,
+      cpfCnpj: cleanCpf,
+      phone: input.phone,
+    });
+
+    const orderId = randomUUID();
+    const orderToken = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+
+    // 2. Cria cobrança no Asaas
+    const payment = await asaasService.createLifetimeLicensePayment(
+      asaasCustomerId,
+      orderId,
+      cleanEmail,
+      cleanName
+    );
+
+    // 3. Salva pedido pendente na tabela license_orders (sem criar o usuário ainda)
+    try {
+      await query(
+        `INSERT INTO license_orders (
+           id, customer_name, customer_email, customer_cpf, session_token,
+           asaas_customer_id, asaas_payment_id, amount, original_amount,
+           billing_type, status, invoice_url, pix_qr_code_image, pix_copia_cola,
+           registration_completed, created_at
+         ) VALUES (
+           $1, $2, $3, $4, $5,
+           $6, $7, $8, 184.90,
+           $9, 'PENDING', $10, $11, $12,
+           FALSE, NOW()
+         );`,
+        [
+          orderId,
+          cleanName,
+          cleanEmail,
+          cleanCpf,
+          orderToken,
+          asaasCustomerId,
+          payment.id,
+          payment.value,
+          payment.billingType || 'UNDEFINED',
+          payment.invoiceUrl,
+          payment.pixQrCodeImage || null,
+          payment.pixCopiaCola || null,
+        ]
+      );
+    } catch (dbErr: any) {
+      console.warn('[LicenseService] Aviso ao persistir ordem no Postgres:', dbErr.message);
+    }
+
+    // Armazena também no cache de memória
+    memoryOrders.set(orderToken, {
+      id: orderId,
+      userId: '',
+      asaasCustomerId,
+      asaasPaymentId: payment.id,
+      amount: payment.value,
+      status: 'PENDING',
+      billingType: payment.billingType || 'UNDEFINED',
+      invoiceUrl: payment.invoiceUrl,
+      pixQrCodeImage: payment.pixQrCodeImage,
+      pixCopiaCola: payment.pixCopiaCola,
+      createdAt: new Date().toISOString(),
+    });
+
+    return {
+      ok: true,
+      orderId,
+      orderToken,
+      invoiceUrl: payment.invoiceUrl,
+      pixQrCodeImage: payment.pixQrCodeImage,
+      pixCopiaCola: payment.pixCopiaCola,
+      amount: payment.value,
+      customerName: cleanName,
+      customerEmail: cleanEmail,
+      message: 'Cobrança gerada com sucesso! Prossiga com o pagamento seguro no Banco Asaas.',
+    };
+  }
+
+  /**
+   * 2. Consulta o status da ordem através do token de sessão do aparelho
+   * Checa em tempo real se o Asaas aprovou o pagamento.
+   */
+  static async checkCheckoutStatus(orderToken: string): Promise<{
+    ok: boolean;
+    status: string;
+    isConfirmed: boolean;
+    registrationCompleted: boolean;
+    name: string;
+    email: string;
+    amount: number;
+    invoiceUrl?: string;
+    pixQrCodeImage?: string;
+    pixCopiaCola?: string;
+  }> {
+    if (!orderToken) {
+      throw new Error('Token de pedido não fornecido.');
+    }
+
+    let order: any = null;
+
+    try {
+      const res = await query(
+        `SELECT * FROM license_orders WHERE session_token = $1 LIMIT 1;`,
+        [orderToken]
+      );
+      if (res.rows.length > 0) order = res.rows[0];
+    } catch (e) {}
+
+    if (!order) {
+      const mem = memoryOrders.get(orderToken);
+      if (mem) {
+        order = {
+          id: mem.id,
+          session_token: orderToken,
+          customer_name: 'Veterinário',
+          customer_email: '',
+          asaas_payment_id: mem.asaasPaymentId,
+          amount: mem.amount,
+          status: mem.status,
+          invoice_url: mem.invoiceUrl,
+          pix_qr_code_image: mem.pixQrCodeImage,
+          pix_copia_cola: mem.pixCopiaCola,
+          registration_completed: false,
+        };
+      }
+    }
+
+    if (!order) {
+      throw new Error('Pedido não localizado para esta sessão.');
+    }
+
+    // Se ainda está pendente, consulta diretamente a API do Asaas para confirmação instantânea
+    if ((order.status === 'PENDING' || order.status === 'pending') && order.asaas_payment_id) {
+      try {
+        const asaasPay = await asaasService.getPayment(order.asaas_payment_id);
+        if (asaasPay.status === 'RECEIVED' || asaasPay.status === 'CONFIRMED') {
+          console.log(`[LicenseService] Pagamento ${order.asaas_payment_id} confirmado no Asaas!`);
+          order.status = 'CONFIRMED';
+          try {
+            await query(
+              `UPDATE license_orders SET status = 'CONFIRMED', confirmed_at = NOW() WHERE id = $1;`,
+              [order.id]
+            );
+          } catch (e) {}
+          const mem = memoryOrders.get(orderToken);
+          if (mem) mem.status = 'CONFIRMED';
+        }
+      } catch (err: any) {
+        console.warn('[LicenseService] Falha ao verificar Asaas:', err.message);
+      }
+    }
+
+    const isConfirmed = order.status === 'CONFIRMED' || order.status === 'RECEIVED';
+
+    return {
+      ok: true,
+      status: order.status,
+      isConfirmed,
+      registrationCompleted: Boolean(order.registration_completed),
+      name: order.customer_name || 'Veterinário',
+      email: order.customer_email || '',
+      amount: Number(order.amount) || 5.00,
+      invoiceUrl: order.invoice_url,
+      pixQrCodeImage: order.pix_qr_code_image,
+      pixCopiaCola: order.pix_copia_cola,
+    };
+  }
+
+  /**
+   * 3. Conclui o cadastro criando a senha (após confirmação do pagamento pelo Asaas)
+   * Cria o registro definitivo na tabela users, ativa a licença vitalícia e inicia a sessão autenticada.
+   */
+  static async completeRegistrationWithPassword(
+    orderToken: string,
+    passwordPlain: string,
+    ipAddress: string,
+    userAgent: string
+  ): Promise<{
+    ok: boolean;
+    user: any;
+    token: string;
+    message: string;
+  }> {
+    if (!orderToken) {
+      throw new Error('Sessão de pedido inválida.');
+    }
+    if (!passwordPlain || passwordPlain.length < 6) {
+      throw new Error('A senha deve possuir pelo menos 6 caracteres.');
+    }
+
+    let order: any = null;
+    try {
+      const res = await query(
+        `SELECT * FROM license_orders WHERE session_token = $1 LIMIT 1;`,
+        [orderToken]
+      );
+      if (res.rows.length > 0) order = res.rows[0];
+    } catch (e) {}
+
+    if (!order) {
+      throw new Error('Pedido não localizado para esta sessão.');
+    }
+
+    // Garante que o pagamento esteja confirmado
+    if (order.status !== 'CONFIRMED' && order.status !== 'RECEIVED') {
+      // Tenta checar mais uma vez no Asaas
+      if (order.asaas_payment_id) {
+        const asaasPay = await asaasService.getPayment(order.asaas_payment_id);
+        if (asaasPay.status === 'RECEIVED' || asaasPay.status === 'CONFIRMED') {
+          order.status = 'CONFIRMED';
+          await query(`UPDATE license_orders SET status = 'CONFIRMED', confirmed_at = NOW() WHERE id = $1;`, [order.id]);
+        }
+      }
+    }
+
+    if (order.status !== 'CONFIRMED' && order.status !== 'RECEIVED') {
+      throw new Error('O pagamento ainda não foi confirmado pelo Banco Asaas. Por favor, aguarde ou atualize o status.');
+    }
+
+    const cleanEmail = order.customer_email.trim().toLowerCase();
+    const cleanName = order.customer_name.trim();
+    const cleanCpf = order.customer_cpf;
+    const passwordHash = hashPassword(passwordPlain);
+
+    let userId: string;
+
+    // Cria ou atualiza o usuário no Postgres
+    try {
+      const existingUser = await query(`SELECT id FROM users WHERE LOWER(email) = $1 LIMIT 1;`, [cleanEmail]);
+      if (existingUser.rows.length > 0) {
+        userId = existingUser.rows[0].id;
+        await query(
+          `UPDATE users 
+           SET name = $1, password_hash = $2, cpf = COALESCE($3, cpf),
+               subscription_status = 'active', is_lifetime = TRUE, email_verified = TRUE,
+               asaas_customer_id = $4, asaas_payment_id = $5, asaas_invoice_url = $6, updated_at = NOW()
+           WHERE id = $7;`,
+          [cleanName, passwordHash, cleanCpf, order.asaas_customer_id, order.asaas_payment_id, order.invoice_url, userId]
+        );
+      } else {
+        userId = randomUUID();
+        await query(
+          `INSERT INTO users (
+             id, name, email, password_hash, role, subscription_status,
+             trial_days, email_verified, cpf, is_lifetime,
+             asaas_customer_id, asaas_payment_id, asaas_invoice_url,
+             created_at, updated_at
+           ) VALUES (
+             $1, $2, $3, $4, 'veterinarian', 'active',
+             0, TRUE, $5, TRUE,
+             $6, $7, $8,
+             NOW(), NOW()
+           );`,
+          [
+            userId,
+            cleanName,
+            cleanEmail,
+            passwordHash,
+            cleanCpf,
+            order.asaas_customer_id,
+            order.asaas_payment_id,
+            order.invoice_url,
+          ]
+        );
+      }
+
+      // Marca a ordem como concluída com o usuário vinculado
+      await query(
+        `UPDATE license_orders SET user_id = $1, registration_completed = TRUE WHERE id = $2;`,
+        [userId, order.id]
+      );
+    } catch (dbErr: any) {
+      console.error('[LicenseService] Erro ao criar conta do usuário pós-pagamento:', dbErr.message);
+      throw new Error('Falha ao concluir cadastro no banco de dados. Tente novamente.');
+    }
+
+    // Dispara e-mail de boas-vindas com confirmação de pagamento
+    try {
+      await emailService.sendPaymentConfirmationEmail(cleanEmail, cleanName, {
+        paymentId: order.asaas_payment_id,
+        amount: Number(order.amount) || 5.00,
+        invoiceUrl: order.invoice_url,
+        paidAt: new Date().toISOString(),
+      });
+    } catch (emailErr: any) {
+      console.warn('[LicenseService] Aviso ao enviar e-mail de boas-vindas:', emailErr.message);
+    }
+
+    // Cria a sessão autenticada no SessionManager
+    const sessionToken = generateSessionToken();
+    try {
+      await SessionManager.createSession(userId, sessionToken, ipAddress, userAgent);
+    } catch (e) {}
+
+    const userRecord = await SessionManager.getUserById(userId);
+
+    return {
+      ok: true,
+      user: userRecord,
+      token: sessionToken,
+      message: 'Cadastro concluído e licença vitalícia ativada com sucesso! Bem-vindo(a) ao anest-vet!',
+    };
+  }
+
+  /**
+   * Registro Legado (compatibilidade retroativa)
    */
   static async registerForLicense(
     input: LicenseRegistrationInput

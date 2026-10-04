@@ -140,7 +140,86 @@ app.get('/api/auth/me', authenticateSession, async (req: Request, res: Response)
 // 1.5 AUTOMATED LIFETIME LICENSE & ASAAS / AOL SMTP ROUTES
 // ---------------------------------------------------------------------------
 
-// A. Cadastro inicial para compra da licença promocional (R$ 49,90) + Envio do código por e-mail
+// A.1 Novo Fluxo: Iniciar Pedido Seguro Asaas com Nome, E-mail e CPF obrigatórios
+app.post('/api/license/create-order', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name, email, cpf, phone } = req.body;
+    const result = await LicenseService.initiateOrder({ name, email, cpf, phone });
+    // Grava cookie para reconhecimento automático do aparelho
+    res.cookie('anest_order_token', result.orderToken, {
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      httpOnly: false,
+      sameSite: 'lax',
+    });
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: 'CREATE_ORDER_ERROR', message: error.message || 'Erro ao gerar pedido de licença.' });
+  }
+});
+
+// A.2 Consulta em tempo real do pedido pelo token da sessão do aparelho (cookie, query ou header)
+app.get('/api/license/check-order-token', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const cookieHeader = req.headers.cookie;
+    let cookieToken: string | undefined;
+    if (cookieHeader) {
+      const match = cookieHeader.match(/(^|;\s*)anest_order_token=([^;]*)/);
+      if (match) cookieToken = decodeURIComponent(match[2]);
+    }
+    const token = (req.query.token as string) || (req.headers['x-order-token'] as string) || cookieToken;
+    if (!token) {
+      res.status(400).json({ error: 'NO_TOKEN', message: 'Token de pedido não fornecido.' });
+      return;
+    }
+    const status = await LicenseService.checkCheckoutStatus(token);
+    res.json(status);
+  } catch (error: any) {
+    res.status(400).json({ error: 'CHECK_ORDER_ERROR', message: error.message || 'Erro ao consultar pedido.' });
+  }
+});
+
+// A.3 Conclusão do cadastro com definição de senha (após confirmação do pagamento pelo Asaas)
+app.post('/api/license/complete-registration', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const cookieHeader = req.headers.cookie;
+    let cookieToken: string | undefined;
+    if (cookieHeader) {
+      const match = cookieHeader.match(/(^|;\s*)anest_order_token=([^;]*)/);
+      if (match) cookieToken = decodeURIComponent(match[2]);
+    }
+    const { orderToken, password, passwordConfirm } = req.body;
+    const token = orderToken || (req.headers['x-order-token'] as string) || cookieToken;
+
+    if (!token) {
+      res.status(400).json({ error: 'MISSING_TOKEN', message: 'Sessão do pedido não localizada.' });
+      return;
+    }
+    if (!password || password.length < 6) {
+      res.status(400).json({ error: 'INVALID_PASSWORD', message: 'A senha deve possuir pelo menos 6 caracteres.' });
+      return;
+    }
+    if (passwordConfirm && password !== passwordConfirm) {
+      res.status(400).json({ error: 'PASSWORD_MISMATCH', message: 'As senhas digitadas não coincidem.' });
+      return;
+    }
+
+    const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+    const userAgent = req.headers['user-agent'] || 'Browser';
+
+    const result = await LicenseService.completeRegistrationWithPassword(
+      token,
+      password,
+      ipAddress,
+      userAgent
+    );
+
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: 'COMPLETE_REGISTRATION_ERROR', message: error.message || 'Erro ao concluir cadastro.' });
+  }
+});
+
+// A. Cadastro inicial para compra da licença promocional (R$ 5,00) + Envio do código por e-mail (legado)
 app.post('/api/license/register', async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, email, password, cpf, phone } = req.body;
