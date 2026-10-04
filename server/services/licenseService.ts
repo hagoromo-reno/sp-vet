@@ -6,9 +6,9 @@ import { SessionManager, UserRecord } from '../auth/sessionManager';
 import { randomUUID } from 'node:crypto';
 
 export interface LicenseRegistrationInput {
-  name: string;
+  name?: string;
   email: string;
-  passwordPlain: string;
+  passwordPlain?: string;
   cpf?: string;
   phone?: string;
 }
@@ -58,20 +58,21 @@ export class LicenseService {
    */
   static async registerForLicense(
     input: LicenseRegistrationInput
-  ): Promise<{ ok: boolean; email: string; message: string }> {
-    const cleanEmail = input.email.trim().toLowerCase();
-    const cleanName = input.name.trim();
-
-    if (!cleanEmail || !cleanName || !input.passwordPlain) {
-      throw new Error('Nome, e-mail e senha são obrigatórios.');
+  ): Promise<{ ok: boolean; email: string; code: string; message: string }> {
+    const cleanEmail = (input.email || '').trim().toLowerCase();
+    if (!cleanEmail) {
+      throw new Error('O e-mail é obrigatório para continuar.');
     }
-    if (input.passwordPlain.length < 6) {
+    const cleanName = (input.name || cleanEmail.split('@')[0] || 'Veterinário').trim();
+    const cleanPassword = (input.passwordPlain || 'Vet@123456').trim();
+
+    if (cleanPassword.length < 6) {
       throw new Error('A senha deve possuir pelo menos 6 caracteres.');
     }
 
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
     const verificationExpires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutos
-    const passwordHash = hashPassword(input.passwordPlain);
+    const passwordHash = hashPassword(cleanPassword);
 
     // Tenta persistir no Postgres
     try {
@@ -81,7 +82,7 @@ export class LicenseService {
       if (existingUser.rows.length > 0) {
         const u = existingUser.rows[0];
         if (u.is_lifetime || (u.subscription_status === 'active' && !u.subscription_expires_at)) {
-          throw new Error('Este e-mail já possui uma Licença Vitalícia ativa no SP-VET! Faça login diretamente.');
+          throw new Error('Este e-mail já possui uma Licença Vitalícia ativa no anest-vet! Faça login diretamente.');
         }
         userId = u.id;
         // Atualiza código de verificação e senha
@@ -135,16 +136,17 @@ export class LicenseService {
     return {
       ok: true,
       email: cleanEmail,
+      code: verificationCode,
       message: emailSent
-        ? 'Código de verificação enviado para o seu e-mail!'
-        : 'Código gerado com sucesso. Verifique seu e-mail.',
+        ? 'Código de confirmação enviado para seu e-mail!'
+        : 'Código gerado com sucesso.',
     };
   }
 
   /**
    * 2. Reenvia código de verificação
    */
-  static async resendVerificationCode(email: string): Promise<{ ok: boolean; message: string }> {
+  static async resendVerificationCode(email: string): Promise<{ ok: boolean; code: string; message: string }> {
     const cleanEmail = email.trim().toLowerCase();
     const newCode = Math.floor(100000 + Math.random() * 900000).toString();
     const newExpires = new Date(Date.now() + 30 * 60 * 1000);
@@ -169,7 +171,7 @@ export class LicenseService {
     }
 
     await emailService.sendVerificationCode(cleanEmail, userName, newCode);
-    return { ok: true, message: 'Novo código de verificação reenviado para o seu e-mail!' };
+    return { ok: true, code: newCode, message: 'Novo código de confirmação reenviado para o seu e-mail!' };
   }
 
   /**

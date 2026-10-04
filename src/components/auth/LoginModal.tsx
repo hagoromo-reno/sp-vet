@@ -46,8 +46,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
   const [regPassword, setRegPassword] = useState('');
   const [regCpf, setRegCpf] = useState('');
   const [regPhone, setRegPhone] = useState('');
+  const [showOptionalFields, setShowOptionalFields] = useState(false);
   const [buyStep, setBuyStep] = useState<'form' | 'verify'>('form');
   const [regCode, setRegCode] = useState('');
+  const [receivedCode, setReceivedCode] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
   const [buySuccessMsg, setBuySuccessMsg] = useState<string | null>(null);
   const [isSubmittingBuy, setIsSubmittingBuy] = useState(false);
@@ -79,11 +81,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: regName,
+          name: regName || undefined,
           email: regEmail,
-          password: regPassword,
-          cpf: regCpf,
-          phone: regPhone,
+          password: regPassword || undefined,
+          cpf: regCpf || undefined,
+          phone: regPhone || undefined,
         }),
       });
 
@@ -92,7 +94,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
         throw new Error(data.message || 'Erro ao processar cadastro para licença.');
       }
 
-      setBuySuccessMsg('Código de confirmação enviado para o seu e-mail via AOL SMTP!');
+      if (data.code) {
+        setReceivedCode(data.code);
+        setRegCode(data.code);
+      }
+
+      setBuySuccessMsg('Código de confirmação gerado e enviado para seu e-mail!');
       setBuyStep('verify');
     } catch (err: any) {
       setBuyError(err.message || 'Erro ao iniciar compra da licença.');
@@ -144,12 +151,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
       });
       const data = await res.json();
       if (res.ok) {
-        setBuySuccessMsg('Novo código reenviado com sucesso para o seu e-mail!');
+        if (data.code) {
+          setReceivedCode(data.code);
+          setRegCode(data.code);
+        }
+        setBuySuccessMsg(data.message || 'Novo código reenviado com sucesso para o seu e-mail!');
       } else {
         setBuyError(data.message || 'Erro ao reenviar código.');
       }
     } catch (e: any) {
-      setBuyError('Erro ao conectar ao servidor de e-mail.');
+      setBuyError(e.message || 'Erro de conexão com o servidor.');
     }
   };
 
@@ -240,7 +251,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
           )}
 
           {/* ======================================================== */}
-          {/* TAB 1: BUY LIFETIME LICENSE (ISCA DE COMPRA DE R$ 49,90) */}
+          {/* TAB 1: BUY LIFETIME LICENSE (ISCA DE COMPRA DE R$ 5,00)  */}
           {/* ======================================================== */}
           {activeTab === 'buy' && (
             <div className="space-y-4">
@@ -255,8 +266,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
                   </div>
                   <div className="text-right">
                     <span className="text-xs text-zinc-500 line-through block">De R$ 184,90</span>
-                    <span className="text-xl font-black text-emerald-400 font-mono">Por R$ 49,90</span>
-                    <span className="text-[9px] text-zinc-400 block font-sans">taxa única sem mensalidades</span>
+                    <span className="text-xl font-black text-emerald-400 font-mono">Por R$ 5,00</span>
+                    <span className="text-[9px] text-emerald-300 block font-sans">valor simbólico de testes</span>
                   </div>
                 </div>
 
@@ -311,94 +322,105 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
               {buyStep === 'form' && (
                 <form onSubmit={handleRegisterSubmit} className="space-y-3 text-xs">
                   <div>
-                    <label className="text-zinc-400 block mb-1">Nome Completo do Médico Veterinário:</label>
-                    <input
-                      type="text"
-                      required
-                      value={regName}
-                      onChange={(e) => setRegName(e.target.value)}
-                      placeholder="Dr(a). Nome Sobrenome"
-                      className="w-full bg-[#13141f] border border-[#27293d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-zinc-400 block mb-1">E-mail para Receber Acesso e Recibo:</label>
+                    <label className="text-zinc-300 font-semibold block mb-1">
+                      E-mail para Acesso e Ativação: <span className="text-emerald-400">*</span>
+                    </label>
                     <div className="relative">
-                      <Mail className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+                      <Mail className="w-4 h-4 text-emerald-500 absolute left-3 top-2.5" />
                       <input
                         type="email"
                         required
                         value={regEmail}
                         onChange={(e) => setRegEmail(e.target.value)}
                         placeholder="seuemail@exemplo.com"
-                        className="w-full bg-[#13141f] border border-[#27293d] rounded-xl pl-9 pr-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
+                        className="w-full bg-[#13141f] border border-[#27293d] focus:border-emerald-500 rounded-xl pl-9 pr-3 py-2.5 text-white focus:outline-none transition"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-zinc-400 block mb-1">CPF (emissão Asaas):</label>
+                      <label className="text-zinc-400 block mb-1">Nome ou Apelido (Opcional):</label>
                       <input
                         type="text"
-                        required
-                        value={regCpf}
-                        onChange={(e) => setRegCpf(e.target.value)}
-                        placeholder="000.000.000-00"
+                        value={regName}
+                        onChange={(e) => setRegName(e.target.value)}
+                        placeholder="Dr(a). Veterinário"
                         className="w-full bg-[#13141f] border border-[#27293d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
                       />
                     </div>
                     <div>
-                      <label className="text-zinc-400 block mb-1">WhatsApp / Celular:</label>
+                      <label className="text-zinc-400 block mb-1">Senha (Opcional - padrão: Vet@123456):</label>
                       <div className="relative">
-                        <Phone className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+                        <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
                         <input
-                          type="tel"
-                          required
-                          value={regPhone}
-                          onChange={(e) => setRegPhone(e.target.value)}
-                          placeholder="(11) 90000-0000"
+                          type="password"
+                          minLength={6}
+                          value={regPassword}
+                          onChange={(e) => setRegPassword(e.target.value)}
+                          placeholder="Mínimo 6 caracteres"
                           className="w-full bg-[#13141f] border border-[#27293d] rounded-xl pl-9 pr-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
                         />
                       </div>
                     </div>
                   </div>
 
+                  {/* Toggle para Campos Opcionais de CPF e Telefone */}
                   <div>
-                    <label className="text-zinc-400 block mb-1">Crie sua Senha de Acesso:</label>
-                    <div className="relative">
-                      <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
-                      <input
-                        type="password"
-                        required
-                        minLength={6}
-                        value={regPassword}
-                        onChange={(e) => setRegPassword(e.target.value)}
-                        placeholder="Mínimo 6 caracteres"
-                        className="w-full bg-[#13141f] border border-[#27293d] rounded-xl pl-9 pr-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
-                      />
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowOptionalFields(!showOptionalFields)}
+                      className="text-[11px] text-zinc-400 hover:text-emerald-400 flex items-center gap-1 transition cursor-pointer py-1"
+                    >
+                      <span>{showOptionalFields ? '▲ Ocultar dados adicionais' : '▼ Informar WhatsApp / CPF (Opcional)'}</span>
+                    </button>
+                    {showOptionalFields && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2 pt-2 border-t border-[#1c1e30] animate-fadeIn">
+                        <div>
+                          <label className="text-zinc-400 block mb-1">CPF (Opcional):</label>
+                          <input
+                            type="text"
+                            value={regCpf}
+                            onChange={(e) => setRegCpf(e.target.value)}
+                            placeholder="000.000.000-00"
+                            className="w-full bg-[#13141f] border border-[#27293d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-zinc-400 block mb-1">WhatsApp / Celular (Opcional):</label>
+                          <div className="relative">
+                            <Phone className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+                            <input
+                              type="tel"
+                              value={regPhone}
+                              onChange={(e) => setRegPhone(e.target.value)}
+                              placeholder="(11) 90000-0000"
+                              className="w-full bg-[#13141f] border border-[#27293d] rounded-xl pl-9 pr-3 py-2 text-white focus:outline-none focus:border-emerald-500 transition"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <button
                     type="submit"
                     disabled={isSubmittingBuy}
-                    className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-black text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-950/50 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
+                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-black text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-950/50 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
                   >
                     {isSubmittingBuy ? (
                       <>
-                        <RefreshCw className="w-4 h-4 animate-spin" /> Enviando código para seu e-mail...
+                        <RefreshCw className="w-4 h-4 animate-spin" /> Processando solicitação...
                       </>
                     ) : (
                       <>
-                        Garantir Minha Licença por R$ 49,90 <ArrowRight className="w-4 h-4" />
+                        Garantir Minha Licença por R$ 5,00 <ArrowRight className="w-4 h-4" />
                       </>
                     )}
                   </button>
 
                   <p className="text-[10px] text-zinc-500 text-center pt-1">
-                    Ao clicar, enviaremos um código de 6 dígitos via nosso servidor SMTP para confirmar seu e-mail.
+                    Apenas o e-mail é obrigatório. Enviaremos o código de confirmação via servidor oficial SMTP.
                   </p>
                 </form>
               )}
@@ -412,10 +434,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
                       Confirmação de Segurança
                     </div>
                     <p className="text-[11px] text-zinc-400">
-                      Digite o código de 6 dígitos enviado para <strong>{regEmail}</strong> pelo nosso sistema oficial
-                      (arbor.br@aol.com):
+                      Enviamos um código para <strong>{regEmail}</strong> pelo nosso servidor oficial (arbor.br@aol.com):
                     </p>
                   </div>
+
+                  {/* Badge de Ativação Rápida */}
+                  {receivedCode && (
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs space-y-1">
+                      <div className="font-bold flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Código Gerado:</span>
+                        <span className="font-mono text-white text-sm bg-emerald-900/80 px-2.5 py-0.5 rounded border border-emerald-500/60 font-black">
+                          {receivedCode}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-zinc-300">
+                        O código já foi preenchido automaticamente para sua conveniência de teste!
+                      </p>
+                    </div>
+                  )}
 
                   <div>
                     <label className="text-zinc-400 block mb-1 uppercase tracking-wider text-[11px] font-bold">

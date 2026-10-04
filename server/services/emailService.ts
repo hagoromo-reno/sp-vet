@@ -26,23 +26,61 @@ class EmailService {
     this.initTransporter();
   }
 
+  private createTransporter(port: number, secure: boolean): Transporter {
+    return nodemailer.createTransport({
+      host: this.config.host,
+      port,
+      secure,
+      auth: {
+        user: this.config.user,
+        pass: this.config.pass,
+      },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
+      tls: {
+        rejectUnauthorized: false,
+      },
+    });
+  }
+
   private initTransporter() {
     try {
-      this.transporter = nodemailer.createTransport({
-        host: this.config.host,
-        port: this.config.port,
-        secure: this.config.secure,
-        auth: {
-          user: this.config.user,
-          pass: this.config.pass,
-        },
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 20000,
-      });
-      console.log(`[EmailService] Configurado com sucesso para ${this.config.user} via ${this.config.host}:${this.config.port}`);
+      this.transporter = this.createTransporter(this.config.port, this.config.secure);
+      console.log(`[EmailService] Configurado para ${this.config.user} via ${this.config.host}:${this.config.port}`);
     } catch (err: any) {
       console.error('[EmailService] Erro ao instanciar transportador de e-mail:', err.message);
+    }
+  }
+
+  /**
+   * Envia e-mail com fallback automático de porta 465 -> 587 caso haja bloqueio de rede
+   */
+  private async sendMailWithFallback(mailOptions: nodemailer.SendMailOptions): Promise<boolean> {
+    if (!this.transporter) this.initTransporter();
+
+    // 1. Tenta envio principal (porta 465)
+    try {
+      if (this.transporter) {
+        const info = await this.transporter.sendMail(mailOptions);
+        console.log(`[EmailService] E-mail enviado com sucesso (porta ${this.config.port}): ${info.messageId}`);
+        return true;
+      }
+    } catch (err: any) {
+      console.warn(`[EmailService] Tentativa na porta ${this.config.port} falhou: ${err.message}. Tentando porta alternativa 587...`);
+    }
+
+    // 2. Fallback na porta 587 (STARTTLS)
+    try {
+      const fallbackTransporter = this.createTransporter(587, false);
+      const info = await fallbackTransporter.sendMail(mailOptions);
+      console.log(`[EmailService] E-mail enviado com sucesso via porta alternativa 587: ${info.messageId}`);
+      // Salva transportador de sucesso para próximas requisições
+      this.transporter = fallbackTransporter;
+      return true;
+    } catch (fallbackErr: any) {
+      console.error(`[EmailService] Falha no envio em ambas as portas (465 e 587):`, fallbackErr.message);
+      return false;
     }
   }
 
@@ -109,19 +147,12 @@ class EmailService {
 </html>
     `;
 
-    try {
-      const info = await this.transporter.sendMail({
-        from: this.config.from,
-        to: cleanTo,
-        subject,
-        html,
-      });
-      console.log(`[EmailService] Código de verificação enviado para ${cleanTo}. ID: ${info.messageId}`);
-      return true;
-    } catch (err: any) {
-      console.error(`[EmailService] Falha ao enviar código para ${cleanTo}:`, err.message);
-      return false;
-    }
+    return await this.sendMailWithFallback({
+      from: this.config.from,
+      to: cleanTo,
+      subject,
+      html,
+    });
   }
 
   /**
@@ -251,19 +282,12 @@ class EmailService {
 </html>
     `;
 
-    try {
-      const info = await this.transporter.sendMail({
-        from: this.config.from,
-        to: cleanTo,
-        subject,
-        html,
-      });
-      console.log(`[EmailService] E-mail de confirmação de pagamento enviado para ${cleanTo}. ID: ${info.messageId}`);
-      return true;
-    } catch (err: any) {
-      console.error(`[EmailService] Erro ao enviar e-mail de pagamento para ${cleanTo}:`, err.message);
-      return false;
-    }
+    return await this.sendMailWithFallback({
+      from: this.config.from,
+      to: cleanTo,
+      subject,
+      html,
+    });
   }
 }
 

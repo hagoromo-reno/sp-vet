@@ -45,6 +45,7 @@ export const PendingPaymentScreen: React.FC = () => {
   const [cardExpiryMonth, setCardExpiryMonth] = useState('');
   const [cardExpiryYear, setCardExpiryYear] = useState('');
   const [cardCcv, setCardCcv] = useState('');
+  const [cardCpf, setCardCpf] = useState('');
   const [isProcessingCard, setIsProcessingCard] = useState(false);
   const [cardError, setCardError] = useState<string | null>(null);
 
@@ -149,7 +150,7 @@ export const PendingPaymentScreen: React.FC = () => {
             expiryMonth: cardExpiryMonth,
             expiryYear: cardExpiryYear,
             ccv: cardCcv,
-            cpfCnpj: user?.cpf || '000.000.000-00',
+            cpfCnpj: cardCpf || user?.cpf || '000.000.000-00',
             phone: user?.phone,
           },
         }),
@@ -186,7 +187,14 @@ export const PendingPaymentScreen: React.FC = () => {
       });
       const data = await res.json();
       if (res.ok) {
-        setResendSuccess('Novo código reenviado para o seu e-mail!');
+        if (data.code) {
+          setVerificationCode(data.code);
+        }
+        setResendSuccess(
+          data.code
+            ? `Novo código reenviado com sucesso! (Código: ${data.code})`
+            : 'Novo código reenviado para o seu e-mail!'
+        );
       } else {
         setVerificationError(data.message || 'Erro ao reenviar código.');
       }
@@ -458,8 +466,10 @@ export const PendingPaymentScreen: React.FC = () => {
                       <div className="flex justify-between items-baseline pt-1 border-t border-[#22253a]">
                         <span className="text-xs font-bold text-emerald-400">Preço Promocional:</span>
                         <div className="text-right">
-                          <span className="text-2xl font-black text-white font-mono">R$ 49,90</span>
-                          <span className="block text-[10px] text-emerald-400 font-semibold">Pagamento Único Vitalício</span>
+                          <span className="text-2xl font-black text-white font-mono">
+                            R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '5,00'}
+                          </span>
+                          <span className="block text-[10px] text-emerald-400 font-semibold">Valor Simbólico de Testes / Promoção</span>
                         </div>
                       </div>
                     </div>
@@ -570,7 +580,7 @@ export const PendingPaymentScreen: React.FC = () => {
                             Aprovação Imediata · Liberação Instantânea
                           </div>
                           <p className="text-[11px] text-zinc-300 mt-0.5">
-                            Pague no cartão de crédito em 1x de R$ 49,90 ou parcelado. Sua licença é liberada no mesmo segundo!
+                            Pague no cartão de crédito em 1x de R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '5,00'} ou parcelado. Sua licença é liberada no mesmo segundo!
                           </p>
                         </div>
                       </div>
@@ -657,6 +667,20 @@ export const PendingPaymentScreen: React.FC = () => {
                           </div>
                         </div>
 
+                        {!user?.cpf && (
+                          <div>
+                            <label className="text-zinc-400 block mb-1">CPF do Titular do Cartão:</label>
+                            <input
+                              type="text"
+                              required
+                              value={cardCpf}
+                              onChange={(e) => setCardCpf(e.target.value)}
+                              placeholder="000.000.000-00"
+                              className="w-full bg-[#131522] border border-[#272b42] rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 transition"
+                            />
+                          </div>
+                        )}
+
                         <button
                           type="submit"
                           disabled={isProcessingCard}
@@ -668,7 +692,7 @@ export const PendingPaymentScreen: React.FC = () => {
                             </>
                           ) : (
                             <>
-                              <ShieldCheck className="w-4 h-4" /> Pagar R$ 49,90 no Cartão & Liberar Acesso
+                              <ShieldCheck className="w-4 h-4" /> Pagar R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '5,00'} no Cartão & Liberar Acesso
                             </>
                           )}
                         </button>

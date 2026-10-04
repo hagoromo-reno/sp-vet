@@ -116,7 +116,7 @@ export class AsaasService {
     customerEmail: string,
     customerName: string
   ): Promise<AsaasPaymentResult> {
-    const value = 49.90;
+    const value = Number(process.env.LICENSE_PRICE_BRL || '5.00');
     const dueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
     // Se a API key do Asaas ainda não foi colocada no .env, devolve cobrança simulada para testes
@@ -132,8 +132,8 @@ export class AsaasService {
         bankSlipUrl: `https://www.asaas.com/b/pdf/${mockPayId}`,
         bankSlipBarCode: '00190.00009 01234.567890 12345.678901 2 94810000004990',
         dueDate,
-        pixQrCodeImage: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220"><rect width="220" height="220" fill="%23ffffff"/><rect x="20" y="20" width="60" height="60" fill="%23059669"/><rect x="140" y="20" width="60" height="60" fill="%23059669"/><rect x="20" y="140" width="60" height="60" fill="%23059669"/><rect x="100" y="100" width="20" height="20" fill="%2310b981"/><text x="110" y="195" font-family="Arial" font-size="11" fill="%23064e3b" text-anchor="middle">PIX ASAAS SIMULADO R$ 49,90</text></svg>',
-        pixCopiaCola: `00020101021226580014br.gov.bcb.pix2536asaas.com/qr/stat/${mockPayId}520400005303986540549.905802BR5916ANEST-VET6009SAO PAULO62070503***6304E8A2`,
+        pixQrCodeImage: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220"><rect width="220" height="220" fill="%23ffffff"/><rect x="20" y="20" width="60" height="60" fill="%23059669"/><rect x="140" y="20" width="60" height="60" fill="%23059669"/><rect x="20" y="140" width="60" height="60" fill="%23059669"/><rect x="100" y="100" width="20" height="20" fill="%2310b981"/><text x="110" y="195" font-family="Arial" font-size="11" fill="%23064e3b" text-anchor="middle">PIX ASAAS SIMULADO R$ ${value.toFixed(2)}</text></svg>`,
+        pixCopiaCola: `00020101021226580014br.gov.bcb.pix2536asaas.com/qr/stat/${mockPayId}5204000053039865405${value.toFixed(2)}5802BR5916ANEST-VET6009SAO PAULO62070503***6304E8A2`,
         isSimulated: true,
       };
     }
@@ -150,7 +150,7 @@ export class AsaasService {
           billingType: 'UNDEFINED', // Suporta Cartão de Crédito, PIX e Boleto
           value,
           dueDate,
-          description: 'Licença Vitalícia anest-vet Anestesia & UTI - Promoção De R$ 184,90 por R$ 49,90',
+          description: `Licença Vitalícia anest-vet Anestesia & UTI - Valor Simbólico R$ ${value.toFixed(2)}`,
           externalReference: userId,
           postalService: false,
         }),

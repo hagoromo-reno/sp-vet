@@ -27,12 +27,13 @@ services:
       - SMTP_SECURE=true
       - SMTP_USER=arbor.br@aol.com
       - SMTP_PASS=doohwgckvsnxglhw
-      - SMTP_FROM="anest-vet Anestesia & UTI" <arbor.br@aol.com>
+      - 'SMTP_FROM="anest-vet Anestesia & UTI" <arbor.br@aol.com>'
 
       # 4. Banco Asaas (Cobranças via Cartão, PIX e Boleto + Webhook de Efetivação)
       - ASAAS_API_URL=https://api.asaas.com/v3
       - ASAAS_API_KEY=${ASAAS_API_KEY}
       - ASAAS_WEBHOOK_TOKEN=${ASAAS_WEBHOOK_TOKEN}
+      - LICENSE_PRICE_BRL=5.00
     deploy:
       mode: replicated
       replicas: 1
