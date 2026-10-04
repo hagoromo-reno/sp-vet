@@ -158,11 +158,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (token) await checkHeartbeat(token);
   };
 
-  const setAuthSession = useCallback((newUser: AuthUser, newToken: string) => {
-    localStorage.setItem(TOKEN_KEY, newToken);
-    setToken(newToken);
-    setUser(newUser);
+  const setAuthSession = useCallback((param1: any, param2: any) => {
+    let actualUser: AuthUser | null = null;
+    let actualToken: string | null = null;
+
+    if (typeof param1 === 'string') {
+      actualToken = param1;
+      actualUser = param2;
+    } else {
+      actualUser = param1;
+      actualToken = param2;
+    }
+
+    if (actualToken) {
+      localStorage.setItem(TOKEN_KEY, actualToken);
+      setToken(actualToken);
+    }
+    if (actualUser) {
+      setUser(actualUser);
+    }
     setSubscriptionError(null);
+    setConcurrentDisconnected(false);
   }, []);
 
   const dismissConcurrentNotice = () => {

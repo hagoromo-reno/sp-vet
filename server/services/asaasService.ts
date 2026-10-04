@@ -175,7 +175,7 @@ export class AsaasService {
     customerEmail: string,
     customerName: string
   ): Promise<AsaasPaymentResult> {
-    const value = Number(process.env.LICENSE_PRICE_BRL || '5.00');
+    const value = Number(process.env.LICENSE_PRICE_BRL || '49.90');
     const dueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
     // Se a API key do Asaas ainda não foi colocada no .env, devolve cobrança simulada para testes
@@ -209,7 +209,7 @@ export class AsaasService {
           billingType: 'UNDEFINED', // Suporta Cartão de Crédito, PIX e Boleto
           value,
           dueDate,
-          description: `Licença Vitalícia ANEST-VET Simulador Veterinário - Valor Simbólico R$ ${value.toFixed(2)}`,
+          description: `Licença Vitalícia ANEST-VET Simulador Veterinário - R$ ${value.toFixed(2)}`,
           externalReference: userId,
           postalService: false,
         }),
@@ -242,7 +242,7 @@ export class AsaasService {
             billingType: 'UNDEFINED',
             value,
             dueDate,
-            description: `Licença Vitalícia ANEST-VET Simulador Veterinário - Valor Simbólico R$ ${value.toFixed(2)}`,
+            description: `Licença Vitalícia ANEST-VET Simulador Veterinário - R$ ${value.toFixed(2)}`,
             externalReference: userId,
             postalService: false,
           }),

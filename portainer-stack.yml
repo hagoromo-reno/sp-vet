@@ -33,7 +33,7 @@ services:
       - ASAAS_API_URL=https://api.asaas.com/v3
       - ASAAS_API_KEY=${ASAAS_API_KEY}
       - ASAAS_WEBHOOK_TOKEN=${ASAAS_WEBHOOK_TOKEN}
-      - LICENSE_PRICE_BRL=5.00
+      - LICENSE_PRICE_BRL=49.90
     deploy:
       mode: replicated
       replicas: 1

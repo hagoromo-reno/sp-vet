@@ -94,20 +94,44 @@ export class LicenseService {
       throw new Error('CPF válido com 11 dígitos é obrigatório para a transação no Asaas.');
     }
 
-    // Verifica se já possui licença ativa
+    // 0. Verifica se o usuário já existe com licença ativa ou se já tem um processo em andamento
     try {
       const existingUser = await query(
-        `SELECT id, is_lifetime, subscription_status FROM users WHERE LOWER(email) = $1 LIMIT 1;`,
+        `SELECT id, name, is_lifetime, subscription_status FROM users WHERE LOWER(email) = $1 LIMIT 1;`,
         [cleanEmail]
       );
       if (existingUser.rows.length > 0) {
         const u = existingUser.rows[0];
         if (u.is_lifetime || (u.subscription_status === 'active' && !u.subscription_expires_at)) {
-          throw new Error('Este e-mail já possui uma Licença Vitalícia ativa no anest-vet! Faça login na aba "Já Sou Cadastrado".');
+          // Em vez de dar erro, leva o cliente exatamente para onde ele parou (criação de senha / login direto)
+          const existingOrderRes = await query(
+            `SELECT * FROM license_orders WHERE LOWER(customer_email) = $1 OR customer_cpf = $2 ORDER BY created_at DESC LIMIT 1;`,
+            [cleanEmail, cleanCpf]
+          );
+          const order = existingOrderRes.rows[0];
+          const tokenToUse = order?.session_token || randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+          if (order && !order.session_token) {
+            await query(`UPDATE license_orders SET session_token = $1 WHERE id = $2;`, [tokenToUse, order.id]);
+          }
+
+          return {
+            ok: true,
+            orderId: order?.id || u.id,
+            orderToken: tokenToUse,
+            invoiceUrl: order?.invoice_url || '',
+            pixQrCodeImage: order?.pix_qr_code_image,
+            pixCopiaCola: order?.pix_copia_cola,
+            amount: Number(order?.amount) || 49.90,
+            customerName: u.name || cleanName,
+            customerEmail: cleanEmail,
+            isConfirmed: true,
+            registrationCompleted: false, // Permite criar a senha ou redefinir e entrar direto
+            message: 'Identificamos seu pagamento aprovado! Crie ou confirme sua senha de acesso abaixo para entrar.',
+          };
         }
       }
     } catch (e: any) {
-      if (e.message?.includes('já possui uma Licença Vitalícia')) throw e;
+      console.warn('[LicenseService] Aviso ao checar usuário existente:', e.message);
     }
 
     // 0. Verifica se já existe um pedido recente (pendente ou pago) para este E-mail ou CPF
@@ -148,7 +172,7 @@ export class LicenseService {
             invoiceUrl: existingOrder.invoice_url,
             pixQrCodeImage: existingOrder.pix_qr_code_image,
             pixCopiaCola: existingOrder.pix_copia_cola,
-            amount: Number(existingOrder.amount) || 5.00,
+            amount: Number(existingOrder.amount) || 49.90,
             customerName: existingOrder.customer_name || cleanName,
             customerEmail: existingOrder.customer_email || cleanEmail,
             isConfirmed: true,
@@ -167,7 +191,7 @@ export class LicenseService {
             invoiceUrl: existingOrder.invoice_url,
             pixQrCodeImage: existingOrder.pix_qr_code_image,
             pixCopiaCola: existingOrder.pix_copia_cola,
-            amount: Number(existingOrder.amount) || 5.00,
+            amount: Number(existingOrder.amount) || 49.90,
             customerName: existingOrder.customer_name || cleanName,
             customerEmail: existingOrder.customer_email || cleanEmail,
             isConfirmed: false,
@@ -344,7 +368,7 @@ export class LicenseService {
       registrationCompleted: Boolean(order.registration_completed),
       name: order.customer_name || 'Veterinário',
       email: order.customer_email || '',
-      amount: Number(order.amount) || 5.00,
+      amount: Number(order.amount) || 49.90,
       invoiceUrl: order.invoice_url,
       pixQrCodeImage: order.pix_qr_code_image,
       pixCopiaCola: order.pix_copia_cola,
@@ -463,7 +487,7 @@ export class LicenseService {
     try {
       await emailService.sendPaymentConfirmationEmail(cleanEmail, cleanName, {
         paymentId: order.asaas_payment_id,
-        amount: Number(order.amount) || 5.00,
+        amount: Number(order.amount) || 49.90,
         invoiceUrl: order.invoice_url,
         paidAt: new Date().toISOString(),
       });
@@ -562,7 +586,7 @@ export class LicenseService {
         invoiceUrl: order.invoice_url,
         pixQrCodeImage: order.pix_qr_code_image,
         pixCopiaCola: order.pix_copia_cola,
-        amount: Number(order.amount) || 5.00,
+        amount: Number(order.amount) || 49.90,
         message: isConfirmed
           ? 'Pagamento aprovado localizado! Você já pode definir sua senha de acesso.'
           : 'Pedido pendente localizado! Você pode prosseguir com o pagamento seguro no Asaas.',

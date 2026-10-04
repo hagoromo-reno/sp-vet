@@ -415,9 +415,9 @@ export const PendingPaymentScreen: React.FC = () => {
                         <span className="text-xs font-bold text-emerald-400">Preço Promocional:</span>
                         <div className="text-right">
                           <span className="text-2xl font-black text-white font-mono">
-                            R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '5,00'}
+                            R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '49,90'}
                           </span>
-                          <span className="block text-[10px] text-emerald-400 font-semibold">Valor Simbólico de Testes / Promoção</span>
+                          <span className="block text-[10px] text-emerald-400 font-semibold">Oferta Promocional Vitalícia</span>
                         </div>
                       </div>
                     </div>
@@ -555,7 +555,7 @@ export const PendingPaymentScreen: React.FC = () => {
                           rel="noopener noreferrer"
                           className="w-full py-4 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-black text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 cursor-pointer"
                         >
-                          <ExternalLink className="w-4 h-4" /> Abrir Pagamento com Cartão no Asaas (R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '5,00'})
+                          <ExternalLink className="w-4 h-4" /> Abrir Pagamento com Cartão no Asaas (R$ {order?.amount ? Number(order.amount).toFixed(2).replace('.', ',') : '49,90'})
                         </a>
                       ) : (
                         <div className="p-3 bg-zinc-900 text-zinc-400 text-xs text-center rounded-xl">

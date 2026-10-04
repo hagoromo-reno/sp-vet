@@ -31,7 +31,7 @@ export const AuthScreen: React.FC = () => {
     setAuthSession,
   } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'buy' | 'login'>('buy');
+  const [activeTab, setActiveTab] = useState<'buy' | 'login'>('login');
 
   // Login state
   const [loginEmail, setLoginEmail] = useState('');
@@ -299,7 +299,7 @@ export const AuthScreen: React.FC = () => {
 
       localStorage.removeItem('anest_order_token');
       if (data.token && data.user) {
-        setAuthSession(data.token, data.user);
+        setAuthSession(data.user, data.token);
       }
     } catch (err: any) {
       setBuyError(err.message || 'Erro ao definir senha e concluir o cadastro.');
@@ -409,8 +409,8 @@ export const AuthScreen: React.FC = () => {
                   </div>
                   <div className="text-right">
                     <span className="text-[11px] text-zinc-500 line-through mr-1 font-mono">De R$ 184,90</span>
-                    <span className="text-xl font-black text-emerald-400 font-mono">Por R$ 5,00</span>
-                    <span className="block text-[9px] text-zinc-400 font-sans">valor simbólico de testes</span>
+                    <span className="text-xl font-black text-emerald-400 font-mono">Por R$ 49,90</span>
+                    <span className="block text-[9px] text-zinc-400 font-sans">oferta especial vitalícia</span>
                   </div>
                 </div>
 
@@ -547,7 +547,7 @@ export const AuthScreen: React.FC = () => {
                         </>
                       ) : (
                         <>
-                          Ir para Pagamento Seguro no Asaas (R$ 5,00) <ArrowRight className="w-4 h-4" />
+                          Ir para Pagamento Seguro no Asaas (R$ 49,90) <ArrowRight className="w-4 h-4" />
                         </>
                       )}
                     </button>
@@ -616,7 +616,7 @@ export const AuthScreen: React.FC = () => {
                         <ShieldCheck className="w-4 h-4 text-emerald-400" /> Checkout Seguro Asaas Iniciado
                       </div>
                       <span className="text-[10px] bg-emerald-900/60 px-2 py-0.5 rounded text-white font-mono font-bold">
-                        R$ {orderData?.amount ? Number(orderData.amount).toFixed(2).replace('.', ',') : '5,00'}
+                        R$ {orderData?.amount ? Number(orderData.amount).toFixed(2).replace('.', ',') : '49,90'}
                       </span>
                     </div>
                     <p className="text-[11px] text-zinc-300 leading-relaxed">
@@ -780,6 +780,26 @@ export const AuthScreen: React.FC = () => {
           {/* ======================================================== */}
           {activeTab === 'login' && (
             <div className="space-y-4">
+              {/* Isca de Pagamento e Cadastro (Callout para quem não tem cadastro) */}
+              <div className="p-3.5 bg-gradient-to-r from-emerald-950/40 via-[#101920] to-[#0c0d16] border border-emerald-500/40 rounded-xl flex items-center justify-between gap-3 shadow-md">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-xs uppercase tracking-wide">
+                    <Sparkles className="w-3.5 h-3.5" /> Ainda não tem acesso?
+                  </div>
+                  <p className="text-[11px] text-zinc-300">
+                    Adquira a <strong>Licença Vitalícia</strong> por apenas <strong>R$ 49,90</strong>.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('buy')}
+                  className="px-3 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black uppercase tracking-wider transition shrink-0 cursor-pointer shadow-sm flex items-center gap-1"
+                >
+                  <span>Adquirir</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+
               {loginError && (
                 <div className="p-3 rounded-lg bg-red-950/50 border border-red-700/50 text-red-300 text-xs flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -832,6 +852,16 @@ export const AuthScreen: React.FC = () => {
                     </>
                   )}
                 </button>
+
+                <div className="pt-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('buy')}
+                    className="text-[11px] text-zinc-400 hover:text-emerald-400 transition underline cursor-pointer"
+                  >
+                    Novo por aqui? Clique aqui para adquirir a Licença Vitalícia (R$ 49,90)
+                  </button>
+                </div>
               </form>
             </div>
           )}

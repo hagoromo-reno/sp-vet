@@ -207,7 +207,7 @@ class EmailService {
     .receipt-row:last-child { border-bottom: none; font-weight: 700; font-size: 15px; color: #10b981; padding-top: 12px; }
     .receipt-label { color: #9ca3af; }
     .receipt-val { color: #f3f4f6; }
-    .btn { display: inline-block; background: linear-gradient(135deg, #10b981, #059669); color: #000000 !important; font-weight: 800; text-decoration: none; padding: 16px 36px; border-radius: 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-top: 20px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4); text-align: center; }
+    .btn { display: inline-block; background-color: #10b981 !important; background: linear-gradient(135deg, #10b981, #059669) !important; color: #ffffff !important; font-weight: 800 !important; text-decoration: none !important; padding: 16px 36px; border-radius: 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-top: 20px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4); text-align: center; border: 1px solid #34d399; }
     .features-list { list-style: none; padding: 0; margin: 20px 0; }
     .features-list li { padding: 6px 0; font-size: 13px; color: #d1d5db; }
     .features-list li::before { content: "✓ "; color: #10b981; font-weight: bold; }
@@ -265,8 +265,10 @@ class EmailService {
         <li>Sessão protegida e suporte especializado</li>
       </ul>
 
-      <div style="text-align: center; margin: 30px 0 10px;">
-        <a href="https://anest.sopet.app" class="btn">Acessar Simulador Agora</a>
+      <div style="text-align: center; margin: 30px 0 15px;">
+        <a href="https://anest.sopet.app" style="display: inline-block; background-color: #10b981; background: linear-gradient(135deg, #10b981, #059669); color: #ffffff !important; font-weight: 800; text-decoration: none; padding: 16px 36px; border-radius: 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4); text-align: center; border: 1px solid #34d399;">
+          <span style="color: #ffffff !important; font-weight: 800; letter-spacing: 1px;">ACESSAR SIMULADOR AGORA</span>
+        </a>
       </div>
 
       ${paymentDetails.invoiceUrl ? `
