@@ -209,7 +209,7 @@ export class AsaasService {
           billingType: 'UNDEFINED', // Suporta Cartão de Crédito, PIX e Boleto
           value,
           dueDate,
-          description: `Licença Vitalícia anest-vet Anestesia & UTI - Valor Simbólico R$ ${value.toFixed(2)}`,
+          description: `Licença Vitalícia ANEST-VET Simulador Veterinário - Valor Simbólico R$ ${value.toFixed(2)}`,
           externalReference: userId,
           postalService: false,
         }),
@@ -242,7 +242,7 @@ export class AsaasService {
             billingType: 'UNDEFINED',
             value,
             dueDate,
-            description: `Licença Vitalícia anest-vet Anestesia & UTI - Valor Simbólico R$ ${value.toFixed(2)}`,
+            description: `Licença Vitalícia ANEST-VET Simulador Veterinário - Valor Simbólico R$ ${value.toFixed(2)}`,
             externalReference: userId,
             postalService: false,
           }),

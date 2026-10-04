@@ -1,4 +1,4 @@
-import nodemailer, { type Transporter } from 'nodemailer';
+import nodemailer, { type Transporter, type SendMailOptions } from 'nodemailer';
 
 export interface EmailServiceConfig {
   host: string;
@@ -20,7 +20,7 @@ class EmailService {
       secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : true,
       user: process.env.SMTP_USER || 'arbor.br@aol.com',
       pass: process.env.SMTP_PASS || 'doohwgckvsnxglhw',
-      from: process.env.SMTP_FROM || '"anest-vet Anestesia & UTI" <arbor.br@aol.com>',
+      from: process.env.SMTP_FROM || '"ANEST-VET Simulador Veterinário" <arbor.br@aol.com>',
     };
 
     this.initTransporter();
@@ -56,7 +56,7 @@ class EmailService {
   /**
    * Envia e-mail com fallback automático de porta 465 -> 587 caso haja bloqueio de rede
    */
-  private async sendMailWithFallback(mailOptions: nodemailer.SendMailOptions): Promise<boolean> {
+  private async sendMailWithFallback(mailOptions: SendMailOptions): Promise<boolean> {
     if (!this.transporter) this.initTransporter();
 
     // 1. Tenta envio principal (porta configurada)
@@ -118,7 +118,7 @@ class EmailService {
 <body>
   <div class="container">
     <div class="header">
-      <h1>anest-vet Anestesia & UTI</h1>
+      <h1>ANEST-VET Simulador Veterinário</h1>
       <p>Simulador Fisiológico Veterinário Avançado</p>
     </div>
     <div class="body">
@@ -276,8 +276,8 @@ class EmailService {
       ` : ''}
     </div>
     <div class="footer">
-      anest-vet Anestesia & UTI · Gestão de Negócios: arbor.br@aol.com<br>
-      © ${new Date().getFullYear()} anest-vet. Todos os direitos reservados.
+      ANEST-VET Simulador Veterinário · Gestão de Negócios: arbor.br@aol.com<br>
+      © ${new Date().getFullYear()} ANEST-VET. Todos os direitos reservados.
     </div>
   </div>
 </body>

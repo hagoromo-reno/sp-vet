@@ -328,7 +328,7 @@ export const AuthScreen: React.FC = () => {
             <HeartPulse className="w-7 h-7 text-white" />
           </div>
           <h2 className="text-xl font-black tracking-wide text-white font-mono uppercase">
-            anest-vet Anestesia & UTI
+            ANEST-VET Simulador Veterinário
           </h2>
           <p className="text-xs text-zinc-400">
             Simulador Fisiológico e Farmacológico Veterinário Avançado

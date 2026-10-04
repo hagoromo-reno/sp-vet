@@ -377,7 +377,9 @@ export class SessionManager {
         throw err;
       }
     }
-    /**
+  }
+
+  /**
    * Busca os dados seguros de um usuário pelo ID.
    */
   static async getUserById(userId: string): Promise<UserRecord | null> {

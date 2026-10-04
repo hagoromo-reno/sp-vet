@@ -189,7 +189,7 @@ export const PendingPaymentScreen: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-black text-sm tracking-wider uppercase text-white">anest-vet Anestesia & UTI</span>
+              <span className="font-black text-sm tracking-wider uppercase text-white">ANEST-VET Simulador Veterinário</span>
               <span className="px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold uppercase">
                 Aguardando Pagamento
               </span>
