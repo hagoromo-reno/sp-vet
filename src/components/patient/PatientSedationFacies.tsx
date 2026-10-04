@@ -138,7 +138,7 @@ export function getSedationStageInfo(vitals?: VitalSigns): SedationStageInfo {
   const hypnotic = vitals.cellularState?.hypnoticEffect ?? vitals.biologicalState?.neurological?.hypnoticDepth ?? 0;
   const temp = vitals.bodyTemperatureC ?? 38.0;
   const etco2 = vitals.etCO2 ?? 38;
-  const spo2 = vitals.spO2 ?? 98;
+  const spo2 = vitals.pulseOximetrySpO2 ?? 98;
   const palpebral = vitals.palpebralReflex;
 
   // 1. Stage 4: Surgical Anesthesia / Deep Sedation / Severe Hypothermic Coma / Arrest / Absent Reflexes

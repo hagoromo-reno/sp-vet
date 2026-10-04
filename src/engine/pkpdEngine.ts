@@ -878,8 +878,8 @@ export class PKPDEngine {
     // Severe physiological insults (critical hypothermia, severe hypercapnic narcosis, acute hypoxia)
     // depress central nervous system activity and protective reflexes independently of pharmacological agents:
     const activeTempC = previousVitals?.bodyTemperatureC ?? patient.baselineVitals.tempC;
-    const priorPaCO2 = previousVitals?.cellularState?.paCO2 ?? 40;
-    const priorSpO2 = previousVitals?.spO2 ?? 98;
+    const priorPaCO2 = previousVitals?.arterialBloodGases?.paCO2 ?? previousVitals?.etCO2 ?? 40;
+    const priorSpO2 = previousVitals?.pulseOximetrySpO2 ?? 98;
 
     if (!isAlreadyDead && !isAlreadyArrested) {
       if (activeTempC < 28.5) {

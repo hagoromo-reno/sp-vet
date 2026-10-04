@@ -52,12 +52,12 @@ export function SimulationHeader(props: SimulationHeaderProps) {
       </a>
       <header className="app-header">
         <div className="app-header-inner flex items-center justify-between">
-          <a href="#monitor" className="app-brand" aria-label="SP-VET — ir para monitor">
+          <a href="#monitor" className="app-brand" aria-label="anest-vet — ir para monitor">
             <span className="brand-mark">
               <HeartPulse size={23} />
             </span>
             <span>
-              <strong>SP-VET</strong>
+              <strong>anest-vet</strong>
               <small>Anestesia e cuidados críticos</small>
             </span>
           </a>

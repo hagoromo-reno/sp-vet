@@ -1,9 +1,8 @@
 version: "3.7"
 
 services:
-  sp_vet:
+  anest_vet:
     # Imagem construída e publicada automaticamente via GitHub Actions no GHCR
-    # Ajuste 'kiryuureno/sp-vet' se o nome do seu repositório GitHub for diferente
     image: ghcr.io/hagoromo-reno/sp-vet:latest
     healthcheck:
       disable: true
@@ -21,6 +20,19 @@ services:
 
       # Parâmetros de segurança e sessão única
       - SESSION_SECRET=c29wZXQtc3AtdmV0LWV4Y2x1c2l2by0yMDI2
+
+      # 3. Serviço de E-mail Transacional (AOL SMTP - Confirmação de E-mail e Ativação de Licença)
+      - SMTP_HOST=smtp.aol.com
+      - SMTP_PORT=465
+      - SMTP_SECURE=true
+      - SMTP_USER=arbor.br@aol.com
+      - SMTP_PASS=doohwgckvsnxglhw
+      - SMTP_FROM="anest-vet Anestesia & UTI" <arbor.br@aol.com>
+
+      # 4. Banco Asaas (Cobranças via Cartão, PIX e Boleto + Webhook de Efetivação)
+      - ASAAS_API_URL=https://api.asaas.com/v3
+      - ASAAS_API_KEY=${ASAAS_API_KEY}
+      - ASAAS_WEBHOOK_TOKEN=${ASAAS_WEBHOOK_TOKEN}
     deploy:
       mode: replicated
       replicas: 1
@@ -33,13 +45,13 @@ services:
           memory: 1024M
       labels:
         - traefik.enable=true
-        - traefik.http.routers.sp_vet.rule=Host(`anest.sopet.app`)
-        - traefik.http.routers.sp_vet.entrypoints=websecure
-        - traefik.http.routers.sp_vet.tls.certresolver=letsencryptresolver
-        - traefik.http.routers.sp_vet.priority=1
-        - traefik.http.routers.sp_vet.service=sp_vet
-        - traefik.http.services.sp_vet.loadbalancer.server.port=3000
-        - traefik.http.services.sp_vet.loadbalancer.passHostHeader=true
+        - traefik.http.routers.anest_vet.rule=Host(`anest.sopet.app`)
+        - traefik.http.routers.anest_vet.entrypoints=websecure
+        - traefik.http.routers.anest_vet.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.anest_vet.priority=1
+        - traefik.http.routers.anest_vet.service=anest_vet
+        - traefik.http.services.anest_vet.loadbalancer.server.port=3000
+        - traefik.http.services.anest_vet.loadbalancer.passHostHeader=true
         - traefik.docker.network=PetSoftNet
     restart: unless-stopped
 

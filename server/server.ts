@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
@@ -6,6 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { initDatabase } from './db/schema';
 import { SessionManager } from './auth/sessionManager';
 import { AdminService } from './admin/adminService';
+import { LicenseService } from './services/licenseService';
 import { CanineReferenceDriver } from './canineReferenceDriver';
 import { NativePhysiologyWorker } from './nativePhysiologyWorker';
 import {
@@ -130,6 +134,115 @@ app.get('/api/auth/me', authenticateSession, async (req: Request, res: Response)
     ok: true,
     user: (req as any).user,
   });
+});
+
+// ---------------------------------------------------------------------------
+// 1.5 AUTOMATED LIFETIME LICENSE & ASAAS / AOL SMTP ROUTES
+// ---------------------------------------------------------------------------
+
+// A. Cadastro inicial para compra da licença promocional (R$ 49,90) + Envio do código por e-mail
+app.post('/api/license/register', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name, email, password, cpf, phone } = req.body;
+    const result = await LicenseService.registerForLicense({
+      name,
+      email,
+      passwordPlain: password,
+      cpf,
+      phone,
+    });
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: 'REGISTRATION_ERROR', message: error.message || 'Erro ao registrar para compra.' });
+  }
+});
+
+// B. Reenvio de código de confirmação de e-mail via AOL SMTP
+app.post('/api/license/resend-code', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      res.status(400).json({ error: 'INVALID_INPUT', message: 'E-mail obrigatório.' });
+      return;
+    }
+    const result = await LicenseService.resendVerificationCode(email);
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: 'RESEND_ERROR', message: error.message || 'Erro ao reenviar código.' });
+  }
+});
+
+// C. Confirmação do e-mail + Geração automática da cobrança Asaas de R$ 49,90 (PIX / Cartão)
+app.post('/api/license/verify-email', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, code } = req.body;
+    const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+    const userAgent = req.headers['user-agent'] || 'Browser';
+
+    if (!email || !code) {
+      res.status(400).json({ error: 'INVALID_INPUT', message: 'E-mail e código de verificação são obrigatórios.' });
+      return;
+    }
+
+    const result = await LicenseService.verifyEmailAndCreateCharge(email, code, ipAddress, userAgent);
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: 'VERIFICATION_ERROR', message: error.message || 'Erro ao validar código.' });
+  }
+});
+
+// D. Consulta de status do pedido de licença em tempo real (usuário autenticado)
+app.get('/api/license/order-status', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const statusData = await LicenseService.getOrderStatus(user.id);
+    res.json({ ok: true, ...statusData });
+  } catch (error: any) {
+    res.status(500).json({ error: 'ORDER_STATUS_ERROR', message: error.message });
+  }
+});
+
+// E. Verificação forçada de pagamento pelo usuário (botão "Já Paguei / Checar Agora")
+app.post('/api/license/check-payment', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const statusData = await LicenseService.getOrderStatus(user.id);
+    res.json({ ok: true, ...statusData });
+  } catch (error: any) {
+    res.status(500).json({ error: 'CHECK_PAYMENT_ERROR', message: error.message });
+  }
+});
+
+// E.2 Processamento Direto de Cartão de Crédito
+app.post('/api/license/pay-credit-card', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const { card } = req.body;
+    if (!card || !card.number || !card.holderName || !card.expiryMonth || !card.expiryYear || !card.ccv) {
+      res.status(400).json({ error: 'INVALID_CARD', message: 'Preencha todos os dados do cartão de crédito.' });
+      return;
+    }
+    const result = await LicenseService.payOrderWithCreditCard(user.id, card);
+    res.json({ ok: true, result });
+  } catch (error: any) {
+    res.status(400).json({ error: 'CARD_PAYMENT_ERROR', message: error.message || 'Falha ao processar cartão.' });
+  }
+});
+
+// F. WEBHOOK DO BANCO ASAAS (Recebe confirmação de pagamento e ativa licença + envia e-mail)
+app.post('/api/webhooks/asaas', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const authHeaderToken = (req.headers['asaas-access-token'] as string) || (req.query.token as string);
+    const { event, payment } = req.body;
+
+    console.log(`[Webhook Asaas] Recebido evento: ${event} para cobrança: ${payment?.id}`);
+
+    const result = await LicenseService.handleAsaasWebhook(event, payment, authHeaderToken);
+    res.status(200).json(result);
+  } catch (error: any) {
+    console.error('[Webhook Asaas] Erro no processamento:', error.message);
+    res.status(400).json({ error: 'WEBHOOK_ERROR', message: error.message });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -468,7 +581,7 @@ export async function startServer() {
   await initDatabase();
   httpServer.listen(port, '0.0.0.0', () => {
     console.log(`========================================================`);
-    console.log(`🚀 SP-VET Servidor de Produção Ativo na porta ${port}`);
+    console.log(`🚀 anest-vet Servidor de Produção Ativo na porta ${port}`);
     console.log(`📡 Endereço HTTP/API: http://0.0.0.0:${port}`);
     console.log(`🔌 WebSocket Fisiológico: ws://0.0.0.0:${port}/physiology`);
     console.log(`========================================================`);

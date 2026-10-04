@@ -5,18 +5,25 @@ export interface AuthUser {
   name: string;
   email: string;
   role: 'admin' | 'veterinarian' | 'student';
-  subscription_status: 'active' | 'inactive' | 'trial' | 'cancelled';
+  subscription_status: 'active' | 'inactive' | 'trial' | 'cancelled' | 'pending_payment';
   subscription_expires_at: string | null;
   trial_days: number;
   is_blocked: boolean;
   created_at: string;
   last_login_at: string | null;
+  email_verified?: boolean;
+  phone?: string;
+  cpf?: string;
+  is_lifetime?: boolean;
+  asaas_invoice_url?: string;
 }
 
 interface AuthContextType {
   user: AuthUser | null;
   token: string | null;
   isAuthenticated: boolean;
+  isPendingPayment: boolean;
+  isLifetime: boolean;
   isLoading: boolean;
   concurrentDisconnected: boolean;
   subscriptionError: string | null;
@@ -24,6 +31,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   dismissConcurrentNotice: () => void;
   refreshUser: () => Promise<void>;
+  setAuthSession: (user: AuthUser, token: string) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -150,9 +158,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (token) await checkHeartbeat(token);
   };
 
+  const setAuthSession = useCallback((newUser: AuthUser, newToken: string) => {
+    localStorage.setItem(TOKEN_KEY, newToken);
+    setToken(newToken);
+    setUser(newUser);
+    setSubscriptionError(null);
+  }, []);
+
   const dismissConcurrentNotice = () => {
     setConcurrentDisconnected(false);
   };
+
+  const isPendingPayment =
+    !!user &&
+    user.role !== 'admin' &&
+    (user.subscription_status === 'pending_payment' ||
+      user.subscription_status === 'inactive' ||
+      !user.email_verified);
+
+  const isLifetime =
+    !!user &&
+    (user.is_lifetime === true ||
+      (user.subscription_status === 'active' && !user.subscription_expires_at));
 
   return (
     <AuthContext.Provider
@@ -160,6 +187,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         token,
         isAuthenticated: !!user,
+        isPendingPayment,
+        isLifetime,
         isLoading,
         concurrentDisconnected,
         subscriptionError,
@@ -167,6 +196,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         dismissConcurrentNotice,
         refreshUser,
+        setAuthSession,
       }}
     >
       {children}

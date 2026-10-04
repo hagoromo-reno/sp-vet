@@ -7,13 +7,18 @@ export interface UserRecord {
   name: string;
   email: string;
   role: 'admin' | 'veterinarian' | 'student';
-  subscription_status: 'active' | 'inactive' | 'trial' | 'cancelled';
+  subscription_status: 'active' | 'inactive' | 'trial' | 'cancelled' | 'pending_payment';
   subscription_expires_at: string | null;
   trial_days: number;
   max_concurrent_sessions: number;
   is_blocked: boolean;
   created_at: string;
   last_login_at: string | null;
+  email_verified?: boolean;
+  phone?: string;
+  cpf?: string;
+  is_lifetime?: boolean;
+  asaas_invoice_url?: string;
 }
 
 export interface SessionRecord {
@@ -122,7 +127,7 @@ export class SessionManager {
         // Atualiza último login
         await query(`UPDATE users SET last_login_at = NOW() WHERE id = $1;`, [row.id]);
 
-        const { password_hash, ...safeUser } = row;
+        const { password_hash, verification_code, ...safeUser } = row;
         return { user: safeUser, token };
       }
     } catch (dbError: any) {
@@ -188,7 +193,9 @@ export class SessionManager {
         `SELECT s.*, 
                 u.name as u_name, u.email as u_email, u.role as u_role, 
                 u.subscription_status as u_sub_status, u.subscription_expires_at as u_sub_expires,
-                u.is_blocked as u_blocked, u.trial_days as u_trial_days, u.created_at as u_created_at
+                u.is_blocked as u_blocked, u.trial_days as u_trial_days, u.created_at as u_created_at,
+                u.email_verified as u_email_verified, u.phone as u_phone, u.cpf as u_cpf,
+                u.is_lifetime as u_is_lifetime, u.asaas_invoice_url as u_asaas_invoice_url
          FROM user_sessions s
          JOIN users u ON u.id = s.user_id
          WHERE s.token = $1
@@ -229,6 +236,11 @@ export class SessionManager {
           is_blocked: row.u_blocked,
           created_at: row.u_created_at,
           last_login_at: row.created_at,
+          email_verified: row.u_email_verified,
+          phone: row.u_phone,
+          cpf: row.u_cpf,
+          is_lifetime: row.u_is_lifetime,
+          asaas_invoice_url: row.u_asaas_invoice_url,
         };
 
         SessionManager.checkSubscriptionStatus(userObj);
@@ -319,9 +331,20 @@ export class SessionManager {
     subscription_status: string;
     subscription_expires_at: string | null;
     role: string;
+    is_lifetime?: boolean;
   }): void {
     // Admin tem livre acesso irrestrito
     if (user.role === 'admin') return;
+
+    // Usuário em processo de checkout/pagamento pendente: permite login para exibir tela de pagamento
+    if (user.subscription_status === 'pending_payment') {
+      return;
+    }
+
+    // Licença vitalícia: nunca expira
+    if (user.is_lifetime || (user.subscription_status === 'active' && !user.subscription_expires_at)) {
+      return;
+    }
 
     if (user.subscription_status === 'inactive' || user.subscription_status === 'cancelled') {
       const err: any = new Error(

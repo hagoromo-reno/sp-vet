@@ -33,6 +33,39 @@ export async function initDatabase(): Promise<boolean> {
       );
     `);
 
+    // 2.1 Migrações seguras da tabela users (Licenciamento & Asaas)
+    await runDdl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50);`);
+    await runDdl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS cpf VARCHAR(50);`);
+    await runDdl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;`);
+    await runDdl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code VARCHAR(10);`);
+    await runDdl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code_expires_at TIMESTAMPTZ;`);
+    await runDdl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS asaas_customer_id VARCHAR(100);`);
+    await runDdl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS asaas_payment_id VARCHAR(100);`);
+    await runDdl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS asaas_invoice_url TEXT;`);
+    await runDdl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_lifetime BOOLEAN DEFAULT FALSE;`);
+
+    // 2.2 Tabela de Pedidos de Licença (Asaas Payments)
+    await runDdl(`
+      CREATE TABLE IF NOT EXISTS license_orders (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        asaas_customer_id VARCHAR(100),
+        asaas_payment_id VARCHAR(100) UNIQUE,
+        amount NUMERIC(10,2) NOT NULL DEFAULT 49.90,
+        original_amount NUMERIC(10,2) NOT NULL DEFAULT 184.90,
+        billing_type VARCHAR(50) DEFAULT 'PIX',
+        status VARCHAR(50) DEFAULT 'PENDING',
+        invoice_url TEXT,
+        pix_qr_code_image TEXT,
+        pix_copia_cola TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        confirmed_at TIMESTAMPTZ,
+        raw_asaas_data JSONB
+      );
+    `);
+    await runDdl(`CREATE INDEX IF NOT EXISTS idx_license_orders_user ON license_orders(user_id);`);
+    await runDdl(`CREATE INDEX IF NOT EXISTS idx_license_orders_asaas ON license_orders(asaas_payment_id);`);
+
     // 3. User sessions table (for single session concurrency enforcement)
     await runDdl(`
       CREATE TABLE IF NOT EXISTS user_sessions (

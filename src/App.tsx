@@ -56,6 +56,7 @@ import { speciesAlarmLimits } from './data/monitorDefaults';
 import { nextSimulationStep } from './engine/simulationClock';
 import { useAuth } from './context/AuthContext';
 import { LoginModal } from './components/auth/LoginModal';
+import { PendingPaymentScreen } from './components/auth/PendingPaymentScreen';
 import { AdminManagementModal } from './components/admin/AdminManagementModal';
 import { SavePerspectiveModal } from './components/records/SavePerspectiveModal';
 import {
@@ -69,17 +70,18 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isPendingPayment, isLoading } = useAuth();
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isSavePerspectiveModalOpen, setIsSavePerspectiveModalOpen] = useState(false);
 
-  // Guard Audio and Alarms against unauthenticated state
+  // Guard Audio and Alarms against unauthenticated or pending payment state
   useEffect(() => {
-    AudioSynthesizer.setAuthenticated(isAuthenticated);
-    if (!isAuthenticated) {
+    const isFullyActive = isAuthenticated && !isPendingPayment;
+    AudioSynthesizer.setAuthenticated(isFullyActive);
+    if (!isFullyActive) {
       AudioSynthesizer.stopAlarmPlayback();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isPendingPayment]);
 
   // 1. ACTIVE PATIENT & SCENARIO
   const [patient, setPatient] = useState<PatientProfile>(PRESET_SCENARIOS[0]);
@@ -1330,6 +1332,9 @@ export default function App() {
       {/* 11. AUTHENTICATION & SINGLE-SESSION ACCESS MODAL */}
       <LoginModal isOpen={!isAuthenticated} />
 
+      {/* 11.5 AGUARDANDO PAGAMENTO / ATIVAÇÃO DA LICENÇA VITALÍCIA */}
+      {isAuthenticated && isPendingPayment && <PendingPaymentScreen />}
+
       {/* 12. ADMIN MANAGEMENT DASHBOARD */}
       {isAdminPanelOpen && (
         <AdminManagementModal
@@ -1351,7 +1356,7 @@ export default function App() {
 
       {/* 11. FOOTER */}
       <footer className="border-t border-[#1a1a1a] bg-[#080808] px-4 py-2.5 text-center text-xs text-[#525252] font-mono-code">
-        Simulador SimPet · Modelagem farmacocinética multicompartimental · Diretrizes RECOVER 2024
+        Simulador anest-vet · Modelagem farmacocinética multicompartimental · Diretrizes RECOVER 2024
       </footer>
     </div>
   );
