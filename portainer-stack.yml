@@ -26,7 +26,7 @@ services:
       - SMTP_PORT=587
       - SMTP_SECURE=false
       - SMTP_USER=arbor.br@aol.com
-      - SMTP_PASS=doohwgckvsnxglhw
+      - SMTP_PASS=SMTP_PASS
       - 'SMTP_FROM="ANEST-VET Simulador Veterinário" <arbor.br@aol.com>'
 
       # 4. Banco Asaas (Cobranças via Cartão, PIX e Boleto + Webhook de Efetivação)
