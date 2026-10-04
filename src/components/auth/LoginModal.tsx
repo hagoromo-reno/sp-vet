@@ -6,11 +6,8 @@ import {
   Mail,
   AlertTriangle,
   UserCheck,
-  Sparkles,
-  LogOut,
   Clock,
   HeartPulse,
-  Info,
 } from 'lucide-react';
 
 interface LoginModalProps {
@@ -157,27 +154,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
               )}
             </button>
           </form>
-
-          {/* CREDENTIALS HINT */}
-          <div className="p-3 rounded-xl bg-[#11121c] border border-[#1f2130] text-[11px] text-zinc-400 space-y-1.5">
-            <div className="flex items-center gap-1.5 font-bold text-zinc-300">
-              <Info className="w-3.5 h-3.5 text-cyan-400" />
-              Acesso de Avaliação / Demonstração:
-            </div>
-            <div className="flex justify-between items-center text-[10px] font-mono">
-              <span>Free Trial (7 dias):</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('demo@spvet.com');
-                  setPassword('demo123');
-                }}
-                className="text-cyan-400 hover:underline cursor-pointer"
-              >
-                demo@spvet.com (demo123)
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
