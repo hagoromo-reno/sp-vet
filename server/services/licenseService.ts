@@ -84,11 +84,10 @@ export class LicenseService {
         if (u.is_lifetime || (u.subscription_status === 'active' && !u.subscription_expires_at)) {
           throw new Error('Este e-mail já possui uma Licença Vitalícia ativa no anest-vet! Faça login diretamente.');
         }
-        userId = u.id;
-        // Atualiza código de verificação e senha
+        // Atualiza código de verificação e senha (preservando phone/cpf se já existirem)
         await query(
           `UPDATE users 
-           SET name = $1, password_hash = $2, phone = $3, cpf = $4,
+           SET name = $1, password_hash = $2, phone = COALESCE($3, phone), cpf = COALESCE($4, cpf),
                verification_code = $5, verification_code_expires_at = $6, email_verified = FALSE,
                subscription_status = 'pending_payment', updated_at = NOW()
            WHERE id = $7;`,
