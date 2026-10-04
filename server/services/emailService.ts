@@ -35,8 +35,8 @@ class EmailService {
         user: this.config.user,
         pass: this.config.pass,
       },
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
+      connectionTimeout: port === 465 ? 3500 : 7000,
+      greetingTimeout: 6000,
       socketTimeout: 10000,
       tls: {
         rejectUnauthorized: false,
@@ -59,7 +59,7 @@ class EmailService {
   private async sendMailWithFallback(mailOptions: nodemailer.SendMailOptions): Promise<boolean> {
     if (!this.transporter) this.initTransporter();
 
-    // 1. Tenta envio principal (porta 465)
+    // 1. Tenta envio principal (porta configurada)
     try {
       if (this.transporter) {
         const info = await this.transporter.sendMail(mailOptions);
@@ -70,13 +70,15 @@ class EmailService {
       console.warn(`[EmailService] Tentativa na porta ${this.config.port} falhou: ${err.message}. Tentando porta alternativa 587...`);
     }
 
-    // 2. Fallback na porta 587 (STARTTLS)
+    // 2. Fallback na porta 587 (STARTTLS) caso a porta principal tenha sido 465
     try {
       const fallbackTransporter = this.createTransporter(587, false);
       const info = await fallbackTransporter.sendMail(mailOptions);
       console.log(`[EmailService] E-mail enviado com sucesso via porta alternativa 587: ${info.messageId}`);
-      // Salva transportador de sucesso para próximas requisições
+      // Salva transportador de sucesso e fixa porta 587 permanentemente
       this.transporter = fallbackTransporter;
+      this.config.port = 587;
+      this.config.secure = false;
       return true;
     } catch (fallbackErr: any) {
       console.error(`[EmailService] Falha no envio em ambas as portas (465 e 587):`, fallbackErr.message);

@@ -219,6 +219,24 @@ app.post('/api/license/complete-registration', async (req: Request, res: Respons
   }
 });
 
+// A.4 Recuperação de pedido ou pagamento anterior por CPF ou E-mail
+app.post('/api/license/recover-order', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { identifier } = req.body;
+    if (!identifier) {
+      res.status(400).json({ error: 'MISSING_IDENTIFIER', message: 'Informe o CPF ou E-mail da compra.' });
+      return;
+    }
+    const result = await LicenseService.recoverOrderByCpfOrEmail(identifier);
+    if (result.found && result.orderToken) {
+      res.setHeader('Set-Cookie', `anest_order_token=${result.orderToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+    }
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: 'RECOVER_ORDER_ERROR', message: error.message || 'Erro ao consultar pedido anterior.' });
+  }
+});
+
 // A. Cadastro inicial para compra da licença promocional (R$ 5,00) + Envio do código por e-mail (legado)
 app.post('/api/license/register', async (req: Request, res: Response): Promise<void> => {
   try {

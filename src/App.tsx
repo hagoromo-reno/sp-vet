@@ -55,7 +55,7 @@ import type { SimulationRun } from './records/simulationRecord';
 import { speciesAlarmLimits } from './data/monitorDefaults';
 import { nextSimulationStep } from './engine/simulationClock';
 import { useAuth } from './context/AuthContext';
-import { LoginModal } from './components/auth/LoginModal';
+import { AuthScreen } from './components/auth/AuthScreen';
 import { PendingPaymentScreen } from './components/auth/PendingPaymentScreen';
 import { AdminManagementModal } from './components/admin/AdminManagementModal';
 import { SavePerspectiveModal } from './components/records/SavePerspectiveModal';
@@ -69,7 +69,7 @@ import {
   Stethoscope,
 } from 'lucide-react';
 
-export default function App() {
+function SimulatorApp() {
   const { isAuthenticated, isPendingPayment, isLoading } = useAuth();
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isSavePerspectiveModalOpen, setIsSavePerspectiveModalOpen] = useState(false);
@@ -998,22 +998,6 @@ export default function App() {
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-[#07080c] flex flex-col items-center justify-center text-zinc-400 gap-3 font-mono">
-        <div className="w-10 h-10 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
-        <p className="text-xs uppercase tracking-widest text-zinc-500">Iniciando ambiente seguro SP-VET...</p>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-[#06070a] flex items-center justify-center p-4">
-        <LoginModal isOpen={true} />
-      </div>
-    );
-  }
 
   return (
     <div className="vetsim-app min-h-screen flex flex-col">
@@ -1329,11 +1313,6 @@ export default function App() {
         }}
       />
 
-      {/* 11. AUTHENTICATION & SINGLE-SESSION ACCESS MODAL */}
-      <LoginModal isOpen={!isAuthenticated} />
-
-      {/* 11.5 AGUARDANDO PAGAMENTO / ATIVAÇÃO DA LICENÇA VITALÍCIA */}
-      {isAuthenticated && isPendingPayment && <PendingPaymentScreen />}
 
       {/* 12. ADMIN MANAGEMENT DASHBOARD */}
       {isAdminPanelOpen && (
@@ -1360,4 +1339,31 @@ export default function App() {
       </footer>
     </div>
   );
+}
+
+export default function App() {
+  const { isAuthenticated, isPendingPayment, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#07080e] flex flex-col items-center justify-center gap-3 text-white">
+        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs uppercase tracking-widest text-zinc-500 font-mono">Iniciando anest-vet...</p>
+      </div>
+    );
+  }
+
+  // 1. Desacoplamento Total: Quando não autenticado, renderiza a tela de login / compra / recuperação
+  // Zero áudio, zero sintetizador, zero timers da simulação rodando em segundo plano!
+  if (!isAuthenticated) {
+    return <AuthScreen />;
+  }
+
+  // 2. Autenticado mas aguardando confirmação do pagamento
+  if (isPendingPayment) {
+    return <PendingPaymentScreen />;
+  }
+
+  // 3. Usuário autenticado com licença vitalícia ativa: inicia a simulação veterinária
+  return <SimulatorApp />;
 }

@@ -68,6 +68,8 @@ export interface CheckoutSessionResult {
   amount: number;
   customerName: string;
   customerEmail: string;
+  isConfirmed?: boolean;
+  registrationCompleted?: boolean;
   message: string;
 }
 
@@ -106,6 +108,76 @@ export class LicenseService {
       }
     } catch (e: any) {
       if (e.message?.includes('já possui uma Licença Vitalícia')) throw e;
+    }
+
+    // 0. Verifica se já existe um pedido recente (pendente ou pago) para este E-mail ou CPF
+    try {
+      const existingOrderRes = await query(
+        `SELECT * FROM license_orders 
+         WHERE LOWER(customer_email) = $1 OR customer_cpf = $2 
+         ORDER BY created_at DESC LIMIT 1;`,
+        [cleanEmail, cleanCpf]
+      );
+
+      if (existingOrderRes.rows.length > 0) {
+        const existingOrder = existingOrderRes.rows[0];
+
+        // Sincroniza em tempo real com o Asaas caso ainda conste PENDING
+        if (existingOrder.asaas_payment_id && existingOrder.status !== 'CONFIRMED') {
+          try {
+            const payStatus = await asaasService.getPayment(existingOrder.asaas_payment_id);
+            if (payStatus.status === 'CONFIRMED' || payStatus.status === 'RECEIVED') {
+              existingOrder.status = 'CONFIRMED';
+              await query(`UPDATE license_orders SET status = 'CONFIRMED', confirmed_at = NOW() WHERE id = $1;`, [existingOrder.id]);
+            }
+          } catch (e) {}
+        }
+
+        const isPaid = existingOrder.status === 'CONFIRMED' || existingOrder.status === 'RECEIVED';
+        const tokenToUse = existingOrder.session_token || randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+        if (!existingOrder.session_token) {
+          await query(`UPDATE license_orders SET session_token = $1 WHERE id = $2;`, [tokenToUse, existingOrder.id]);
+        }
+
+        // Se o pagamento já foi aprovado: retorna imediatamente para criação de senha!
+        if (isPaid) {
+          return {
+            ok: true,
+            orderId: existingOrder.id,
+            orderToken: tokenToUse,
+            invoiceUrl: existingOrder.invoice_url,
+            pixQrCodeImage: existingOrder.pix_qr_code_image,
+            pixCopiaCola: existingOrder.pix_copia_cola,
+            amount: Number(existingOrder.amount) || 5.00,
+            customerName: existingOrder.customer_name || cleanName,
+            customerEmail: existingOrder.customer_email || cleanEmail,
+            isConfirmed: true,
+            registrationCompleted: Boolean(existingOrder.registration_completed),
+            message: 'Pagamento aprovado localizado! Você já pode definir sua senha de acesso.',
+          };
+        }
+
+        // Se tem uma ordem pendente recente (menos de 24h), reutiliza para evitar cobranças duplicadas
+        const orderAgeHours = (Date.now() - new Date(existingOrder.created_at).getTime()) / (1000 * 60 * 60);
+        if (existingOrder.status === 'PENDING' && orderAgeHours < 24 && existingOrder.invoice_url) {
+          return {
+            ok: true,
+            orderId: existingOrder.id,
+            orderToken: tokenToUse,
+            invoiceUrl: existingOrder.invoice_url,
+            pixQrCodeImage: existingOrder.pix_qr_code_image,
+            pixCopiaCola: existingOrder.pix_copia_cola,
+            amount: Number(existingOrder.amount) || 5.00,
+            customerName: existingOrder.customer_name || cleanName,
+            customerEmail: existingOrder.customer_email || cleanEmail,
+            isConfirmed: false,
+            registrationCompleted: false,
+            message: 'Cobrança existente localizada. Prossiga com o pagamento seguro no Banco Asaas.',
+          };
+        }
+      }
+    } catch (checkErr: any) {
+      console.warn('[LicenseService] Aviso ao verificar pedidos anteriores:', checkErr.message);
     }
 
     // 1. Cadastra/localiza cliente no Asaas com garantia de CPF
@@ -413,6 +485,92 @@ export class LicenseService {
       token: sessionToken,
       message: 'Cadastro concluído e licença vitalícia ativada com sucesso! Bem-vindo(a) ao anest-vet!',
     };
+  }
+
+  /**
+   * Localiza um pedido anterior por CPF ou E-mail
+   * Permite que o cliente retome de onde parou (seja para pagar ou para criar a senha pós-pagamento).
+   */
+  static async recoverOrderByCpfOrEmail(identifier: string): Promise<{
+    ok: boolean;
+    found: boolean;
+    orderToken?: string;
+    isConfirmed?: boolean;
+    registrationCompleted?: boolean;
+    customerName?: string;
+    customerEmail?: string;
+    invoiceUrl?: string;
+    pixQrCodeImage?: string;
+    pixCopiaCola?: string;
+    amount?: number;
+    message: string;
+  }> {
+    const clean = (identifier || '').trim();
+    const cleanDigits = clean.replace(/\D/g, '');
+    const cleanEmail = clean.toLowerCase();
+
+    if (!clean) {
+      throw new Error('Informe o CPF ou E-mail cadastrado na compra.');
+    }
+
+    try {
+      let queryStr = `SELECT * FROM license_orders WHERE LOWER(customer_email) = $1`;
+      let params: any[] = [cleanEmail];
+      if (cleanDigits.length === 11) {
+        queryStr += ` OR customer_cpf = $2`;
+        params.push(cleanDigits);
+      }
+      queryStr += ` ORDER BY created_at DESC LIMIT 1;`;
+
+      const res = await query(queryStr, params);
+      if (res.rows.length === 0) {
+        return {
+          ok: true,
+          found: false,
+          message: 'Nenhum pedido localizado com os dados informados. Verifique se digitou o CPF ou E-mail corretamente.',
+        };
+      }
+
+      const order = res.rows[0];
+
+      // Checa em tempo real com o Asaas caso ainda conste pendente
+      if (order.status !== 'CONFIRMED' && order.asaas_payment_id) {
+        try {
+          const pay = await asaasService.getPayment(order.asaas_payment_id);
+          if (pay.status === 'CONFIRMED' || pay.status === 'RECEIVED') {
+            order.status = 'CONFIRMED';
+            await query(`UPDATE license_orders SET status = 'CONFIRMED', confirmed_at = NOW() WHERE id = $1;`, [order.id]);
+          }
+        } catch (e) {}
+      }
+
+      const tokenToUse = order.session_token || randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+      if (!order.session_token) {
+        await query(`UPDATE license_orders SET session_token = $1 WHERE id = $2;`, [tokenToUse, order.id]);
+      }
+
+      const isConfirmed = order.status === 'CONFIRMED' || order.status === 'RECEIVED';
+
+      return {
+        ok: true,
+        found: true,
+        orderToken: tokenToUse,
+        isConfirmed,
+        registrationCompleted: Boolean(order.registration_completed),
+        customerName: order.customer_name || 'Veterinário',
+        customerEmail: order.customer_email || cleanEmail,
+        invoiceUrl: order.invoice_url,
+        pixQrCodeImage: order.pix_qr_code_image,
+        pixCopiaCola: order.pix_copia_cola,
+        amount: Number(order.amount) || 5.00,
+        message: isConfirmed
+          ? 'Pagamento aprovado localizado! Você já pode definir sua senha de acesso.'
+          : 'Pedido pendente localizado! Você pode prosseguir com o pagamento seguro no Asaas.',
+      };
+    } catch (err: any) {
+      console.error('[LicenseService] Erro ao recuperar pedido por identificador:', err.message);
+      throw new Error('Falha ao consultar pedido anterior. Tente novamente.');
+    }
   }
 
   /**

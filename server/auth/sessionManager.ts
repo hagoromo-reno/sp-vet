@@ -377,5 +377,80 @@ export class SessionManager {
         throw err;
       }
     }
+    /**
+   * Busca os dados seguros de um usuário pelo ID.
+   */
+  static async getUserById(userId: string): Promise<UserRecord | null> {
+    try {
+      const res = await query(
+        `SELECT id, name, email, role, subscription_status, subscription_expires_at,
+                trial_days, 1 as max_concurrent_sessions, is_blocked, created_at,
+                last_login_at, email_verified, phone, cpf, is_lifetime, asaas_invoice_url
+         FROM users WHERE id = $1 LIMIT 1;`,
+        [userId]
+      );
+      if (res.rows.length > 0) {
+        return res.rows[0];
+      }
+    } catch (e) {
+      console.warn('[SessionManager] Erro ao buscar usuário por id no DB:', e);
+    }
+
+    for (const u of memoryUsers.values()) {
+      if (u.id === userId) {
+        const { password_hash, ...safe } = u;
+        return safe;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Cria uma sessão exclusiva para um determinado usuário (revogando sessões anteriores).
+   */
+  static async createSession(
+    userId: string,
+    token: string,
+    ipAddress: string,
+    userAgent: string
+  ): Promise<void> {
+    try {
+      // Revoga sessões anteriores para garantir sessão única
+      await query(
+        `UPDATE user_sessions 
+         SET is_active = FALSE, revoked_reason = 'concurrency_limit' 
+         WHERE user_id = $1 AND is_active = TRUE;`,
+        [userId]
+      );
+
+      const sessionId = randomUUID();
+      await query(
+        `INSERT INTO user_sessions (id, user_id, token, ip_address, user_agent, is_active, last_heartbeat_at)
+         VALUES ($1, $2, $3, $4, $5, TRUE, NOW());`,
+        [sessionId, userId, token, ipAddress, userAgent]
+      );
+
+      await query(`UPDATE users SET last_login_at = NOW() WHERE id = $1;`, [userId]);
+    } catch (dbError: any) {
+      console.warn('[SessionManager] Erro ao persistir sessão no banco, usando fallback em memória:', dbError.message);
+      // Fallback em memória
+      for (const s of memorySessions.values()) {
+        if (s.user_id === userId && s.is_active) {
+          s.is_active = false;
+          s.revoked_reason = 'concurrency_limit';
+        }
+      }
+      memorySessions.set(token, {
+        id: randomUUID(),
+        user_id: userId,
+        token,
+        ip_address: ipAddress,
+        user_agent: userAgent,
+        is_active: true,
+        last_heartbeat_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        revoked_reason: null,
+      });
+    }
   }
 }
