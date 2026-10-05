@@ -1,5 +1,13 @@
 import React from 'react';
-import { VitalSigns, MonitorAlarmLimits, AnesthesiaEquipmentState, CardiacRhythm, MucousMembraneColor, CapillaryRefillTime } from '../../types/simulator';
+import {
+  VitalSigns,
+  MonitorAlarmLimits,
+  AnesthesiaEquipmentState,
+  CardiacRhythm,
+  MucousMembraneColor,
+  CapillaryRefillTime,
+  AdminMonitorOverrides,
+} from '../../types/simulator';
 import {
   Activity,
   Heart,
@@ -15,6 +23,7 @@ import {
   AlertTriangle,
   AlertOctagon,
   FileText,
+  ShieldAlert,
 } from 'lucide-react';
 import { ActiveAlarmStatus } from '../../engine/audioSynthesizer';
 
@@ -36,6 +45,8 @@ interface VitalNumbersProps {
   simTimeSeconds?: number;
   onOpenDeathReport?: () => void;
   onOpenDepthBoard?: () => void;
+  adminOverrides?: AdminMonitorOverrides;
+  onOpenAdminMenu?: () => void;
 }
 
 function formatRhythm(rhythm: CardiacRhythm): string {
@@ -47,10 +58,21 @@ function formatRhythm(rhythm: CardiacRhythm): string {
     case 'ventricular_premature_complexes': return 'CPVs Ventriculares';
     case 'ventricular_tachycardia': return 'Taquicardia Ventricular';
     case 'ventricular_fibrillation': return 'Fibrilação Ventricular';
+    case 'supraventricular_tachycardia': return 'TSV (Supraventricular)';
+    case 'atrial_flutter': return 'Flutter Atrial';
+    case 'atrial_fibrillation': return 'Fibrilação Atrial';
+    case 'av_block_1st_degree': return 'BAV 1º Grau';
+    case 'av_block_2nd_degree': return 'BAV 2º Grau';
+    case 'av_block_2nd_degree_mobitz1': return 'BAV 2º Mobitz I';
+    case 'av_block_2nd_degree_mobitz2': return 'BAV 2º Mobitz II';
+    case 'av_block_3rd_degree': return 'BAV 3º Grau';
+    case 'st_depression_ischemia': return 'Isquemia ST (Infra)';
+    case 'st_elevation_injury': return 'Lesão ST (Supra)';
+    case 't_wave_inversion': return 'Inversão Onda T';
+    case 'hyperkalemia': return 'Hipercalemia (T Apic.)';
+    case 'hypokalemia': return 'Hipocalemia (Onda U)';
     case 'pulseless_electrical_activity': return 'AESP';
     case 'asystole': return 'Assistolia';
-    case 'av_block_2nd_degree': return 'BAV 2º Grau';
-    case 'av_block_3rd_degree': return 'BAV 3º Grau';
     default: return rhythm;
   }
 }
@@ -109,6 +131,8 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
   simTimeSeconds = 0,
   onOpenDeathReport,
   onOpenDepthBoard,
+  adminOverrides,
+  onOpenAdminMenu,
 }) => {
   const isHrAlarm = vitals.heartRate < alarmLimits.hrLow || vitals.heartRate > alarmLimits.hrHigh;
   const isMapAlarm = vitals.meanArterialPressure < alarmLimits.mapLow || vitals.meanArterialPressure > alarmLimits.mapHigh;
@@ -222,6 +246,32 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
             >
               <Sliders className="w-3.5 h-3.5 text-cyan-400" />
               <span className="text-[10px] hidden sm:inline">TIMBRE</span>
+            </button>
+          )}
+
+          {/* Admin / Instructor Forced Profile Button */}
+          {onOpenAdminMenu && (
+            <button
+              onClick={onOpenAdminMenu}
+              className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs transition font-bold cursor-pointer ${
+                adminOverrides &&
+                (adminOverrides.ecg !== 'auto' ||
+                  adminOverrides.capnography !== 'auto' ||
+                  adminOverrides.oximetry !== 'auto')
+                  ? 'bg-purple-950/90 text-purple-200 border border-purple-500/80 animate-pulse shadow-sm shadow-purple-950/60'
+                  : 'bg-zinc-900 border border-zinc-700/60 text-zinc-300 hover:bg-zinc-800 hover:text-purple-300 hover:border-purple-500/40'
+              }`}
+              title="Menu do Administrador/Instrutor: Forçar perfis de ECG, Capnógrafo e Oximetria"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-purple-400" />
+              <span className="text-[10px]">
+                {adminOverrides &&
+                (adminOverrides.ecg !== 'auto' ||
+                  adminOverrides.capnography !== 'auto' ||
+                  adminOverrides.oximetry !== 'auto')
+                  ? 'PERFIL FORÇADO'
+                  : 'PERFIL'}
+              </span>
             </button>
           )}
         </div>

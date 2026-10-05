@@ -11,9 +11,19 @@ export type CardiacRhythm =
   | 'ventricular_premature_complexes' // VPCs / PVCs
   | 'ventricular_tachycardia'
   | 'ventricular_fibrillation'
+  | 'supraventricular_tachycardia'
+  | 'atrial_flutter'
   | 'atrial_fibrillation'
+  | 'av_block_1st_degree'
   | 'av_block_2nd_degree'
+  | 'av_block_2nd_degree_mobitz1'
+  | 'av_block_2nd_degree_mobitz2'
   | 'av_block_3rd_degree'
+  | 'st_depression_ischemia'
+  | 'st_elevation_injury'
+  | 't_wave_inversion'
+  | 'hyperkalemia'
+  | 'hypokalemia'
   | 'pulseless_electrical_activity' // PEA
   | 'asystole';
 
@@ -34,7 +44,60 @@ export type CapnogramType =
   | 'cardiogenic_oscillations'
   | 'hyperventilation'
   | 'hypoventilation'
+  | 'esophageal_intubation'
+  | 'co2_contamination'
   | 'cardiac_arrest_flat';
+
+export type AdminECGOverride =
+  | 'auto'
+  | 'normal'
+  | 'sinus_bradycardia'
+  | 'sinus_tachycardia'
+  | 'ventricular_premature_complexes'
+  | 'ventricular_tachycardia'
+  | 'ventricular_fibrillation'
+  | 'supraventricular_tachycardia'
+  | 'atrial_flutter'
+  | 'atrial_fibrillation'
+  | 'av_block_1st_degree'
+  | 'av_block_2nd_degree_mobitz1'
+  | 'av_block_2nd_degree_mobitz2'
+  | 'av_block_3rd_degree'
+  | 'st_depression_ischemia'
+  | 'st_elevation_injury'
+  | 't_wave_inversion'
+  | 'hyperkalemia'
+  | 'hypokalemia';
+
+export type AdminCapnographyOverride =
+  | 'auto'
+  | 'normal'
+  | 'hypocapnia'
+  | 'hypercapnia'
+  | 'rebreathing'
+  | 'esophageal_intubation'
+  | 'bronchospasm'
+  | 'co2_contamination'
+  | 'cardiogenic_oscillations'
+  | 'curare_cleft';
+
+export type AdminOximetryOverride =
+  | 'auto'
+  | 'normal'
+  | 'vasodilation'
+  | 'vasoconstriction';
+
+export interface AdminMonitorOverrides {
+  ecg: AdminECGOverride;
+  capnography: AdminCapnographyOverride;
+  oximetry: AdminOximetryOverride;
+}
+
+export const DEFAULT_MONITOR_OVERRIDES: AdminMonitorOverrides = {
+  ecg: 'auto',
+  capnography: 'auto',
+  oximetry: 'auto',
+};
 
 export type IntubationStatus = 
   | 'unintubated'

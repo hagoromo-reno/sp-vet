@@ -59,6 +59,9 @@ import { AuthScreen } from './components/auth/AuthScreen';
 import { PendingPaymentScreen } from './components/auth/PendingPaymentScreen';
 import { AdminManagementModal } from './components/admin/AdminManagementModal';
 import { SavePerspectiveModal } from './components/records/SavePerspectiveModal';
+import { AdminMonitorOverrideModal } from './components/monitor/AdminMonitorOverrideModal';
+import { applyAdminMonitorOverrides } from './engine/adminMonitorProfile';
+import { AdminMonitorOverrides, DEFAULT_MONITOR_OVERRIDES } from './types/simulator';
 import {
   Activity,
   Syringe,
@@ -205,6 +208,10 @@ function SimulatorApp() {
   const [clinicalOccurrenceHistory, setClinicalOccurrenceHistory] = useState<EmergencyFeedbackItem[]>([]);
   const [isOccurrenceCenterOpen, setIsOccurrenceCenterOpen] = useState(false);
 
+  // Admin / Instructor Monitor Overrides
+  const [adminMonitorOverrides, setAdminMonitorOverrides] = useState<AdminMonitorOverrides>(DEFAULT_MONITOR_OVERRIDES);
+  const [isAdminMonitorModalOpen, setIsAdminMonitorModalOpen] = useState<boolean>(false);
+
   // 10. NIBP / IBP STATE
   const [isNibpMeasuring, setIsNibpMeasuring] = useState(false);
   const [lastNibpMeasurement, setLastNibpMeasurement] = useState<{
@@ -236,6 +243,11 @@ function SimulatorApp() {
     try { setReviewRuns(await recording.flush()); }
     catch { setReviewRuns([structuredClone(recording.recorder.current!.run)]); }
   };
+
+  // Effective vitals displayed on monitor (including forced instructor/admin overrides)
+  const displayVitals = useMemo(() => {
+    return applyAdminMonitorOverrides(vitals, adminMonitorOverrides);
+  }, [vitals, adminMonitorOverrides]);
 
   // Auto-open death report on transition to dead
   useEffect(() => {
@@ -1038,16 +1050,24 @@ function SimulatorApp() {
         <div className="monitor-layout">
           {/* Waveform Sweeping Canvas (7 cols) */}
           <div className="waveform-panel">
-            <CanvasWaveforms vitals={vitals} isSimPaused={isSimPaused} equipment={equipment} />
+            <CanvasWaveforms
+              vitals={displayVitals}
+              isSimPaused={isSimPaused}
+              equipment={equipment}
+              adminOverrides={adminMonitorOverrides}
+              onOpenAdminMenu={() => setIsAdminMonitorModalOpen(true)}
+            />
           </div>
 
           {/* Numeric Vital Readouts (5 cols) */}
           <div className="vitals-panel">
             <VitalNumbers
-              vitals={vitals}
+              vitals={displayVitals}
               equipment={equipment}
               alarmLimits={alarmLimits}
               activeAlarmStatus={activeAlarmStatus}
+              adminOverrides={adminMonitorOverrides}
+              onOpenAdminMenu={() => setIsAdminMonitorModalOpen(true)}
               onToggleAudioMute={() => {
                 const nextMuted = !alarmLimits.isAudioMuted;
                 setAlarmLimits((prev) => ({ ...prev, isAudioMuted: nextMuted }));
@@ -1332,6 +1352,14 @@ function SimulatorApp() {
           simTimeSeconds={simTimeSeconds}
         />
       )}
+
+      {/* 14. ADMIN & INSTRUCTOR MONITOR OVERRIDE MODAL */}
+      <AdminMonitorOverrideModal
+        isOpen={isAdminMonitorModalOpen}
+        onClose={() => setIsAdminMonitorModalOpen(false)}
+        overrides={adminMonitorOverrides}
+        onUpdateOverrides={setAdminMonitorOverrides}
+      />
 
       {/* 11. FOOTER */}
       <footer className="border-t border-[#1a1a1a] bg-[#080808] px-4 py-2.5 text-center text-xs text-[#525252] font-mono-code">

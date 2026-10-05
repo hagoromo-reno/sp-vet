@@ -1,14 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { VitalSigns, AnesthesiaEquipmentState } from '../../types/simulator';
+import { VitalSigns, AnesthesiaEquipmentState, AdminMonitorOverrides } from '../../types/simulator';
 import { AudioSynthesizer } from '../../engine/audioSynthesizer';
+import { ShieldAlert, Sliders } from 'lucide-react';
 
 interface CanvasWaveformsProps {
   vitals: VitalSigns;
   isSimPaused: boolean;
   equipment?: AnesthesiaEquipmentState;
+  adminOverrides?: AdminMonitorOverrides;
+  onOpenAdminMenu?: () => void;
 }
 
-export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimPaused, equipment }) => {
+export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({
+  vitals,
+  isSimPaused,
+  equipment,
+  adminOverrides,
+  onOpenAdminMenu,
+}) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -241,13 +250,46 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
       return (Math.random() - 0.5) * 0.01;
     }
 
-    // 5. Atrial Fibrillation (AFib) - Irregular baseline f-waves with normal narrow QRS
+    // 5. Atrial Flutter (ondas F em dente de serra a ~300 bpm com condução filtrada)
+    if (rhythm === 'atrial_flutter') {
+      const flutterPhase = (simTimeSec * 5.0) % 1.0;
+      const sawTooth = (flutterPhase * 2.0 - 1.0) * -0.18;
+      let ecgVal = sawTooth;
+
+      const gauss = (pos: number, center: number, width: number, amp: number) => {
+        const diff = pos - center;
+        return amp * Math.exp(-(diff * diff) / (2 * width * width));
+      };
+      ecgVal += gauss(p, 0.23, 0.011, 1.10); // R wave
+      ecgVal += gauss(p, 0.26, 0.009, -0.25); // S wave
+      return ecgVal + (Math.random() - 0.5) * 0.01;
+    }
+
+    // 6. Atrial Fibrillation (AFib) - Irregular baseline f-waves with normal narrow QRS
     let baselineNoise = 0;
     if (rhythm === 'atrial_fibrillation') {
       baselineNoise = Math.sin(simTimeSec * 2 * Math.PI * 6.5) * 0.08 + (Math.random() - 0.5) * 0.04;
     }
 
-    // 6. Standard Normal / Sinus / Brady / Tachy / AV Blocks (P-Q-R-S-T synthesis)
+    // 7. BAV 3º Grau (Dissociação AV Completa)
+    if (rhythm === 'av_block_3rd_degree') {
+      const gauss = (pos: number, center: number, width: number, amp: number) => {
+        const diff = pos - center;
+        return amp * Math.exp(-(diff * diff) / (2 * width * width));
+      };
+      const pAtrialCycle = (simTimeSec * 1.7) % 1.0;
+      let ecgVal = gauss(pAtrialCycle, 0.20, 0.04, 0.18);
+
+      if (p < 0.48) {
+        const qrsP = p / 0.48;
+        ecgVal += Math.sin(qrsP * Math.PI) * 0.95;
+      } else if (p < 0.78) {
+        const tP = (p - 0.48) / 0.30;
+        ecgVal += -0.32 * Math.sin(tP * Math.PI);
+      }
+      return ecgVal + (Math.random() - 0.5) * 0.01;
+    }
+
     // Gaussian helper: A * exp(-((p - mu)^2) / (2 * sigma^2))
     const gauss = (pos: number, center: number, width: number, amp: number) => {
       const diff = pos - center;
@@ -258,39 +300,75 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
 
     // Potassium level check for hyperkalemia ECG alterations
     const kLevel = vitals.arterialBloodGases?.potassium ?? 4.0;
-    const isHyperkalemic = kLevel > 6.0;
-    const isSevereHyperkalemic = kLevel > 7.5;
+    const isHyperkalemic = rhythm === 'hyperkalemia' || kLevel > 6.0;
+    const isSevereHyperkalemic = rhythm === 'hyperkalemia' || kLevel > 7.5;
+    const isHypokalemic = rhythm === 'hypokalemia' || kLevel < 3.2;
 
-    // P WAVE (Center: 0.12, width: 0.028)
-    // In AFib: no P wave. In severe hyperkalemia: flattened/absent P wave.
-    if (rhythm !== 'atrial_fibrillation' && !isSevereHyperkalemic) {
+    // Check dropped beat for 2nd degree AV blocks (Mobitz I / Wenckebach & Mobitz II)
+    const isMobitz1 = rhythm === 'av_block_2nd_degree' || rhythm === 'av_block_2nd_degree_mobitz1';
+    const isMobitz2 = rhythm === 'av_block_2nd_degree_mobitz2';
+    const beatIndex = droppedBeatCountRef.current;
+    const isQrsDroppedThisBeat = (isMobitz1 && beatIndex === 3) || (isMobitz2 && beatIndex === 2);
+
+    // Dynamic PR interval offset for AV Blocks
+    let pCenter = 0.12;
+    if (rhythm === 'av_block_1st_degree') {
+      pCenter = 0.04; // Long PR interval (0.19 normalized duration vs 0.11 normal)
+    } else if (isMobitz1) {
+      pCenter = Math.max(0.04, 0.12 - beatIndex * 0.026);
+    }
+
+    // P WAVE
+    const isSvt = rhythm === 'supraventricular_tachycardia';
+    if (rhythm !== 'atrial_fibrillation' && !isSvt && !isSevereHyperkalemic) {
       const pAmp = isHyperkalemic ? 0.04 : 0.16;
-      ecg += gauss(p, 0.12, 0.026, pAmp);
+      ecg += gauss(p, pCenter, 0.026, pAmp);
+    }
+
+    // If QRS is dropped in 2nd degree AV block, skip QRS and T (isoelectric line following P)
+    if (isQrsDroppedThisBeat && (p >= 0.18 && p <= 0.85)) {
+      return ecg + (Math.random() - 0.5) * 0.01;
     }
 
     // Q WAVE (Center: 0.20, width: 0.008, negative)
     ecg += gauss(p, 0.20, 0.008, -0.12);
 
     // R WAVE (Center: 0.23, width: 0.014, sharp tall positive spike)
-    const rAmp = isHyperkalemic ? 0.85 : 1.15;
-    ecg += gauss(p, 0.23, 0.012, rAmp);
+    const rAmp = isHyperkalemic ? 0.85 : isSvt ? 1.25 : 1.15;
+    const rWidth = isSvt ? 0.009 : isHyperkalemic ? 0.019 : 0.012;
+    ecg += gauss(p, 0.23, rWidth, rAmp);
 
     // S WAVE (Center: 0.26, width: 0.011, sharp negative dip)
     ecg += gauss(p, 0.26, 0.010, -0.28);
 
-    // ST SEGMENT (Isoelectric or elevated/depressed in ischemia)
-    if (p >= 0.28 && p < 0.38) {
-      const isHypoxemic = vitals.pulseOximetrySpO2 < 85;
-      if (isHypoxemic) {
-        ecg += -0.15 * Math.sin(((p - 0.28) / 0.10) * Math.PI); // ST depression
+    // ST SEGMENT (Isoelectric or altered in Ischemia / Injury / Hypokalemia)
+    if (p >= 0.27 && p < 0.38) {
+      if (rhythm === 'st_elevation_injury') {
+        ecg += 0.32 * Math.sin(((p - 0.27) / 0.11) * Math.PI); // Convex ST elevation
+      } else if (rhythm === 'st_depression_ischemia') {
+        ecg += -0.25; // ST depression
+      } else if (isHypokalemic) {
+        ecg += -0.09; // Mild ST depression in hypokalemia
+      } else if (vitals.pulseOximetrySpO2 < 85) {
+        ecg += -0.15 * Math.sin(((p - 0.27) / 0.11) * Math.PI); // Hypoxemic ST depression
       }
     }
 
     // T WAVE (Center: 0.44, width: 0.055, smooth asymmetric wave)
     if (isHyperkalemic) {
       // Tented, tall, peaked, narrow symmetrical T wave of hyperkalemia
-      const tAmp = Math.min(1.0, 0.45 + (kLevel - 6.0) * 0.35);
-      ecg += gauss(p, 0.44, 0.028, tAmp);
+      const tAmp = Math.min(1.1, 0.55 + (kLevel - 6.0) * 0.35);
+      ecg += gauss(p, 0.44, 0.022, tAmp);
+    } else if (rhythm === 't_wave_inversion') {
+      // Deep symmetrical inverted T wave
+      ecg += gauss(p, 0.44, 0.046, -0.35);
+    } else if (isHypokalemic) {
+      // Flattened T wave + prominent U wave
+      ecg += gauss(p, 0.42, 0.040, 0.06);
+      ecg += gauss(p, 0.56, 0.042, 0.18); // Prominent U wave
+    } else if (isSvt) {
+      // SVT rapid repolarization
+      ecg += gauss(p, 0.42, 0.040, 0.18);
     } else {
       // Normal rounded asymmetrical T wave
       ecg += gauss(p, 0.44, 0.048, 0.24);
@@ -315,31 +393,54 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
     // Pulse wave arrives with ~0.10s delay relative to R-wave (p offset ~0.12)
     const pp = (p + 0.88) % 1.0;
 
+    const isVasodilation = adminOverrides?.oximetry === 'vasodilation';
+    const isVasoconstriction = adminOverrides?.oximetry === 'vasoconstriction';
+
     let pleth = 0;
     if (pp < 0.26) {
       // Anacrotic steep systolic upstroke (Sigmoidal curve to crest)
+      const upExponent = isVasoconstriction ? 1.6 : 1.1;
       pleth = Math.sin((pp / 0.26) * (Math.PI / 2));
-      pleth = Math.pow(pleth, 1.2);
+      pleth = Math.pow(pleth, upExponent);
     } else if (pp < 0.44) {
-      // Catacrotic limb with sharp Dicrotic Notch (Incisura) at pp = 0.34
+      // Catacrotic limb with Dicrotic Notch (Incisura)
       const tNotch = (pp - 0.26) / 0.18;
-      if (tNotch < 0.45) {
-        // Descent to notch
-        pleth = 1.0 - 0.42 * (tNotch / 0.45);
+      if (isVasoconstriction) {
+        // Flattened slope with loss/attenuation of dicrotic notch
+        pleth = 1.0 - 0.65 * tNotch;
+      } else if (isVasodilation) {
+        // Broad wave with low, rounded dicrotic notch
+        if (tNotch < 0.55) {
+          pleth = 1.0 - 0.32 * (tNotch / 0.55);
+        } else {
+          const tRebound = (tNotch - 0.55) / 0.45;
+          pleth = 0.68 + 0.12 * Math.sin(tRebound * Math.PI);
+        }
       } else {
-        // Dicrotic wave rebound crest
-        const tRebound = (tNotch - 0.45) / 0.55;
-        pleth = 0.58 + 0.16 * Math.sin(tRebound * Math.PI);
+        // Normal crisp dicrotic notch
+        if (tNotch < 0.45) {
+          pleth = 1.0 - 0.42 * (tNotch / 0.45);
+        } else {
+          const tRebound = (tNotch - 0.45) / 0.55;
+          pleth = 0.58 + 0.16 * Math.sin(tRebound * Math.PI);
+        }
       }
     } else {
       // Diastolic runoff decay towards baseline
       const tDecay = (pp - 0.44) / 0.56;
-      pleth = 0.58 * Math.exp(-3.2 * tDecay);
+      const decayRate = isVasodilation ? 2.4 : 3.4;
+      const baseLevel = isVasodilation ? 0.68 : 0.58;
+      pleth = baseLevel * Math.exp(-decayRate * tDecay);
     }
 
-    // Perfusion Index scaling (vasoconstriction/hypothermia reduces amplitude)
-    const pi = Math.max(0.15, Math.min(1.5, vitals.perfusionIndex));
-    pleth = Math.max(0, pleth * pi);
+    // Perfusion Index scaling (vasoconstriction/hypothermia reduces amplitude, vasodilation increases amplitude)
+    let piScale = vitals.perfusionIndex / 2.0;
+    if (isVasodilation) {
+      piScale = 1.75;
+    } else if (isVasoconstriction) {
+      piScale = 0.26;
+    }
+    pleth = Math.max(0, pleth * piScale);
 
     return pleth;
   };
@@ -358,19 +459,19 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
     }
 
     // 2. Esophageal Intubation - Immediate flatline at 0
-    if (etCO2 === 0) {
+    if (vitals.capnogramType === 'esophageal_intubation' || etCO2 === 0) {
       return 0;
     }
 
     // 3. Obstructive / Bronchospasm "Shark-Fin" pattern (Asthma, COPD, kinked tube)
     if (vitals.capnogramType === 'obstructive_shark_fin') {
-      if (p < 0.65) {
-        // Prolonged upward curving Phase II/III with no distinct alpha angle
-        const curve = Math.pow(p / 0.65, 1.85);
+      if (p < 0.68) {
+        // Prolonged upward curving Phase II/III with no distinct alpha angle (shark fin)
+        const curve = Math.pow(p / 0.68, 1.95);
         return fiCO2 + (etCO2 - fiCO2) * curve;
-      } else if (p < 0.75) {
+      } else if (p < 0.78) {
         // Rapid inspiratory downstroke
-        const tDown = (p - 0.65) / 0.10;
+        const tDown = (p - 0.68) / 0.10;
         return fiCO2 + (etCO2 - fiCO2) * (1.0 - tDown);
       } else {
         return fiCO2;
@@ -378,9 +479,8 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
     }
 
     // 4. Standard 4-Phase Capnogram (Phase I -> II -> III -> Phase 0)
-    // Smooth continuous alveolar transition (I:E = 1:2)
     if (p < 0.08) {
-      // Phase I: Inspiratory Baseline (0 mmHg or FiCO2 in rebreathing)
+      // Phase I: Inspiratory Baseline (0 mmHg or FiCO2 in rebreathing/exhausted soda lime)
       return fiCO2;
     } else if (p < 0.24) {
       // Phase II: Rapid Expiratory S-Curve Upstroke (Anatomic dead space gas emptying)
@@ -392,18 +492,18 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
       const tPlateau = (p - 0.24) / 0.44;
       let plateauCo2 = etCO2 * (0.92 + 0.08 * tPlateau);
 
-      // Curare Cleft pathology check (diaphragmatic notch during neuromuscular recovery)
+      // Curare Cleft pathology (diaphragmatic notch during neuromuscular recovery / breathing against ventilator)
       if (vitals.capnogramType === 'curare_cleft') {
         const cleftPos = (tPlateau - 0.55);
         if (Math.abs(cleftPos) < 0.15) {
-          const dip = 0.35 * etCO2 * Math.exp(-(cleftPos * cleftPos) / 0.005);
+          const dip = 0.42 * etCO2 * Math.exp(-(cleftPos * cleftPos) / 0.004);
           plateauCo2 -= dip;
         }
       }
 
-      // Cardiogenic Oscillations pathology check
+      // Cardiogenic Oscillations pathology (rhythmic pulses pushing alveolar gas)
       if (vitals.capnogramType === 'cardiogenic_oscillations') {
-        plateauCo2 += Math.sin(tPlateau * Math.PI * 12) * 2.0;
+        plateauCo2 += Math.sin(tPlateau * Math.PI * 14) * 2.8;
       }
 
       return Math.max(fiCO2, plateauCo2);
@@ -529,7 +629,11 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
           }
 
           // 2nd Degree AV Block (Wenckebach / Mobitz): drop 1 out of 4 beats
-          if (vitals.cardiacRhythm === 'av_block_2nd_degree') {
+          if (
+            vitals.cardiacRhythm === 'av_block_2nd_degree' ||
+            vitals.cardiacRhythm === 'av_block_2nd_degree_mobitz1' ||
+            vitals.cardiacRhythm === 'av_block_2nd_degree_mobitz2'
+          ) {
             droppedBeatCountRef.current = (droppedBeatCountRef.current + 1) % 4;
           }
 
@@ -712,7 +816,7 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [vitals, isSimPaused, sweepSpeedMmPerSec, showShading]);
+  }, [vitals, isSimPaused, sweepSpeedMmPerSec, showShading, adminOverrides]);
 
   return (
     <div
@@ -728,6 +832,11 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
         <span className="text-[11px] px-1.5 py-0.2 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono-code">
           {vitals.cardiacRhythm.replace(/_/g, ' ').toUpperCase()}
         </span>
+        {adminOverrides && adminOverrides.ecg !== 'auto' && (
+          <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-950/80 border border-purple-500/70 text-purple-300 font-bold uppercase tracking-wider">
+            FORÇADO
+          </span>
+        )}
       </div>
       <div className="waveform-settings absolute top-2 right-3 z-10 flex items-center space-x-3 text-[10px] text-[#737373] font-mono-code pointer-events-none">
         <span>Filtro: DIAG (0.05-150Hz)</span>
@@ -743,6 +852,11 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
         <span className="text-[11px] px-1.5 py-0.2 rounded bg-cyan-950/60 border border-cyan-800/50 text-cyan-300 font-mono-code">
           PI: {vitals.perfusionIndex}%
         </span>
+        {adminOverrides && adminOverrides.oximetry !== 'auto' && (
+          <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-950/80 border border-purple-500/70 text-purple-300 font-bold uppercase tracking-wider">
+            FORÇADO ({adminOverrides.oximetry.toUpperCase()})
+          </span>
+        )}
       </div>
       <div className="absolute top-[26%] right-3 z-10 text-[10px] text-[#737373] font-mono-code pointer-events-none">
         AutoGanho: Normal
@@ -754,6 +868,11 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
         <span className="text-xs font-bold font-mono-code tracking-wider text-yellow-400">
           CO₂ · Capnografia (mmHg)
         </span>
+        {adminOverrides && adminOverrides.capnography !== 'auto' && (
+          <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-950/80 border border-purple-500/70 text-purple-300 font-bold uppercase tracking-wider">
+            FORÇADO ({adminOverrides.capnography.toUpperCase()})
+          </span>
+        )}
         {equipment?.intubationStatus === 'intubated_tracheal' ? (
           <span className="text-[11px] px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-mono-code font-bold flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -818,6 +937,27 @@ export const CanvasWaveforms: React.FC<CanvasWaveformsProps> = ({ vitals, isSimP
         >
           {showShading ? 'Sombra ativa' : 'Sombra desativada'}
         </button>
+
+        {onOpenAdminMenu && (
+          <>
+            <span className="text-[#444444]">|</span>
+            <button
+              onClick={onOpenAdminMenu}
+              className={`px-2 py-0.5 rounded transition font-bold flex items-center gap-1 cursor-pointer ${
+                adminOverrides &&
+                (adminOverrides.ecg !== 'auto' ||
+                  adminOverrides.capnography !== 'auto' ||
+                  adminOverrides.oximetry !== 'auto')
+                  ? 'bg-purple-950/90 text-purple-200 border border-purple-500/80 animate-pulse shadow-sm shadow-purple-950'
+                  : 'bg-[#1c1c1c] text-zinc-300 hover:text-white hover:bg-[#282828]'
+              }`}
+              title="Menu do Administrador/Instrutor: Forçar perfis de ECG, Capnógrafo e Oximetria"
+            >
+              <ShieldAlert className="w-3 h-3 text-purple-400" />
+              <span>PERFIL / ADMIN</span>
+            </button>
+          </>
+        )}
       </div>
 
       {/* Main High-DPI HTML5 Canvas */}

@@ -170,10 +170,21 @@ function formatCardiacRhythmPt(rhythm: CardiacRhythm): string {
     case 'ventricular_premature_complexes': return 'Complexos Ventriculares Prematuros (CPVs)';
     case 'ventricular_tachycardia': return 'Taquicardia Ventricular (TV)';
     case 'ventricular_fibrillation': return 'Fibrilação Ventricular (FV - Ritmo Chocável)';
+    case 'supraventricular_tachycardia': return 'Taquicardia Supraventricular (TSV)';
+    case 'atrial_flutter': return 'Flutter Atrial (Ondas F)';
+    case 'atrial_fibrillation': return 'Fibrilação Atrial (AFib)';
+    case 'av_block_1st_degree': return 'Bloqueio AV de 1º Grau';
+    case 'av_block_2nd_degree': return 'Bloqueio AV de 2º Grau';
+    case 'av_block_2nd_degree_mobitz1': return 'Bloqueio AV de 2º Grau Mobitz I (Wenckebach)';
+    case 'av_block_2nd_degree_mobitz2': return 'Bloqueio AV de 2º Grau Mobitz II';
+    case 'av_block_3rd_degree': return 'Bloqueio AV Total (3º Grau)';
+    case 'st_depression_ischemia': return 'Isquemia Miocárdica (Infradesnível ST)';
+    case 'st_elevation_injury': return 'Corrente de Lesão (Supradesnível ST)';
+    case 't_wave_inversion': return 'Inversão Primária de Onda T';
+    case 'hyperkalemia': return 'Hipercalemia (Ondas T Apiculadas)';
+    case 'hypokalemia': return 'Hipocalemia (Achatamento T e Onda U)';
     case 'pulseless_electrical_activity': return 'Atividade Elétrica Sem Pulso (AESP)';
     case 'asystole': return 'Assistolia (Parada)';
-    case 'av_block_2nd_degree': return 'Bloqueio AV de 2º Grau';
-    case 'av_block_3rd_degree': return 'Bloqueio AV Total (3º Grau)';
     default: return rhythm;
   }
 }
