@@ -397,6 +397,13 @@ export interface ActiveDrugDose {
     bioavailableFraction: number;
     effectiveClearanceMultiplier: number;
     depotWasLoaded: boolean;
+    /** Primary metabolite mass (normalized to the parent typical dose). */
+    metaboliteAmountNormalized?: number;
+    /** Metabolite biophase exposure (normalized, before potency weighting). */
+    metaboliteEffectNormalized?: number;
+    cumulativeMetaboliteFormedNormalized?: number;
+    /** Species k10 multiplier actually applied (literature or enzyme prediction). */
+    speciesEliminationFactor?: number;
   };
 }
 
@@ -586,12 +593,17 @@ export interface BiologicalState {
     compensatoryReserve: number;
   };
   biotransformation: {
+    /** Intrinsic (perfusion-independent) hepatic enzymatic capacity, 1 = calibrated baseline. */
     hepaticEnzymeCapacity: number;
     hepaticEnzymeSaturation: number;
     renalFiltrationCapacity: number;
     renalTransportSaturation: number;
     circulatingMetaboliteBurden: number;
     receptorAdaptiveFeedback: number;
+    /** Per-pathway state: load (normalized substrate exposure), saturation and residual activity. */
+    enzymePathways?: Record<string, { load: number; saturation: number; activity: number }>;
+    /** Toxic metabolite burden (laudanosine, 2,6-xylidine, MEGX excess), 0 to 1. */
+    toxicMetaboliteBurden?: number;
   };
   respiratory: {
     highAirwayPressureSeconds: number;

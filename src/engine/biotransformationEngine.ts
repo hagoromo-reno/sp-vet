@@ -7,6 +7,18 @@ import type {
   PatientProfile,
 } from '../types/simulator';
 import { getSpeciesDoseRange } from './drugAdministration';
+import {
+  classifyConcentration,
+  DRUG_DISPOSITION,
+  DrugDispositionProfile,
+  ENZYME_PATHWAYS,
+  ENZYME_PATHWAY_KM,
+  EnzymePathway,
+  getTherapeuticWindow,
+  TherapeuticWindow,
+} from './pk/speciesDrugDisposition';
+import { computeOrganClearance, OrganClearanceBreakdown } from './organClearance';
+import { predictDecrementTimes } from './pharmacokineticModel';
 
 const clamp = (value: number, min = 0, max = 1): number => Math.min(max, Math.max(min, value));
 const approach = (current: number, target: number, dt: number, tau: number): number =>
@@ -72,14 +84,31 @@ export interface PatientDrugKinetics {
   eliminatedFraction: number;
   bioaccumulationLabel: 'mínima' | 'moderada' | 'elevada';
   profile: DrugBiotransformationProfile;
+  dispositionProfile?: DrugDispositionProfile;
+  therapeuticWindow?: TherapeuticWindow;
+  therapeuticBand?: TherapeuticWindow['bands'][number];
+  contextSensitiveHalfTimeMin?: number;
+  metaboliteExposure?: {
+    name: string;
+    amountNormalized: number;
+    effectNormalized: number;
+    isToxic: boolean;
+    clinicalNote: string;
+  };
+  clearanceBreakdown?: OrganClearanceBreakdown;
   effectiveClearance: number;
   feedbackExplanation: string;
 }
 
-export const analyzePatientDrugKinetics = (patient: PatientProfile, dose: ActiveDrugDose, biological?: BiologicalState): PatientDrugKinetics | undefined => {
+export const analyzePatientDrugKinetics = (
+  patient: PatientProfile,
+  dose: ActiveDrugDose,
+  biological?: BiologicalState
+): PatientDrugKinetics | undefined => {
   const drug = VETERINARY_DRUG_DATABASE.find((item) => item.id === dose.drugId);
   if (!drug) return undefined;
   const profile = resolveBiotransformationProfile(drug);
+  const disposition = DRUG_DISPOSITION[drug.id];
   const state = dose.pkCompartments;
   const central = state?.centralAmountNormalized || 0;
   const rapid = state?.rapidPeripheralAmountNormalized || 0;
@@ -104,16 +133,51 @@ export const analyzePatientDrugKinetics = (patient: PatientProfile, dose: Active
       : normalizingMg;
     estimatedPlasmaConcentration = dose.currentCp * doseEquivalentMgKg / Math.max(0.05, profile.apparentCentralVolumeLKg);
   }
+
+  // Therapeutic window classification
+  const window = getTherapeuticWindow(drug.id, patient.species);
+  let concentrationForWindow: number | undefined = estimatedPlasmaConcentration;
+  if (window && estimatedPlasmaConcentration !== undefined && window.unit === 'ng/mL') {
+    concentrationForWindow = estimatedPlasmaConcentration * 1000;
+  }
+  const therapeuticBand = classifyConcentration(window, concentrationForWindow);
+
+  // Clearance breakdown & predictions
+  let clearanceBreakdown: OrganClearanceBreakdown | undefined;
+  if (biological) {
+    clearanceBreakdown = computeOrganClearance(patient, drug, biological, patient.baselineVitals.tempC);
+  }
+
+  const decrement = predictDecrementTimes(
+    patient,
+    drug,
+    dose,
+    clearanceBreakdown?.multiplier ?? 1.0,
+    0.08,
+    360
+  );
+
+  const metabolite = disposition?.metabolite;
+  const metaboliteExposure = metabolite ? {
+    name: metabolite.name,
+    amountNormalized: state?.metaboliteAmountNormalized || 0,
+    effectNormalized: state?.metaboliteEffectNormalized || 0,
+    isToxic: metabolite.pdMode === 'toxic',
+    clinicalNote: metabolite.clinicalNote,
+  } : undefined;
+
   const hepaticCapacity = biological?.biotransformation?.hepaticEnzymeCapacity ?? 1.0;
   const renalCapacity = biological?.biotransformation?.renalFiltrationCapacity ?? 1.0;
-  const effectiveClearance = profile.hepaticClearanceFraction * hepaticCapacity
-    + profile.renalClearanceFraction * renalCapacity
-    + Math.max(0, 1 - profile.hepaticClearanceFraction - profile.renalClearanceFraction);
+  const effectiveClearance = clearanceBreakdown
+    ? clearanceBreakdown.multiplier
+    : profile.hepaticClearanceFraction * hepaticCapacity
+      + profile.renalClearanceFraction * renalCapacity
+      + Math.max(0, 1 - profile.hepaticClearanceFraction - profile.renalClearanceFraction);
 
   return {
     estimatedPlasmaConcentration,
     concentrationUnit: estimatedPlasmaConcentration === undefined ? 'índice relativo' : 'µg/mL',
-    estimatedFreeConcentration: estimatedPlasmaConcentration === undefined ? undefined : estimatedPlasmaConcentration * (1 - profile.proteinBindingFraction),
+    estimatedFreeConcentration: estimatedPlasmaConcentration === undefined ? undefined : estimatedPlasmaConcentration * (1 - (clearanceBreakdown?.freeFractionCurrent !== undefined ? (1 - clearanceBreakdown.freeFractionCurrent) : profile.proteinBindingFraction)),
     estimatedCentralAmountMg: estimatedPlasmaConcentration === undefined ? undefined : estimatedPlasmaConcentration * profile.apparentCentralVolumeLKg * patient.weightKg,
     plasmaTrend,
     centralFraction: central / distributionTotal,
@@ -123,46 +187,105 @@ export const analyzePatientDrugKinetics = (patient: PatientProfile, dose: Active
     eliminatedFraction: eliminated / deliveredTotal,
     bioaccumulationLabel: tissueFraction > 0.62 ? 'elevada' : tissueFraction > 0.3 ? 'moderada' : 'mínima',
     profile,
+    dispositionProfile: disposition,
+    therapeuticWindow: window,
+    therapeuticBand,
+    contextSensitiveHalfTimeMin: decrement.contextSensitiveHalfTimeMin,
+    metaboliteExposure,
+    clearanceBreakdown,
     effectiveClearance,
     feedbackExplanation: effectiveClearance < 0.65
-      ? 'Depuração limitada pela perfusão/capacidade orgânica; maior tendência à acumulação.'
+      ? `Depuração reduzida: ${clearanceBreakdown?.limitingFactor || 'perfusão orgânica diminuída'}; risco de bioacumulação.`
       : (biological?.biotransformation?.receptorAdaptiveFeedback ?? 0) > 0.2
         ? 'Exposição sustentada induz adaptação receptorial e menor resposta por unidade de concentração.'
-        : 'Entrada, distribuição e depuração permanecem em equilíbrio fisiológico compensado.',
+        : 'Entrada, distribuição e depuração em equilíbrio fisiológico com o regime hemodinâmico.',
   };
 };
 
 export class BiotransformationEngine {
-  public static step(dtSeconds: number, doses: ActiveDrugDose[], previous: BiologicalState['biotransformation'], hepaticPerfusion: number, renalPerfusion: number): BiologicalState['biotransformation'] {
+  public static step(
+    dtSeconds: number,
+    doses: ActiveDrugDose[],
+    previous: BiologicalState['biotransformation'],
+    hepaticPerfusion: number,
+    renalPerfusion: number
+  ): BiologicalState['biotransformation'] {
     let hepaticLoad = 0;
     let renalLoad = 0;
     let metaboliteDrive = 0;
+    let toxicMetaboliteDrive = 0;
     let longestContinuousExposureHours = 0;
+
+    // Track per-pathway substrate loads
+    const pathwayLoads: Record<EnzymePathway, number> = {
+      cyp3a: 0, cyp2b_2c: 0, cyp2d: 0, cyp1a2: 0, ugt: 0, sult: 0, nat: 0, esterase: 0, hofmann: 0, comt_mao: 0,
+    };
+
     for (const dose of doses) {
       const drug = VETERINARY_DRUG_DATABASE.find((item) => item.id === dose.drugId);
       if (!drug) continue;
       const profile = resolveBiotransformationProfile(drug);
-      hepaticLoad += dose.currentCp * profile.hepaticClearanceFraction;
-      renalLoad += dose.currentCp * profile.renalClearanceFraction;
-      metaboliteDrive += dose.currentCp * profile.hepaticClearanceFraction * (profile.activeMetabolite ? 0.45 : 0.12);
+      const disposition = DRUG_DISPOSITION[drug.id];
+      const cp = dose.currentCp;
+
+      hepaticLoad += cp * profile.hepaticClearanceFraction;
+      renalLoad += cp * profile.renalClearanceFraction;
+      metaboliteDrive += cp * profile.hepaticClearanceFraction * (profile.activeMetabolite ? 0.45 : 0.12);
+
+      // Metabolite accumulation
+      if (disposition?.metabolite) {
+        if (disposition.metabolite.pdMode === 'toxic') {
+          toxicMetaboliteDrive += (dose.pkCompartments?.metaboliteAmountNormalized || 0) * 0.8;
+        } else if (disposition.metabolite.pdMode === 'parent') {
+          // e.g. MEGX or norcetamina under hypoperfusion
+          if (hepaticPerfusion < 0.6 || renalPerfusion < 0.6) {
+            toxicMetaboliteDrive += (dose.pkCompartments?.metaboliteAmountNormalized || 0) * 0.4;
+          }
+        }
+      }
+
+      // Distribute load among pathways
+      if (disposition?.pathways) {
+        for (const [p, share] of Object.entries(disposition.pathways) as [EnzymePathway, number][]) {
+          pathwayLoads[p] = (pathwayLoads[p] || 0) + cp * share;
+        }
+      }
+
       const isToleranceSensitive = Boolean(drug.specialTraits?.isOpioid || drug.specialTraits?.isAlpha2Agonist || drug.specialTraits?.isSympathomimetic);
       if (isToleranceSensitive && dose.isCRI && dose.isInfusionRunning !== false) {
         longestContinuousExposureHours = Math.max(longestContinuousExposureHours, (dose.deliveryElapsedSec || 0) / 3600);
       }
     }
+
+    // Step per-pathway Michaelis-Menten saturation and activity
+    const enzymePathways: Record<string, { load: number; saturation: number; activity: number }> = {};
+    for (const pathway of ENZYME_PATHWAYS) {
+      const load = pathwayLoads[pathway];
+      const km = ENZYME_PATHWAY_KM[pathway];
+      const targetSat = clamp(load / (km + load));
+      const prevSat = previous.enzymePathways?.[pathway]?.saturation ?? 0;
+      const sat = approach(prevSat, targetSat, dtSeconds, targetSat > prevSat ? 45 : 360);
+      const activity = clamp(1 - sat * 0.48, 0.12, 1.0);
+      enzymePathways[pathway] = { load, saturation: sat, activity };
+    }
+
     const hepaticSaturationTarget = clamp(hepaticLoad / (2.5 + hepaticLoad));
     const renalSaturationTarget = clamp(renalLoad / (3 + renalLoad));
     const hepaticEnzymeSaturation = approach(previous.hepaticEnzymeSaturation, hepaticSaturationTarget, dtSeconds, hepaticSaturationTarget > previous.hepaticEnzymeSaturation ? 45 : 420);
     const renalTransportSaturation = approach(previous.renalTransportSaturation, renalSaturationTarget, dtSeconds, renalSaturationTarget > previous.renalTransportSaturation ? 60 : 360);
     const metaboliteTarget = clamp(metaboliteDrive / 4);
+    const toxicTarget = clamp(toxicMetaboliteDrive / 2.5);
     const adaptationTarget = clamp(longestContinuousExposureHours / 12, 0, 0.65);
+
     return {
       hepaticEnzymeSaturation,
       renalTransportSaturation,
       hepaticEnzymeCapacity: clamp(hepaticPerfusion * (1 - hepaticEnzymeSaturation * 0.48), 0.12, 1.15),
       renalFiltrationCapacity: clamp(renalPerfusion * (1 - renalTransportSaturation * 0.38), 0.12, 1.15),
       circulatingMetaboliteBurden: approach(previous.circulatingMetaboliteBurden, metaboliteTarget, dtSeconds, metaboliteTarget > previous.circulatingMetaboliteBurden ? 180 : 1800),
+      toxicMetaboliteBurden: approach(previous.toxicMetaboliteBurden ?? 0, toxicTarget, dtSeconds, toxicTarget > (previous.toxicMetaboliteBurden ?? 0) ? 90 : 600),
       receptorAdaptiveFeedback: approach(previous.receptorAdaptiveFeedback, adaptationTarget, dtSeconds, adaptationTarget > previous.receptorAdaptiveFeedback ? 900 : 3600),
+      enzymePathways,
     };
   }
 }
