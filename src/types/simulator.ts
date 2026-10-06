@@ -677,6 +677,7 @@ export interface BiologicalState {
   resuscitation: {
     roscReadinessSeconds: number;
     processedShockCount: number;
+    postRoscStabilizationSeconds?: number;
   };
 }
 
@@ -866,6 +867,8 @@ export interface ResuscitationState {
   epinephrineDosesGiven?: number;
   lastEpinephrineSimTime?: number;
   shocksDeliveredCount?: number;
+  isDeathDeclared?: boolean;
+  deathDeclaredSimTime?: number;
 }
 
 export interface LogEntry {

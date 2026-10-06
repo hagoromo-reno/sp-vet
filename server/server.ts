@@ -537,8 +537,71 @@ app.delete('/api/patients/:id', authenticateSession, async (req: Request, res: R
 });
 
 // ---------------------------------------------------------------------------
+// 2.8 PROCEDURE LOGS & STUDENT ACTIVITY (Resumo de Procedimento e Atividades)
+// ---------------------------------------------------------------------------
+
+app.post('/api/procedures/log', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  try {
+    const payload = {
+      ...req.body,
+      userId: user.id,
+      userEmail: user.email,
+      studentName: req.body.studentName || user.name || 'Aluno Não Identificado',
+    };
+    const saved = await AdminService.saveProcedureLog(payload);
+    res.json({ ok: true, log: saved });
+  } catch (error: any) {
+    res.status(500).json({ error: 'SAVE_PROCEDURE_LOG_ERROR', message: error.message });
+  }
+});
+
+app.get('/api/procedures/logs', authenticateSession, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  const studentName = (req.query.studentName as string) || undefined;
+  const limit = Number(req.query.limit || 50);
+  try {
+    const logs = await AdminService.listProcedureLogs({
+      userId: user.id,
+      studentName,
+      isAdmin: user.role === 'admin',
+      limit,
+    });
+    res.json({ ok: true, logs });
+  } catch (error: any) {
+    res.status(500).json({ error: 'LIST_PROCEDURE_LOGS_ERROR', message: error.message });
+  }
+});
+
+app.get('/api/admin/procedure-logs', authenticateSession, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const studentName = (req.query.studentName as string) || undefined;
+  const limit = Number(req.query.limit || 100);
+  try {
+    const logs = await AdminService.listProcedureLogs({
+      isAdmin: true,
+      studentName,
+      limit,
+    });
+    res.json({ ok: true, logs });
+  } catch (error: any) {
+    res.status(500).json({ error: 'ADMIN_PROCEDURE_LOGS_ERROR', message: error.message });
+  }
+});
+
+app.delete('/api/admin/procedure-logs/:id', authenticateSession, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  try {
+    await AdminService.deleteProcedureLog(req.params.id, user.id, true);
+    res.json({ ok: true });
+  } catch (error: any) {
+    res.status(500).json({ error: 'DELETE_PROCEDURE_LOG_ERROR', message: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 3. ADMIN MANAGEMENT ROUTES
 // ---------------------------------------------------------------------------
+
 
 app.get('/api/admin/metrics', authenticateSession, requireAdmin, async (_req: Request, res: Response): Promise<void> => {
   try {

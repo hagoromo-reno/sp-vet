@@ -65,7 +65,7 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
           {hasImpendingDeath && onSwitchToEmergencyTab && (
             <button
               onClick={onSwitchToEmergencyTab}
-              className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-mono-code font-bold flex items-center space-x-1 shadow-md shadow-amber-950/80 transition animate-bounce"
+              className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-mono-code font-bold flex items-center space-x-1 shadow-md shadow-amber-950/80 transition"
             >
               <AlertTriangle className="w-3.5 h-3.5" />
               <span>COLAPSO EM ~{vitals.impendingArrestWarning?.secondsRemainingEstimate}s · AGIR AGORA</span>
@@ -75,7 +75,7 @@ export const ClinicalAlertRibbon: React.FC<ClinicalAlertRibbonProps> = ({
           {hasPCR && onSwitchToEmergencyTab && (
             <button
               onClick={onSwitchToEmergencyTab}
-              className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-[11px] font-mono-code font-bold flex items-center space-x-1 shadow-md shadow-red-950/80 transition animate-pulse"
+              className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-[11px] font-mono-code font-bold flex items-center space-x-1 shadow-md shadow-red-950/80 transition"
             >
               <HeartPulse className="w-3.5 h-3.5" />
               <span>IR PARA ABA CPCR RECOVER</span>

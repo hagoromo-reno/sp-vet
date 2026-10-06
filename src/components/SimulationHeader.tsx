@@ -14,6 +14,9 @@ import {
   FileText,
   LogOut,
   User,
+  GraduationCap,
+  Edit2,
+  ClipboardList,
 } from 'lucide-react';
 import { PatientProfile, VitalSigns } from '../types/simulator';
 import { formatSpecies } from '../utils/formatters';
@@ -40,6 +43,9 @@ interface SimulationHeaderProps {
   onEmergency: () => void;
   onAdminPanel?: () => void;
   onSavePerspective?: () => void;
+  studentName?: string;
+  onOpenStudentModal?: () => void;
+  onOpenProcedureSummary?: () => void;
 }
 
 export function SimulationHeader(props: SimulationHeaderProps) {
@@ -121,12 +127,26 @@ export function SimulationHeader(props: SimulationHeaderProps) {
                   </button>
                 )}
 
+                {user.role === 'student' && props.onOpenStudentModal && (
+                  <button
+                    onClick={props.onOpenStudentModal}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/40 text-indigo-300 text-xs font-semibold transition cursor-pointer"
+                    title="Identificação do Aluno - Clique para alterar nome ou codinome"
+                  >
+                    <GraduationCap size={15} />
+                    <span className="max-w-[120px] truncate">{props.studentName ? `Aluno: ${props.studentName}` : 'Identificar Aluno'}</span>
+                    <Edit2 size={12} className="opacity-75" />
+                  </button>
+                )}
+
                 <div className="hidden lg:flex flex-col text-right leading-tight">
-                  <span className="text-xs font-bold text-white truncate max-w-[130px]">{user.name}</span>
+                  <span className="text-xs font-bold text-white truncate max-w-[130px]">
+                    {user.role === 'student' && props.studentName ? props.studentName : user.name}
+                  </span>
                   <span className={`text-[10px] font-mono ${
-                    user.subscription_status === 'active' ? 'text-emerald-400' : 'text-cyan-400'
+                    user.role === 'student' ? 'text-indigo-400' : user.subscription_status === 'active' ? 'text-emerald-400' : 'text-cyan-400'
                   }`}>
-                    {user.subscription_status === 'active' ? '● Assinatura Ativa' : '● Free Trial'}
+                    {user.role === 'student' ? '● Turma SOPET' : user.subscription_status === 'active' ? '● Assinatura Ativa' : '● Free Trial'}
                   </span>
                 </div>
 
@@ -179,6 +199,16 @@ export function SimulationHeader(props: SimulationHeaderProps) {
         </div>
 
         <nav className="context-tools flex items-center gap-1.5" aria-label="Consultas do caso">
+          {props.onOpenProcedureSummary && (
+            <button
+              onClick={props.onOpenProcedureSummary}
+              className="bg-indigo-950/40 hover:bg-indigo-900/60 text-indigo-300 border border-indigo-700/50 cursor-pointer font-bold"
+              title="Visualizar Resumo do Procedimento Anestésico"
+            >
+              <ClipboardList size={16} />
+              Resumo do Procedimento
+            </button>
+          )}
           {props.onSavePerspective && (
             <button
               onClick={props.onSavePerspective}

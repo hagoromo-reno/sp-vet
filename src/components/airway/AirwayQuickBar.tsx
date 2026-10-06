@@ -120,7 +120,7 @@ export const AirwayQuickBar: React.FC<AirwayQuickBarProps> = ({
             onClick={onQuickIntubate}
             className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 shadow-sm text-xs ${
               isApneic
-                ? 'bg-amber-600 hover:bg-amber-500 text-white animate-bounce'
+                ? 'bg-amber-600 hover:bg-amber-500 text-white'
                 : 'bg-emerald-700 hover:bg-emerald-600 text-white'
             }`}
           >

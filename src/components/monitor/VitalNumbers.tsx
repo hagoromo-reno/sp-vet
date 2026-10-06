@@ -211,7 +211,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
                 isAlarmSilenced
                   ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 animate-pulse shadow-sm shadow-amber-950/50'
                   : isCriticalAlarm || isWarningAlarm
-                  ? 'bg-red-950/60 border border-red-500 text-red-200 hover:bg-red-900/80 animate-bounce'
+                  ? 'bg-red-950/60 border border-red-500 text-red-200 hover:bg-red-900/80 shadow-sm shadow-red-950/50'
                   : 'bg-zinc-900 border border-zinc-700/60 text-zinc-400 hover:bg-zinc-800'
               }`}
               title={isAlarmSilenced ? `Alarmes pausados por mais ${silenceSec}s (clique para reativar)` : 'Pausar/Silenciar apitos de alarme por 120s'}
@@ -289,7 +289,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
           <div className="flex items-center space-x-2 truncate">
             <AlertTriangle
               className={`w-4 h-4 shrink-0 ${
-                isCriticalAlarm ? 'text-red-400 animate-bounce' : 'text-amber-400'
+                isCriticalAlarm ? 'text-red-400' : 'text-amber-400'
               }`}
             />
             <div className="truncate flex items-center gap-2">
@@ -312,7 +312,7 @@ export const VitalNumbers: React.FC<VitalNumbersProps> = ({
       {vitals.impendingArrestWarning && !vitals.isDead && !vitals.isCardiacArrest && (
         <div className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-red-950/95 via-red-900/80 to-red-950/95 border border-red-500 text-red-100 text-xs font-mono-code flex items-center justify-between animate-pulse shadow-xl shrink-0">
           <div className="flex items-center space-x-2 truncate">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 animate-bounce" />
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
             <div className="truncate">
               <span className="font-extrabold text-red-200 uppercase tracking-wide">
                 ⚠️ {vitals.impendingArrestWarning.headline}

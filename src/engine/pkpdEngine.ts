@@ -527,7 +527,24 @@ export class PKPDEngine {
     let triggeredArrestNow = false;
     let achievedROSCNow = false;
 
-    if (hemodynamics.isArrestTriggered && !isAlreadyArrested && !isAlreadyDead) {
+    // Check if death was declared by clinician/instructor
+    if (resuscitation.isDeathDeclared && !isAlreadyDead) {
+      isAlreadyDead = true;
+      deathTime = resuscitation.deathDeclaredSimTime ?? simTimeSeconds;
+      deathCause = arrestCause || 'Óbito declarado pela equipe de anestesiologia / ressuscitação';
+      isAlreadyArrested = true;
+      arrestType = 'asystole';
+    }
+
+    // Post-ROSC stabilization window: protects patient against instant re-arrest
+    // during the endogenous catecholamine surge / myocardial recovery phase
+    let postRoscGraceSec = biologicalState.resuscitation.postRoscStabilizationSeconds || 0;
+    if (postRoscGraceSec > 0) {
+      postRoscGraceSec = Math.max(0, postRoscGraceSec - dtSeconds);
+      biologicalState.resuscitation.postRoscStabilizationSeconds = postRoscGraceSec;
+    }
+
+    if (hemodynamics.isArrestTriggered && !isAlreadyArrested && !isAlreadyDead && postRoscGraceSec <= 0) {
       triggeredArrestNow = true;
       arrestType = hemodynamics.arrestType || 'ventricular_fibrillation';
       arrestCause = hemodynamics.arrestCause;
@@ -545,7 +562,7 @@ export class PKPDEngine {
       arrestCause = `Parada Cardiorrespiratória por Anóxia Miocárdica Aguda (${Math.round(hypoxiaSeconds)}s em hipóxia crítica)`;
     }
 
-    if (biologicalState.organPerfusion.cumulativeOxygenDebt > 0.92 && !isAlreadyArrested && !isAlreadyDead) {
+    if (biologicalState.organPerfusion.cumulativeOxygenDebt > 0.92 && !isAlreadyArrested && !isAlreadyDead && postRoscGraceSec <= 0) {
       triggeredArrestNow = true;
       arrestType = 'pea';
       arrestCause = 'Parada por falência de entrega sistêmica de oxigênio (baixo débito/anemia/hipoxemia prolongados)';
@@ -651,8 +668,11 @@ export class PKPDEngine {
         asystoleSeconds = 0;
         cprSeconds = 0;
         hypoxiaSeconds = 0;
-        ischemiaScore = 0.10; // CRITICAL: Reset ischemia so it does not immediately re-trigger arrest!
+        ischemiaScore = 0.05; // CRITICAL: Reset ischemia so it does not immediately re-trigger arrest!
         biologicalState.resuscitation.roscReadinessSeconds = 0;
+        // 90s post-ROSC stabilization grace window to prevent instant cyclic re-arrest
+        biologicalState.resuscitation.postRoscStabilizationSeconds = 90;
+        biologicalState.organPerfusion.cumulativeOxygenDebt = Math.min(0.20, biologicalState.organPerfusion.cumulativeOxygenDebt);
         previousCriticalTimers.severeBradycardiaSeconds = 0;
         previousCriticalTimers.severeTachycardiaSeconds = 0;
         previousCriticalTimers.profoundHypotensionSeconds = 0;
@@ -684,29 +704,29 @@ export class PKPDEngine {
     // ----------------------------------------------------
     let impendingArrestWarning: VitalSigns['impendingArrestWarning'] = undefined;
 
-    if (!isAlreadyDead && !isAlreadyArrested) {
-      if (hemodynamics.criticalEventTimers.profoundHypotensionSeconds >= 2.5) {
-        const remaining = Math.max(1, Math.round(18 - hemodynamics.criticalEventTimers.profoundHypotensionSeconds));
+    if (!isAlreadyDead && !isAlreadyArrested && postRoscGraceSec <= 0) {
+      if (hemodynamics.criticalEventTimers.profoundHypotensionSeconds >= 3.0) {
+        const remaining = Math.max(1, Math.round(50 - hemodynamics.criticalEventTimers.profoundHypotensionSeconds));
         impendingArrestWarning = {
           type: 'hypotension',
           headline: 'COLAPSO CIRCULATÓRIO IMINENTE · CHOQUE DESCOMPENSADO',
           details: `Pressão Arterial Média em nível crítico (${Math.round(hemodynamics.meanArterialPressure)} mmHg) há ${Math.round(hemodynamics.criticalEventTimers.profoundHypotensionSeconds)}s. Risco de AESP em ~${remaining}s!`,
           secondsRemainingEstimate: remaining,
           recommendedAction: 'Reduzir ou suspender inalatório, infundir bólus volêmico e aplicar Efedrina (0.1 mg/kg) ou Adrenalina (0.01 mg/kg IV).',
-          urgency: hemodynamics.criticalEventTimers.profoundHypotensionSeconds >= 9 ? 'critical' : 'warning',
+          urgency: hemodynamics.criticalEventTimers.profoundHypotensionSeconds >= 25 ? 'critical' : 'warning',
         };
-      } else if (hemodynamics.criticalEventTimers.severeBradycardiaSeconds >= 2.5) {
-        const remaining = Math.max(1, Math.round(12 - hemodynamics.criticalEventTimers.severeBradycardiaSeconds));
+      } else if (hemodynamics.criticalEventTimers.severeBradycardiaSeconds >= 3.0) {
+        const remaining = Math.max(1, Math.round(24 - hemodynamics.criticalEventTimers.severeBradycardiaSeconds));
         impendingArrestWarning = {
           type: 'bradycardia',
           headline: 'BRADICARDIA CRÍTICA EXTREMA · RISCO DE ASSISTOLIA',
           details: `Frequência Cardíaca em colapso (${Math.round(hemodynamics.heartRate)} bpm) há ${Math.round(hemodynamics.criticalEventTimers.severeBradycardiaSeconds)}s. Risco de assistolia terminal em ~${remaining}s!`,
           secondsRemainingEstimate: remaining,
           recommendedAction: 'Administrar Atropina 0.03 mg/kg IV; se houver agonista alfa-2 ativo, aplicar Atipamezol imediatamente.',
-          urgency: hemodynamics.criticalEventTimers.severeBradycardiaSeconds >= 6 ? 'critical' : 'warning',
+          urgency: hemodynamics.criticalEventTimers.severeBradycardiaSeconds >= 12 ? 'critical' : 'warning',
         };
-      } else if (hemodynamics.criticalEventTimers.severeTachycardiaSeconds >= 2.5) {
-        const remaining = Math.max(1, Math.round(10 - hemodynamics.criticalEventTimers.severeTachycardiaSeconds));
+      } else if (hemodynamics.criticalEventTimers.severeTachycardiaSeconds >= 3.0) {
+        const remaining = Math.max(1, Math.round(18 - hemodynamics.criticalEventTimers.severeTachycardiaSeconds));
         impendingArrestWarning = {
           type: 'tachycardia',
           headline: 'TAQUICARDIA MALIGNA · RISCO DE FIBRILAÇÃO VENTRICULAR',

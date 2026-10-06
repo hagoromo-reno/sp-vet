@@ -25,6 +25,30 @@ export interface ProfessionalPerspectiveDto {
   telemetryData?: any;
 }
 
+export interface ProcedureLogDto {
+  id?: string;
+  userId?: string;
+  userEmail: string;
+  studentName: string;
+  sessionDeviceId?: string;
+  patientId?: string;
+  patientName?: string;
+  species?: string;
+  procedureName?: string;
+  durationSeconds?: number;
+  outcome?: 'ongoing' | 'finished' | 'death' | 'restarted' | 'switched_patient';
+  deathCause?: string | null;
+  finalHr?: number | null;
+  finalMap?: number | null;
+  finalSpo2?: number | null;
+  finalEtco2?: number | null;
+  finalRr?: number | null;
+  administeredDrugs?: any[];
+  vitalRecords?: any[];
+  eventsSummary?: any[];
+  clinicalNotes?: string | null;
+}
+
 export class AdminService {
   /**
    * Métricas do painel administrativo
@@ -499,4 +523,135 @@ export class AdminService {
     }
     return { ok: true };
   }
+
+  // =========================================================================
+  // GESTÃO DE LOGS DE PROCEDIMENTO (Atividades dos Alunos & Execuções Clínicas)
+  // =========================================================================
+
+  private static inMemoryProcedureLogs: any[] = [];
+
+  static async saveProcedureLog(dto: ProcedureLogDto) {
+    const id = dto.id || randomUUID();
+    try {
+      const res = await query(
+        `INSERT INTO procedure_logs 
+          (id, user_id, user_email, student_name, session_device_id, patient_id, patient_name,
+           species, procedure_name, duration_seconds, outcome, death_cause,
+           final_hr, final_map, final_spo2, final_etco2, final_rr,
+           administered_drugs, vital_records, events_summary, clinical_notes, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
+         ON CONFLICT (id) DO UPDATE SET
+           student_name = EXCLUDED.student_name,
+           duration_seconds = EXCLUDED.duration_seconds,
+           outcome = EXCLUDED.outcome,
+           death_cause = EXCLUDED.death_cause,
+           final_hr = EXCLUDED.final_hr,
+           final_map = EXCLUDED.final_map,
+           final_spo2 = EXCLUDED.final_spo2,
+           final_etco2 = EXCLUDED.final_etco2,
+           final_rr = EXCLUDED.final_rr,
+           administered_drugs = EXCLUDED.administered_drugs,
+           vital_records = EXCLUDED.vital_records,
+           events_summary = EXCLUDED.events_summary,
+           clinical_notes = EXCLUDED.clinical_notes,
+           updated_at = NOW()
+         RETURNING *;`,
+        [
+          id,
+          dto.userId || null,
+          dto.userEmail,
+          dto.studentName,
+          dto.sessionDeviceId || '',
+          dto.patientId || '',
+          dto.patientName || '',
+          dto.species || '',
+          dto.procedureName || '',
+          dto.durationSeconds ?? 0,
+          dto.outcome || 'finished',
+          dto.deathCause || null,
+          dto.finalHr ?? null,
+          dto.finalMap ?? null,
+          dto.finalSpo2 ?? null,
+          dto.finalEtco2 ?? null,
+          dto.finalRr ?? null,
+          JSON.stringify(dto.administeredDrugs || []),
+          JSON.stringify(dto.vitalRecords || []),
+          JSON.stringify(dto.eventsSummary || []),
+          dto.clinicalNotes || null,
+        ]
+      );
+      return res.rows[0];
+    } catch (e) {
+      const record = {
+        ...dto,
+        id,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      this.inMemoryProcedureLogs = [record, ...this.inMemoryProcedureLogs.filter((l) => l.id !== id)];
+      return record;
+    }
+  }
+
+  static async listProcedureLogs(options: {
+    userId?: string;
+    studentName?: string;
+    isAdmin: boolean;
+    limit?: number;
+  }) {
+    const limit = options.limit || 100;
+    try {
+      if (options.isAdmin) {
+        if (options.studentName) {
+          const res = await query(
+            `SELECT * FROM procedure_logs WHERE LOWER(student_name) LIKE LOWER($1) ORDER BY created_at DESC LIMIT $2;`,
+            [`%${options.studentName}%`, limit]
+          );
+          return res.rows;
+        }
+        const res = await query(
+          `SELECT * FROM procedure_logs ORDER BY created_at DESC LIMIT $1;`,
+          [limit]
+        );
+        return res.rows;
+      }
+
+      if (options.studentName) {
+        const res = await query(
+          `SELECT * FROM procedure_logs WHERE (user_id = $1 OR user_id IS NULL) AND LOWER(student_name) = LOWER($2) ORDER BY created_at DESC LIMIT $3;`,
+          [options.userId, options.studentName, limit]
+        );
+        return res.rows;
+      }
+
+      const res = await query(
+        `SELECT * FROM procedure_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2;`,
+        [options.userId, limit]
+      );
+      return res.rows;
+    } catch (e) {
+      let filtered = [...this.inMemoryProcedureLogs];
+      if (!options.isAdmin && options.userId) {
+        filtered = filtered.filter((l) => l.userId === options.userId || l.user_id === options.userId);
+      }
+      if (options.studentName) {
+        filtered = filtered.filter((l) => (l.studentName || l.student_name || '').toLowerCase().includes(options.studentName!.toLowerCase()));
+      }
+      return filtered.slice(0, limit);
+    }
+  }
+
+  static async deleteProcedureLog(id: string, userId: string, isAdmin: boolean) {
+    try {
+      if (isAdmin) {
+        await query(`DELETE FROM procedure_logs WHERE id = $1;`, [id]);
+      } else {
+        await query(`DELETE FROM procedure_logs WHERE id = $1 AND user_id = $2;`, [id, userId]);
+      }
+    } catch (e) {
+      this.inMemoryProcedureLogs = this.inMemoryProcedureLogs.filter((l) => l.id !== id);
+    }
+    return { ok: true };
+  }
 }
+

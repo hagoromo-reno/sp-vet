@@ -36,12 +36,12 @@ export const EmergencyFeedbackToast: React.FC<EmergencyFeedbackToastProps> = ({
   const isAirway = item.type === 'airway';
 
   const borderClass = isRosc
-    ? 'border-emerald-500 bg-emerald-950/90 text-white shadow-emerald-950/80 animate-pulse'
+    ? 'border-emerald-500 bg-emerald-950/95 text-white shadow-emerald-950/80'
     : isDanger
-    ? 'border-red-500 bg-red-950/90 text-white shadow-red-950/80 animate-bounce'
+    ? 'border-red-500 bg-red-950/95 text-white shadow-red-950/80'
     : isAirway
-    ? 'border-cyan-500 bg-cyan-950/90 text-white shadow-cyan-950/80'
-    : 'border-amber-500 bg-amber-950/90 text-white shadow-amber-950/80';
+    ? 'border-cyan-500 bg-cyan-950/95 text-white shadow-cyan-950/80'
+    : 'border-amber-500 bg-amber-950/95 text-white shadow-amber-950/80';
 
   const icon = isRosc ? (
     <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />

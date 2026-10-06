@@ -34,7 +34,7 @@ export const DrugInteractionsAlertBanner: React.FC<DrugInteractionsAlertBannerPr
           >
             <div className="mt-0.5 shrink-0">
               {isLethal ? (
-                <AlertOctagon className="w-4 h-4 text-red-400 animate-bounce" />
+                <AlertOctagon className="w-4 h-4 text-red-400" />
               ) : isDanger ? (
                 <AlertTriangle className="w-4 h-4 text-amber-400" />
               ) : (

@@ -72,10 +72,28 @@ memoryUsers.set('demo@spvet.com', {
   last_login_at: null,
 });
 
+const defaultStudentPassHash = hashPassword('melhoresalunos');
+memoryUsers.set('alunos@sopet.app', {
+  id: '00000000-0000-0000-0000-000000000003',
+  name: 'Turma de Alunos',
+  email: 'alunos@sopet.app',
+  password_hash: defaultStudentPassHash,
+  role: 'student',
+  subscription_status: 'active',
+  subscription_expires_at: null,
+  trial_days: 3650,
+  max_concurrent_sessions: 999,
+  is_blocked: false,
+  is_lifetime: true,
+  created_at: new Date().toISOString(),
+  last_login_at: null,
+});
+
 export class SessionManager {
   /**
    * Autentica usuário e impõe a política de SESSÃO ÚNICA (bloqueio de conexão concorrente).
-   * Caso o usuário já tenha sessão aberta em outro dispositivo, ela é imediatamente invalidada.
+   * Usuários especiais da turma (role 'student' ou max_concurrent_sessions > 1) podem
+   * conectar múltiplos alunos simultaneamente.
    */
   static async login(
     email: string,
@@ -107,15 +125,20 @@ export class SessionManager {
         // Valida status da assinatura
         SessionManager.checkSubscriptionStatus(row);
 
-        // IMPÕE CONEXÃO NÃO-CONCORRENTE: Revoga TODAS as sessões ativas anteriores deste usuário!
-        await query(
-          `UPDATE user_sessions 
-           SET is_active = FALSE, revoked_reason = 'concurrency_limit' 
-           WHERE user_id = $1 AND is_active = TRUE;`,
-          [row.id]
-        );
+        // IMPÕE CONEXÃO NÃO-CONCORRENTE apenas para contas individuais:
+        // Contas da turma de alunos (role 'student') ou com sessões múltiplas permitidas
+        // não derrubam os colegas!
+        const isMultiSessionAllowed = row.role === 'student' || (row.max_concurrent_sessions && row.max_concurrent_sessions > 1);
+        if (!isMultiSessionAllowed) {
+          await query(
+            `UPDATE user_sessions 
+             SET is_active = FALSE, revoked_reason = 'concurrency_limit' 
+             WHERE user_id = $1 AND is_active = TRUE;`,
+            [row.id]
+          );
+        }
 
-        // Cria nova sessão ativa exclusiva
+        // Cria nova sessão ativa
         const token = generateSessionToken();
         const sessionId = randomUUID();
         await query(
@@ -150,11 +173,14 @@ export class SessionManager {
     }
     SessionManager.checkSubscriptionStatus(memUser);
 
-    // Revoga sessões em memória para este usuário
-    for (const [t, s] of memorySessions.entries()) {
-      if (s.user_id === memUser.id && s.is_active) {
-        s.is_active = false;
-        s.revoked_reason = 'concurrency_limit';
+    // Revoga sessões em memória para este usuário se não for conta de turma
+    const isMultiSessionAllowed = memUser.role === 'student' || (memUser.max_concurrent_sessions && memUser.max_concurrent_sessions > 1);
+    if (!isMultiSessionAllowed) {
+      for (const [t, s] of memorySessions.entries()) {
+        if (s.user_id === memUser.id && s.is_active) {
+          s.is_active = false;
+          s.revoked_reason = 'concurrency_limit';
+        }
       }
     }
 
@@ -333,8 +359,8 @@ export class SessionManager {
     role: string;
     is_lifetime?: boolean;
   }): void {
-    // Admin tem livre acesso irrestrito
-    if (user.role === 'admin') return;
+    // Admin e Alunos de turma têm livre acesso irrestrito às simulações
+    if (user.role === 'admin' || user.role === 'student') return;
 
     // Usuário em processo de checkout/pagamento pendente: permite login para exibir tela de pagamento
     if (user.subscription_status === 'pending_payment') {

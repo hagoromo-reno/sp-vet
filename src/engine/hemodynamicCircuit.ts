@@ -178,14 +178,16 @@ export class HemodynamicCircuitEngine {
     }
 
     // Alpha-1 blockade and general anesthetics dilate the venous capacitance bed.
-    // This prevents the previous non-physiological rise in stroke volume after acepromazine.
-    const venousPooling =
-      Math.min(1, Math.abs(Math.min(0, receptors.alpha1Drive))) * 0.22 +
-      receptors.hypnoticEffect * 0.12 +
-      calibratedPressureDilation * 0.45 +
+    // Peripheral alpha-2 stimulation causes potent venoconstriction, mobilizing venous reserve and counteracting pooling.
+    const alpha2Venoconstriction = Math.max(0, receptors.alpha2Drive) * 0.22;
+    const grossVenousPooling =
+      Math.min(1, Math.abs(Math.min(0, receptors.alpha1Drive))) * 0.20 +
+      receptors.hypnoticEffect * 0.10 +
+      calibratedPressureDilation * 0.35 +
       (receptors.directVenodilatorEffect ?? 0) * 0.12 +
-      acuteVasodilation * 0.25;
-    bloodVolumeRatio = Math.max(0.3, bloodVolumeRatio - venousPooling);
+      acuteVasodilation * 0.20;
+    const netVenousPooling = Math.max(0, grossVenousPooling - alpha2Venoconstriction);
+    bloodVolumeRatio = Math.max(0.35, bloodVolumeRatio - netVenousPooling);
     bloodVolumeRatio = Math.min(1.4, bloodVolumeRatio + receptors.volumeExpansion * 0.28);
 
     // Effective circulating preload
@@ -263,8 +265,8 @@ export class HemodynamicCircuitEngine {
       asaReserveFactor = 0.75;
       asaBaroreflexFactor = 0.65;
     } else if (baseAsa === 'IV' || baseAsa === 'V') {
-      asaReserveFactor = 0.52;
-      asaBaroreflexFactor = 0.40;
+      asaReserveFactor = 0.46;
+      asaBaroreflexFactor = 0.38;
     }
 
     inotropyFactor *= asaReserveFactor * coupling.contractilityMultiplier;
@@ -276,28 +278,26 @@ export class HemodynamicCircuitEngine {
       inotropyFactor = Math.max(0.1, inotropyFactor - receptors.naVBlockade * 0.70);
     }
 
-    // Propofol and acute induction myocardial contractility depression
-    if (receptors.propofolSiteOccupancy > 0.15) {
-      inotropyFactor = Math.max(0.35, inotropyFactor - (receptors.propofolSiteOccupancy - 0.15) * 0.22);
-    }
-    if (receptors.acuteBolusHypotension > 0.15) {
-      inotropyFactor = Math.max(0.35, inotropyFactor - (receptors.acuteBolusHypotension - 0.15) * 0.20);
-    }
+    // Propofol and acute induction myocardial contractility modulation (realistic ~12-20% transient blunting)
+    const propofolInotropyDrop = (receptors.propofolSiteOccupancy > 0.15 ? (receptors.propofolSiteOccupancy - 0.15) * 0.12 : 0)
+      + (receptors.acuteBolusHypotension > 0.15 ? (receptors.acuteBolusHypotension - 0.15) * 0.10 : 0);
+    inotropyFactor = Math.max(0.20, inotropyFactor - propofolInotropyDrop);
 
     const inotropicStateEmax = Number(inotropyFactor.toFixed(2));
 
     // ----------------------------------------------------
     // 4. STROKE VOLUME (SV) DYNAMICS
     // ----------------------------------------------------
-    // SV = (Preload * Inotropy) / (1 + AfterloadRatio * 0.5)
+    // In healthy ventricles, increased peripheral resistance (afterload) raises blood pressure
+    // and only mildly impedes ejection; failing ventricles (DCM) suffer severe afterload mismatch.
     const afterloadRatio = SVR / baselineSVR;
-    let computedSV = (preloadEDV * 0.65 * inotropyFactor) / (0.4 + afterloadRatio * 0.6);
+    let computedSV = (preloadEDV * 0.65 * inotropyFactor) / (0.65 + afterloadRatio * 0.35);
     // Em cardiopatas (DCM/ICC), a elevação de pós-carga por alfa-2 descompensa severamente o ventrículo insuficiente
     if (patient.pathologyConditions.cardiacFailureDCM && receptors.alpha2Drive > 0.15) {
       const dcmAfterloadPenalty = 1 / (1 + receptors.alpha2Drive * 1.5);
       computedSV *= dcmAfterloadPenalty;
     }
-    computedSV = Math.max(baselineSV * 0.12, Math.min(baselineSV * 2.2, computedSV));
+    computedSV = Math.max(baselineSV * 0.15, Math.min(baselineSV * 2.2, computedSV));
     let strokeVolumeMl = computedSV;
 
     // ----------------------------------------------------
@@ -331,12 +331,17 @@ export class HemodynamicCircuitEngine {
     const vagolyticReserve = (0.20 + speciesConfig.restingVagalTone * 0.40)
       * Math.min(1, speciesInfo.normalVitals.hrTypical / Math.max(1, baseHR))
       * Math.max(0.35, 1 - Math.max(0, receptors.beta1Drive) * 0.5 - nociceptiveStressLevel * 0.4);
-    autonomicHRMultiplier -= Math.max(0, receptors.m2Drive) * 0.50;
     autonomicHRMultiplier += Math.max(0, -receptors.m2Drive) * vagolyticReserve;
-    autonomicHRMultiplier -= receptors.alpha2Drive * 0.40;
     autonomicHRMultiplier += receptors.directHeartRateEffect * 0.32;
-    autonomicHRMultiplier -= receptors.acuteBolusBradycardia * 0.28;
     autonomicHRMultiplier -= receptors.hyperkalemicCardiotoxicity * 0.30;
+
+    // Sub-additive Gi/GIRK nodal hyperpolarization (M2 + Alpha-2 + Acute Bolus reflex):
+    // Preserves intrinsic sinoatrial pacemaker escape against non-physiological total collapse
+    const rawNegativeChronotropy = Math.max(0, receptors.m2Drive) * 0.48
+      + Math.max(0, receptors.alpha2Drive) * 0.42
+      + receptors.acuteBolusBradycardia * 0.22;
+    const saturatingNegativeDrive = Math.min(0.55, rawNegativeChronotropy * (1 - rawNegativeChronotropy * 0.20));
+    autonomicHRMultiplier -= saturatingNegativeDrive;
     const nodalDeltaBpm = baseHR * (autonomicHRMultiplier - 1);
     const systemicDeltaBpm = baseHR * autonomicHRMultiplier * (coupling.heartRateMultiplier - 1);
     autonomicHRMultiplier *= coupling.heartRateMultiplier;
@@ -355,7 +360,7 @@ export class HemodynamicCircuitEngine {
     // attenuating chronotropic breakthrough during painful stimuli
     if (nociceptiveStressLevel > 0.01) {
       const nodalSympatholyticBraking = Math.max(0.35, 1.0 - Math.max(0, receptors.alpha2Drive) * 0.75);
-      autonomicHRMultiplier += nociceptiveStressLevel * 0.36 * nodalSympatholyticBraking
+      autonomicHRMultiplier += nociceptiveStressLevel * 0.44 * nodalSympatholyticBraking
         * Math.max(0.25, catecholamineReserve);
     }
 
@@ -401,11 +406,11 @@ export class HemodynamicCircuitEngine {
     const effectiveHR = prevCoreHR > 0 ? (prevCoreHR + (targetHR - prevCoreHR) * hrSmoothingAlpha) : targetHR;
     const finalHR = Number((effectiveHR + (resuscitation.isCPRActive ? 0 : variations.hrVariationBpm)).toFixed(3));
 
-    // Longer diastole can partly restore SV during vagal/sympatholytic bradycardia.
-    // It cannot manufacture preload in hemorrhage or normalize a failing ventricle.
+    // Longer diastole during vagal/sympatholytic bradycardia enhances ventricular filling
+    // and preserves cardiac output via Frank-Starling mechanism in healthy hearts.
     if (effectiveHR > 0 && effectiveHR < baseHR) {
-      const fillingReserve = Math.min(1, Math.max(0, (bloodVolumeRatio - 0.45) / 0.55));
-      strokeVolumeMl *= 1 + Math.min(0.45, (baseHR / effectiveHR - 1) * 0.6) * fillingReserve;
+      const fillingReserve = Math.min(1, Math.max(0, (bloodVolumeRatio - 0.35) / 0.65)) * asaReserveFactor;
+      strokeVolumeMl *= 1 + Math.min(0.70, (baseHR / effectiveHR - 1) * 0.65) * fillingReserve;
     }
     // Very high rates shorten diastole and reduce preload instead of increasing CO forever.
     if (effectiveHR > baseHR * 1.2) {
@@ -535,22 +540,22 @@ export class HemodynamicCircuitEngine {
     const criticalEventTimers = {
       severeBradycardiaSeconds: targetHR <= fatalBradyThreshold
         ? previousCriticalTimers.severeBradycardiaSeconds + dtSeconds
-        : Math.max(0, previousCriticalTimers.severeBradycardiaSeconds - dtSeconds * 2),
+        : Math.max(0, previousCriticalTimers.severeBradycardiaSeconds - dtSeconds * 3),
       severeTachycardiaSeconds: targetHR >= fatalTachyThreshold
         ? previousCriticalTimers.severeTachycardiaSeconds + dtSeconds
-        : Math.max(0, previousCriticalTimers.severeTachycardiaSeconds - dtSeconds * 2),
+        : Math.max(0, previousCriticalTimers.severeTachycardiaSeconds - dtSeconds * 3),
       profoundHypotensionSeconds: targetMAP < 20
         ? previousCriticalTimers.profoundHypotensionSeconds + dtSeconds
-        : Math.max(0, previousCriticalTimers.profoundHypotensionSeconds - dtSeconds * 2),
+        : Math.max(0, previousCriticalTimers.profoundHypotensionSeconds - dtSeconds * 3),
     };
 
-    if (criticalEventTimers.severeBradycardiaSeconds >= 12) {
+    if (criticalEventTimers.severeBradycardiaSeconds >= 24) {
       isArrestTriggered = true;
       arrestType = 'asystole';
       arrestCause = `Assistolia Terminal por Bradicardia Refratária (FC ${Math.round(targetHR)} bpm)`;
     }
 
-    if (criticalEventTimers.severeTachycardiaSeconds >= 10) {
+    if (criticalEventTimers.severeTachycardiaSeconds >= 18) {
       isArrestTriggered = true;
       arrestType = 'ventricular_fibrillation';
       arrestCause = `Taquiarritmia e Fibrilação Ventricular Terminal (FC crítica ${Math.round(targetHR)} bpm com perda de enchimento diastólico)`;
@@ -563,8 +568,9 @@ export class HemodynamicCircuitEngine {
       arrestCause = 'Dissociação Eletromecânica (AESP) por Colapso Miocárdico Fulminante por Lidocaína IV em Felino';
     }
 
-    // E. Terminal Hypotension Collapse
-    if (criticalEventTimers.profoundHypotensionSeconds >= 18) {
+    // E. Terminal Hypotension Collapse (realistic 50s duration of MAP < 20 mmHg allows clinical rescue)
+    const hypotensionThresholdSec = (patient.ageYears + (patient.ageMonths || 0) / 12) < 0.6 ? 35 : 50;
+    if (criticalEventTimers.profoundHypotensionSeconds >= hypotensionThresholdSec) {
       isArrestTriggered = true;
       arrestType = 'pea';
       arrestCause = 'Parada Cardíaca por Choque Irreversível e Ausência de Perfusão Sistêmica (PAM < 20 mmHg)';

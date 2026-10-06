@@ -13,6 +13,7 @@ interface CPCRResuscitationPanelProps {
   resuscitation: ResuscitationState;
   onUpdateResuscitation: (updates: Partial<ResuscitationState>) => void;
   onSelectEmergencyDrug: (drugId: string) => void;
+  onDeclareDeath?: () => void;
 }
 
 export const CPCRResuscitationPanel: React.FC<CPCRResuscitationPanelProps> = ({
@@ -22,6 +23,7 @@ export const CPCRResuscitationPanel: React.FC<CPCRResuscitationPanelProps> = ({
   resuscitation,
   onUpdateResuscitation,
   onSelectEmergencyDrug,
+  onDeclareDeath,
 }) => {
   const [cprCycleSeconds, setCprCycleSeconds] = useState(0);
   const [isChargingDefib, setIsChargingDefib] = useState(false);
@@ -105,12 +107,34 @@ export const CPCRResuscitationPanel: React.FC<CPCRResuscitationPanelProps> = ({
           <HeartPulse className="w-5 h-5 text-red-500 animate-pulse" />
           <h3 className="text-sm font-bold text-[#f5f5f5]">RESSUSCITAÇÃO CARDIOPULMONAR (CPCR · DIRETRIZES RECOVER)</h3>
         </div>
-        <div className="flex items-center space-x-2 text-xs font-mono-code">
-          <Clock className="w-3.5 h-3.5 text-[#888888]" />
-          <span className="text-[#888888]">Ciclo CPR (2 min):</span>
-          <strong className={cprCycleSeconds >= 120 ? 'text-red-400 animate-pulse' : 'text-[#f5f5f5]'}>
-            {formatCycleTime(cprCycleSeconds)}
-          </strong>
+        <div className="flex items-center space-x-3 text-xs font-mono-code">
+          <div className="flex items-center space-x-1.5">
+            <Clock className="w-3.5 h-3.5 text-[#888888]" />
+            <span className="text-[#888888]">Ciclo CPR:</span>
+            <strong className={cprCycleSeconds >= 120 ? 'text-red-400' : 'text-[#f5f5f5]'}>
+              {formatCycleTime(cprCycleSeconds)}
+            </strong>
+          </div>
+
+          {onDeclareDeath && !vitals.isDead && (
+            <button
+              onClick={() => {
+                if (window.confirm('Deseja realmente DECLARAR O ÓBITO do paciente? Os esforços de ressuscitação cardiopulmonar serão interrompidos e o evento será registrado.')) {
+                  onDeclareDeath();
+                }
+              }}
+              className="px-2.5 py-1 rounded bg-[#200b0c] hover:bg-[#381114] border border-red-700 hover:border-red-500 text-red-200 text-xs font-bold font-mono-code transition flex items-center space-x-1 shadow-md"
+              title="Encerrar manobras de RCP e declarar óbito biológico"
+            >
+              <span>💀 DECLARAR ÓBITO</span>
+            </button>
+          )}
+
+          {vitals.isDead && (
+            <span className="px-2 py-0.5 rounded bg-red-950/90 border border-red-600 text-red-200 text-xs font-bold font-mono-code">
+              💀 ÓBITO DECLARADO
+            </span>
+          )}
         </div>
       </div>
 
@@ -194,7 +218,7 @@ export const CPCRResuscitationPanel: React.FC<CPCRResuscitationPanelProps> = ({
               disabled={!resuscitation.isDefibrillatorArmed}
               className={`flex-1 py-2 px-2 rounded text-xs font-extrabold font-mono-code transition flex items-center justify-center space-x-1 shadow-lg ${
                 resuscitation.isDefibrillatorArmed
-                  ? 'bg-red-600 hover:bg-red-500 text-white animate-bounce shadow-red-950/60'
+                  ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-950/60'
                   : 'bg-[#141414] text-[#525252] border border-[#222222] cursor-not-allowed'
               }`}
             >

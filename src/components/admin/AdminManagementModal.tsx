@@ -24,7 +24,10 @@ import {
   Zap,
   MessageSquare,
   FolderHeart,
+  GraduationCap,
+  Eye,
 } from 'lucide-react';
+import { ProcedureSummaryModal, ProcedureLogData } from '../records/ProcedureSummaryModal';
 
 interface AdminManagementModalProps {
   isOpen: boolean;
@@ -33,7 +36,7 @@ interface AdminManagementModalProps {
 
 export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOpen, onClose }) => {
   const { token, user: currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'users' | 'sessions' | 'perspectives' | 'reviews' | 'patients' | 'metrics'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'sessions' | 'perspectives' | 'reviews' | 'patients' | 'student_logs' | 'metrics'>('users');
 
   // Metrics
   const [metrics, setMetrics] = useState<any>({
@@ -62,6 +65,12 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOp
 
   // Admin Patients list (Pacientes criados pelos Vets)
   const [adminPatients, setAdminPatients] = useState<any[]>([]);
+
+  // Student procedure logs (Atividades dos Alunos & Execuções Clínicas)
+  const [studentLogs, setStudentLogs] = useState<any[]>([]);
+  const [studentFilter, setStudentFilter] = useState('');
+  const [selectedStudentLog, setSelectedStudentLog] = useState<ProcedureLogData | null>(null);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
 
   // Create User Modal/Form state
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -163,6 +172,39 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOp
     } catch (e) {}
   }, [token]);
 
+  // Load student procedure logs
+  const loadStudentLogs = useCallback(async () => {
+    if (!token) return;
+    setIsLoadingLogs(true);
+    try {
+      const params = new URLSearchParams();
+      if (studentFilter) params.append('studentName', studentFilter);
+      const res = await fetch(`/api/admin/procedure-logs?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStudentLogs(data.logs || []);
+      }
+    } catch (e) {
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  }, [token, studentFilter]);
+
+  const handleDeleteStudentLog = async (id: string) => {
+    if (!confirm('Deseja excluir este log de procedimento do aluno?')) return;
+    try {
+      await fetch(`/api/admin/procedure-logs/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      loadStudentLogs();
+    } catch (e) {
+      alert('Erro ao excluir log.');
+    }
+  };
+
   const handleDeleteReview = async (id: string) => {
     if (!confirm('Deseja excluir esta revisão clínica do banco de dados?')) return;
     try {
@@ -197,8 +239,9 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOp
       loadPerspectives();
       loadReviews();
       loadAdminPatients();
+      loadStudentLogs();
     }
-  }, [isOpen, loadMetrics, loadUsers, loadSessions, loadPerspectives, loadReviews, loadAdminPatients]);
+  }, [isOpen, loadMetrics, loadUsers, loadSessions, loadPerspectives, loadReviews, loadAdminPatients, loadStudentLogs]);
 
   if (!isOpen) return null;
 
@@ -428,6 +471,18 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOp
           >
             <FolderHeart className="w-4 h-4" />
             <span>PACIENTES DOS VETS ({adminPatients.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('student_logs')}
+            className={`py-3 px-4 text-xs font-bold font-mono transition border-b-2 flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'student_logs'
+                ? 'border-indigo-500 text-indigo-400'
+                : 'border-transparent text-zinc-400 hover:text-white'
+            }`}
+          >
+            <GraduationCap className="w-4 h-4" />
+            <span>ATIVIDADES DOS ALUNOS ({studentLogs.length})</span>
           </button>
         </div>
 
@@ -1043,8 +1098,160 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({ isOp
               </div>
             </div>
           )}
+
+          {/* TAB 6: STUDENT ACTIVITY LOGS (Atividades dos Alunos & Resumos de Procedimento) */}
+          {activeTab === 'student_logs' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-1 max-w-md">
+                  <div className="relative w-full">
+                    <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={studentFilter}
+                      onChange={(e) => setStudentFilter(e.target.value)}
+                      placeholder="Filtrar por nome ou codinome do aluno..."
+                      className="w-full bg-[#12141f] border border-[#232538] rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={loadStudentLogs}
+                    className="p-2 rounded-xl bg-[#151724] hover:bg-[#1f2235] text-zinc-300 border border-[#282b42] text-xs transition cursor-pointer flex items-center gap-1.5"
+                    title="Atualizar lista de atividades"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLogs ? 'animate-spin' : ''}`} />
+                    <span>Atualizar</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-[#1e2030] rounded-xl overflow-hidden bg-[#0a0b12]">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-[#121422] text-zinc-400 border-b border-[#1e2030]">
+                    <tr>
+                      <th className="p-3">Data / Hora</th>
+                      <th className="p-3">Aluno / Codinome</th>
+                      <th className="p-3">Aparelho (ID)</th>
+                      <th className="p-3">Paciente</th>
+                      <th className="p-3">Duração</th>
+                      <th className="p-3">Desfecho</th>
+                      <th className="p-3 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#181a28] text-zinc-300">
+                    {studentLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-6 text-center text-zinc-500">
+                          Nenhum registro de atividade de aluno encontrado no banco de dados.
+                        </td>
+                      </tr>
+                    ) : (
+                      studentLogs.map((log) => {
+                        const isDeath = log.outcome === 'death';
+                        const isFinished = log.outcome === 'finished';
+                        const isRestarted = log.outcome === 'restarted';
+
+                        return (
+                          <tr key={log.id} className="hover:bg-[#121422]/50 transition">
+                            <td className="p-3 text-zinc-400">
+                              {new Date(log.created_at || log.createdAt).toLocaleString()}
+                            </td>
+                            <td className="p-3 font-bold text-white">
+                              <span className="flex items-center gap-1.5">
+                                <GraduationCap className="w-3.5 h-3.5 text-indigo-400" />
+                                {log.student_name || log.studentName}
+                              </span>
+                            </td>
+                            <td className="p-3 text-zinc-500 text-[11px]">
+                              {(log.session_device_id || log.sessionDeviceId || '-').slice(0, 12)}
+                            </td>
+                            <td className="p-3 text-white">
+                              {log.patient_name || log.patientName} ({log.species})
+                            </td>
+                            <td className="p-3 text-zinc-300">
+                              {Math.floor((log.duration_seconds || log.durationSeconds || 0) / 60)} min
+                            </td>
+                            <td className="p-3">
+                              {isDeath ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-300 border border-rose-800">
+                                  Óbito
+                                </span>
+                              ) : isFinished ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
+                                  Sobrevida
+                                </span>
+                              ) : isRestarted ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                                  Reiniciado
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-sky-950 text-sky-300 border border-sky-800">
+                                  Transição
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    setSelectedStudentLog({
+                                      id: log.id,
+                                      studentName: log.student_name || log.studentName,
+                                      sessionDeviceId: log.session_device_id || log.sessionDeviceId,
+                                      patientId: log.patient_id || log.patientId,
+                                      patientName: log.patient_name || log.patientName,
+                                      species: log.species,
+                                      procedureName: log.procedure_name || log.procedureName,
+                                      durationSeconds: log.duration_seconds || log.durationSeconds,
+                                      outcome: log.outcome,
+                                      deathCause: log.death_cause || log.deathCause,
+                                      finalHr: log.final_hr || log.finalHr,
+                                      finalMap: log.final_map || log.finalMap,
+                                      finalSpo2: log.final_spo2 || log.finalSpo2,
+                                      finalEtco2: log.final_etco2 || log.finalEtco2,
+                                      finalRr: log.final_rr || log.finalRr,
+                                      administeredDrugs: typeof log.administered_drugs === 'string' ? JSON.parse(log.administered_drugs) : (log.administered_drugs || log.administeredDrugs || []),
+                                      eventsSummary: typeof log.events_summary === 'string' ? JSON.parse(log.events_summary) : (log.events_summary || log.eventsSummary || []),
+                                      clinicalNotes: log.clinical_notes || log.clinicalNotes,
+                                      createdAt: log.created_at || log.createdAt,
+                                    });
+                                  }}
+                                  className="px-2 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition"
+                                  title="Ver Resumo do Procedimento"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>Ver Resumo</span>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteStudentLog(log.id)}
+                                  className="p-1 rounded bg-rose-950/40 hover:bg-rose-900 text-rose-400 border border-rose-800/40 transition cursor-pointer"
+                                  title="Excluir log"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Modal para Visualização Completa do Resumo do Aluno */}
+      <ProcedureSummaryModal
+        isOpen={!!selectedStudentLog}
+        onClose={() => setSelectedStudentLog(null)}
+        data={selectedStudentLog}
+      />
     </div>
   );
 };

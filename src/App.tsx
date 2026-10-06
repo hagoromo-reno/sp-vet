@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { SimulationHeader, WORKSTATIONS, WorkstationId } from './components/SimulationHeader';
 import { ClinicalSnapshot } from './components/monitor/ClinicalSnapshot';
 import {
@@ -62,6 +62,9 @@ import { SavePerspectiveModal } from './components/records/SavePerspectiveModal'
 import { AdminMonitorOverrideModal } from './components/monitor/AdminMonitorOverrideModal';
 import { applyAdminMonitorOverrides } from './engine/adminMonitorProfile';
 import { AdminMonitorOverrides, DEFAULT_MONITOR_OVERRIDES } from './types/simulator';
+import { getStudentName, getDeviceId, setStudentName } from './utils/studentDevice';
+import { StudentIdentificationModal } from './components/auth/StudentIdentificationModal';
+import { ProcedureSummaryModal, ProcedureLogData } from './components/records/ProcedureSummaryModal';
 import {
   Activity,
   Syringe,
@@ -73,9 +76,22 @@ import {
 } from 'lucide-react';
 
 function SimulatorApp() {
-  const { isAuthenticated, isPendingPayment, isLoading } = useAuth();
+  const { isAuthenticated, isPendingPayment, isLoading, token, user } = useAuth();
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isSavePerspectiveModalOpen, setIsSavePerspectiveModalOpen] = useState(false);
+
+  // Student Identification & Procedure Logs
+  const [studentName, setStudentNameState] = useState<string>(() => getStudentName());
+  const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
+  const [procedureSummaryData, setProcedureSummaryData] = useState<ProcedureLogData | null>(null);
+  const [isProcedureSummaryModalOpen, setIsProcedureSummaryModalOpen] = useState(false);
+
+  // Se o usuário logado for 'student' (turma compartilhada) e ainda não tiver informado codinome neste aparelho
+  useEffect(() => {
+    if (isAuthenticated && user?.role === 'student' && !studentName) {
+      setIsStudentModalOpen(true);
+    }
+  }, [isAuthenticated, user?.role, studentName]);
 
   // Guard Audio and Alarms against unauthenticated or pending payment state
   useEffect(() => {
@@ -249,14 +265,80 @@ function SimulatorApp() {
     return applyAdminMonitorOverrides(vitals, adminMonitorOverrides);
   }, [vitals, adminMonitorOverrides]);
 
-  // Auto-open death report on transition to dead
+  // Record Procedure Log & Display Resumo do Procedimento
+  const recordProcedureLog = useCallback(async (
+    outcome: 'death' | 'finished' | 'restarted' | 'switched_patient' | 'ongoing',
+    deathCause?: string | null,
+    notes?: string
+  ) => {
+    const effectiveStudent = studentName || user?.name || 'Aluno';
+    const deviceId = getDeviceId();
+    const summaryData: ProcedureLogData = {
+      studentName: effectiveStudent,
+      sessionDeviceId: deviceId,
+      patientId: patient.id,
+      patientName: patient.name,
+      species: patient.species,
+      weightKg: patient.weightKg,
+      asa: patient.asa,
+      procedureName: patient.surgicalProcedure || activeSurgicalProcedure?.name || patient.scenarioTitle || 'Procedimento Anestésico',
+      durationSeconds: Math.round(simTimeSeconds),
+      outcome,
+      deathCause: deathCause || (outcome === 'death' ? vitals.deathCause || 'Óbito declarado / Parada cardiorrespiratória' : null),
+      finalHr: Math.round(vitals.heartRate),
+      finalMap: Math.round(vitals.meanArterialPressure),
+      finalSpo2: Math.round(vitals.pulseOximetrySpO2),
+      finalEtco2: Number(vitals.etCO2.toFixed(1)),
+      finalRr: Math.round(vitals.respiratoryRate),
+      administeredDrugs: activeDoses.map((d) => ({
+        name: d.drugName,
+        dosePerKg: d.dosePerKg,
+        doseUnit: d.doseUnit,
+        route: d.route,
+        simTimeSec: d.administeredAtSimTime,
+        isCRI: d.isCRI,
+        volumeMl: d.volumeMl,
+      })),
+      eventsSummary: eventLogs.slice(-20).map((e) => ({
+        id: e.id,
+        simTimeSec: e.simTimeSeconds,
+        type: e.type,
+        message: e.message,
+        severity: e.severity,
+      })),
+      clinicalNotes: notes || '',
+      createdAt: new Date().toISOString(),
+    };
+
+    setProcedureSummaryData(summaryData);
+    setIsProcedureSummaryModalOpen(true);
+
+    if (token) {
+      try {
+        await fetch('/api/procedures/log', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(summaryData),
+        });
+      } catch (err) {
+        console.warn('Falha ao registrar log no banco de dados:', err);
+      }
+    }
+    return summaryData;
+  }, [studentName, user, patient, activeSurgicalProcedure, simTimeSeconds, vitals, activeDoses, eventLogs, token]);
+
+  // Auto-open death report and procedure summary on transition to dead
   useEffect(() => {
     if (vitals.isDead && !prevDeadStateRef.current) {
       setIsDeathModalOpen(true);
       setIsSimPaused(true);
+      recordProcedureLog('death', vitals.deathCause || 'Parada cardíaca irreversível / Óbito biológico');
     }
     prevDeadStateRef.current = vitals.isDead;
-  }, [vitals.isDead]);
+  }, [vitals.isDead, recordProcedureLog]);
 
   // Every transient feedback is also retained in the occurrence center.
   useEffect(() => {
@@ -411,10 +493,16 @@ function SimulatorApp() {
 
       // Check ROSC transition (Return of Spontaneous Circulation)
       if (prevArrestStateRef.current && !newVitals.isCardiacArrest && !newVitals.isDead) {
+        setResuscitation((prev) => ({
+          ...prev,
+          isCPRActive: false,
+          isCPRVentilationActive: false,
+          compressionsPerMin: 0,
+        }));
         setFeedbackToast({
           id: `rosc_${Date.now()}`,
           title: 'RETORNO DA CIRCULAÇÃO ESPONTÂNEA (ROSC)!',
-          message: `Ritmo sinusal restabelecido! Pico de EtCO2 detectado (${newVitals.etCO2} mmHg).`,
+          message: `Ritmo sinusal restabelecido! Pico de EtCO2 detectado (${newVitals.etCO2} mmHg). Interromper compressões.`,
           type: 'rosc',
         });
         setEventLogs((prev) => [
@@ -424,7 +512,7 @@ function SimulatorApp() {
             simTimeSeconds: newSimTime,
             realTimestamp: new Date().toLocaleTimeString(),
             type: 'emergency',
-            message: 'ROSC ALCANÇADO COM SUCESSO! Ritmo sinusal restabelecido.',
+            message: 'ROSC ALCANÇADO COM SUCESSO! Compressões interrompidas.',
             details: `FC: ${newVitals.heartRate} bpm · PAM: ${newVitals.meanArterialPressure} mmHg · EtCO2: ${newVitals.etCO2} mmHg`,
             severity: 'success',
           },
@@ -597,6 +685,9 @@ function SimulatorApp() {
 
   const handleResetSimulation = () => {
     AudioSynthesizer.stopAlarmPlayback();
+    if (simTimeSeconds > 5 || activeDoses.length > 0) {
+      recordProcedureLog('restarted');
+    }
     resetSimulationForPatient(patient);
   };
 
@@ -751,8 +842,61 @@ function SimulatorApp() {
     });
   };
 
+  // DECLARE DEATH
+  const handleDeclareDeath = (reason?: string) => {
+    const finalReason = reason || 'Óbito declarado pela equipe de anestesiologia / ressuscitação.';
+    recordProcedureLog('death', finalReason);
+    setResuscitation((prev) => ({
+      ...prev,
+      isCPRActive: false,
+      isCPRVentilationActive: false,
+      isDefibrillatorArmed: false,
+      defibrillatorChargedJoules: 0,
+      isDeathDeclared: true,
+      deathDeclaredSimTime: simTimeSeconds,
+    }));
+    setVitals((prev) => ({
+      ...prev,
+      isDead: true,
+      deathTimeSeconds: simTimeSeconds,
+      deathCause: finalReason,
+      isCardiacArrest: true,
+      cardiacArrestType: 'asystole',
+      heartRate: 0,
+      respiratoryRate: 0,
+      systolicBP: 0,
+      diastolicBP: 0,
+      meanArterialPressure: 0,
+      pulseOximetrySpO2: 0,
+      etCO2: 0,
+      capnogramType: 'cardiac_arrest_flat',
+    }));
+    setEventLogs((prev) => [
+      ...prev,
+      {
+        id: `death_${Date.now()}`,
+        simTimeSeconds,
+        realTimestamp: new Date().toLocaleTimeString(),
+        type: 'emergency',
+        message: 'Constatação e Declaração de Óbito.',
+        details: finalReason,
+        severity: 'danger',
+      },
+    ]);
+    setFeedbackToast({
+      id: `death_toast_${Date.now()}`,
+      title: 'ÓBITO DECLARADO',
+      message: 'Esforços de ressuscitação encerrados. Registro arquivado.',
+      type: 'danger',
+      severity: 'crítico',
+    });
+  };
+
   // CHANGE PATIENT / SCENARIO
   const handleSelectScenario = (newPatient: PatientProfile) => {
+    if (simTimeSeconds > 5 || activeDoses.length > 0) {
+      recordProcedureLog('switched_patient');
+    }
     setPatient(newPatient);
     setIsScenarioModalOpen(false);
     resetSimulationForPatient(newPatient);
@@ -1023,6 +1167,15 @@ function SimulatorApp() {
         onOccurrences={() => setIsOccurrenceCenterOpen(true)} onEmergency={() => selectWorkstation('emergency_cpr')}
         onAdminPanel={() => setIsAdminPanelOpen(true)}
         onSavePerspective={() => setIsSavePerspectiveModalOpen(true)}
+        studentName={studentName}
+        onOpenStudentModal={() => setIsStudentModalOpen(true)}
+        onOpenProcedureSummary={() => {
+          if (!procedureSummaryData || !isSimPaused) {
+            recordProcedureLog(vitals.isDead ? 'death' : 'ongoing');
+          } else {
+            setIsProcedureSummaryModalOpen(true);
+          }
+        }}
       />
 
       <div className="review-access"><button className="ui-button" onClick={openExpertReview}>Revisão por anestesiologista</button><span>{recording.storageError || (recording.savedAt ? `Rodada salva neste dispositivo às ${recording.savedAt}` : 'Preparando registro da rodada…')}</span>{recording.storageError && <button className="ui-button" onClick={() => downloadRecord(JSON.stringify(recording.recorder.current!.run, null, 2), `resgate-${recording.recorder.current!.run.id}.json`)}>Exportar cópia agora</button>}</div>
@@ -1231,6 +1384,7 @@ function SimulatorApp() {
                 resuscitation={resuscitation}
                 onUpdateResuscitation={(updates) => setResuscitation((prev) => ({ ...prev, ...updates }))}
                 onSelectEmergencyDrug={handleSelectEmergencyDrug}
+                onDeclareDeath={handleDeclareDeath}
               />
             )}
 
@@ -1359,6 +1513,27 @@ function SimulatorApp() {
         onClose={() => setIsAdminMonitorModalOpen(false)}
         overrides={adminMonitorOverrides}
         onUpdateOverrides={setAdminMonitorOverrides}
+      />
+
+      {/* 15. STUDENT IDENTIFICATION MODAL (Cookies por Aparelho) */}
+      <StudentIdentificationModal
+        isOpen={isStudentModalOpen}
+        onClose={() => setIsStudentModalOpen(false)}
+        onSaved={(newName) => {
+          setStudentNameState(newName);
+          setStudentName(newName);
+        }}
+        canDismiss={!!studentName}
+      />
+
+      {/* 16. RESUMO DO PROCEDIMENTO (Óbito, Reinício, Troca de Paciente ou Consulta) */}
+      <ProcedureSummaryModal
+        isOpen={isProcedureSummaryModalOpen}
+        onClose={() => setIsProcedureSummaryModalOpen(false)}
+        data={procedureSummaryData}
+        onUpdateNotes={(notes) => {
+          setProcedureSummaryData((prev) => (prev ? { ...prev, clinicalNotes: notes } : null));
+        }}
       />
 
       {/* 11. FOOTER */}

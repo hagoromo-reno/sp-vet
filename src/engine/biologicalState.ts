@@ -135,6 +135,7 @@ export class BiologicalStateEngine {
       resuscitation: {
         roscReadinessSeconds: 0,
         processedShockCount: 0,
+        postRoscStabilizationSeconds: 0,
       },
     };
   }
@@ -576,7 +577,7 @@ export class BiologicalStateEngine {
     }
 
     next.organPerfusion.cumulativeOxygenDebt = clamp(
-      state.organPerfusion.cumulativeOxygenDebt + (oxygenDebtRate * dtSeconds / 300) - recoveryRate,
+      state.organPerfusion.cumulativeOxygenDebt + (oxygenDebtRate * dtSeconds / 240) - recoveryRate,
       0,
       1
     );

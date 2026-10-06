@@ -197,3 +197,106 @@ test('Segurança Acústica: AudioSynthesizer silencia o monitor antes da autenti
   AudioSynthesizer.setAuthenticated(false);
   assert.equal(AudioSynthesizer.getIsAuthenticated(), false);
 });
+
+test('Turma de Alunos: login compartilhado alunos@sopet.app permite múltiplas conexões simultâneas', async () => {
+  // Aluno 1 conecta
+  const session1 = await SessionManager.login(
+    'alunos@sopet.app',
+    'melhoresalunos',
+    '10.0.0.1',
+    'Chrome Device 1'
+  );
+  assert.ok(session1.token);
+  assert.equal(session1.user.role, 'student');
+  assert.notEqual(session1.user.role, 'admin', 'Alunos NÃO podem ter acesso de administrador');
+
+  // Aluno 2 conecta simultaneamente na mesma conta
+  const session2 = await SessionManager.login(
+    'alunos@sopet.app',
+    'melhoresalunos',
+    '10.0.0.2',
+    'Safari Device 2'
+  );
+  assert.ok(session2.token);
+  assert.notEqual(session1.token, session2.token);
+
+  // Aluno 3 conecta simultaneamente na mesma conta
+  const session3 = await SessionManager.login(
+    'alunos@sopet.app',
+    'melhoresalunos',
+    '10.0.0.3',
+    'Firefox Device 3'
+  );
+  assert.ok(session3.token);
+
+  // Ambas as 3 sessões devem conseguir fazer heartbeat sem que nenhuma seja derrubada
+  const hb1 = await SessionManager.validateAndHeartbeat(session1.token);
+  assert.equal(hb1.activeSession.is_active, true, 'Sessão 1 do Aluno deve permanecer ativa');
+
+  const hb2 = await SessionManager.validateAndHeartbeat(session2.token);
+  assert.equal(hb2.activeSession.is_active, true, 'Sessão 2 do Aluno deve permanecer ativa');
+
+  const hb3 = await SessionManager.validateAndHeartbeat(session3.token);
+  assert.equal(hb3.activeSession.is_active, true, 'Sessão 3 do Aluno deve permanecer ativa');
+});
+
+test('Procedure Logs: persistência de logs diferenciados por nome/codinome de aluno', async () => {
+  const { AdminService } = await import('../server/admin/adminService');
+
+  // Salva log para Mariana
+  const logMariana = await AdminService.saveProcedureLog({
+    userEmail: 'alunos@sopet.app',
+    studentName: 'Mariana Silva',
+    sessionDeviceId: 'dev_cookie_mariana_123',
+    patientId: 'patient-1',
+    patientName: 'Thor',
+    species: 'canine',
+    procedureName: 'Osh Eletiva',
+    durationSeconds: 1200,
+    outcome: 'finished',
+    finalHr: 95,
+    finalMap: 78,
+    finalSpo2: 99,
+    finalEtco2: 38,
+    finalRr: 14,
+    administeredDrugs: [{ name: 'Propofol', dosePerKg: 4 }],
+  });
+  assert.ok(logMariana.id);
+  assert.equal(logMariana.student_name || logMariana.studentName, 'Mariana Silva');
+
+  // Salva log para Pedro (com óbito)
+  const logPedro = await AdminService.saveProcedureLog({
+    userEmail: 'alunos@sopet.app',
+    studentName: 'Pedro Aluno 02',
+    sessionDeviceId: 'dev_cookie_pedro_456',
+    patientId: 'patient-2',
+    patientName: 'Mel',
+    species: 'feline',
+    procedureName: 'Enterotomia',
+    durationSeconds: 850,
+    outcome: 'death',
+    deathCause: 'Fibrilação Ventricular refratária',
+    finalHr: 0,
+    finalMap: 0,
+    finalSpo2: 0,
+    finalEtco2: 0,
+    finalRr: 0,
+  });
+  assert.ok(logPedro.id);
+  assert.equal(logPedro.outcome, 'death');
+
+  // Consulta por Mariana
+  const marianaLogs = await AdminService.listProcedureLogs({
+    studentName: 'Mariana',
+    isAdmin: true,
+  });
+  assert.ok(marianaLogs.some((l: any) => (l.student_name || l.studentName).includes('Mariana')));
+  assert.equal(marianaLogs.some((l: any) => (l.student_name || l.studentName).includes('Pedro')), false);
+
+  // Admin lista todos os logs
+  const allLogs = await AdminService.listProcedureLogs({
+    isAdmin: true,
+  });
+  assert.ok(allLogs.length >= 2);
+});
+

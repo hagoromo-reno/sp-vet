@@ -167,15 +167,58 @@ export async function initDatabase(): Promise<boolean> {
     await runDdl(`CREATE INDEX IF NOT EXISTS idx_patients_user ON patients(user_id);`);
     await runDdl(`CREATE INDEX IF NOT EXISTS idx_patients_default ON patients(is_default);`);
 
+    // 7.1 Procedure Logs table (Resumo do Procedimento e Atividades dos Alunos)
+    await runDdl(`
+      CREATE TABLE IF NOT EXISTS procedure_logs (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        user_email VARCHAR(255) NOT NULL,
+        student_name VARCHAR(255) NOT NULL,
+        session_device_id VARCHAR(255),
+        patient_id VARCHAR(100),
+        patient_name VARCHAR(255),
+        species VARCHAR(50),
+        procedure_name VARCHAR(255),
+        duration_seconds INT DEFAULT 0,
+        outcome VARCHAR(50) NOT NULL DEFAULT 'ongoing',
+        death_cause TEXT,
+        final_hr INT,
+        final_map INT,
+        final_spo2 INT,
+        final_etco2 NUMERIC,
+        final_rr INT,
+        administered_drugs JSONB DEFAULT '[]'::jsonb,
+        vital_records JSONB DEFAULT '[]'::jsonb,
+        events_summary JSONB DEFAULT '[]'::jsonb,
+        clinical_notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await runDdl(`CREATE INDEX IF NOT EXISTS idx_procedure_logs_user ON procedure_logs(user_id);`);
+    await runDdl(`CREATE INDEX IF NOT EXISTS idx_procedure_logs_student ON procedure_logs(student_name);`);
+    await runDdl(`CREATE INDEX IF NOT EXISTS idx_procedure_logs_created ON procedure_logs(created_at DESC);`);
+
     // 8. Seed Admin user if table is empty
     const checkAdmin = await query(`SELECT id FROM users WHERE email = 'admin@spvet.com' LIMIT 1;`);
     if (checkAdmin.rows.length === 0) {
       const adminPass = hashPassword('admin123');
       await query(`
-        INSERT INTO users (name, email, password_hash, role, subscription_status)
-        VALUES ('Administrador SP-VET', 'admin@spvet.com', $1, 'admin', 'active');
+        INSERT INTO users (name, email, password_hash, role, subscription_status, is_lifetime)
+        VALUES ('Administrador SP-VET', 'admin@spvet.com', $1, 'admin', 'active', TRUE);
       `, [adminPass]);
       console.log('[DB] Usuário Admin padrão criado: admin@spvet.com (senha: admin123)');
+    }
+
+    // 8.1 Seed Student Class user (Conta compartilhada para alunos de turma)
+    const checkStudent = await query(`SELECT id FROM users WHERE LOWER(email) = 'alunos@sopet.app' LIMIT 1;`);
+    if (checkStudent.rows.length === 0) {
+      const studentPass = hashPassword('melhoresalunos');
+      await query(`
+        INSERT INTO users (name, email, password_hash, role, subscription_status, max_concurrent_sessions, is_lifetime, trial_days)
+        VALUES ('Turma de Alunos', 'alunos@sopet.app', $1, 'student', 'active', 999, TRUE, 3650);
+      `, [studentPass]);
+      console.log('[DB] Usuário de Alunos criado: alunos@sopet.app (senha: melhoresalunos, sessões simultâneas ilimitadas)');
     }
 
     // 9. Seed Demonstration / Trial user
