@@ -208,6 +208,8 @@ test('Turma de Alunos: login compartilhado alunos@sopet.app permite múltiplas c
   );
   assert.ok(session1.token);
   assert.equal(session1.user.role, 'student');
+  assert.equal(session1.user.email_verified, true, 'Alunos devem ter email verificado automaticamente');
+  assert.equal(session1.user.subscription_status, 'active', 'Alunos devem ter licença ativa imediatamente');
   assert.notEqual(session1.user.role, 'admin', 'Alunos NÃO podem ter acesso de administrador');
 
   // Aluno 2 conecta simultaneamente na mesma conta

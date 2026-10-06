@@ -1545,7 +1545,7 @@ function SimulatorApp() {
 }
 
 export default function App() {
-  const { isAuthenticated, isPendingPayment, isLoading } = useAuth();
+  const { isAuthenticated, isPendingPayment, isLoading, user } = useAuth();
 
   if (isLoading) {
     return (
@@ -1562,8 +1562,8 @@ export default function App() {
     return <AuthScreen />;
   }
 
-  // 2. Autenticado mas aguardando confirmação do pagamento
-  if (isPendingPayment) {
+  // 2. Autenticado mas aguardando confirmação do pagamento (Alunos são automaticamente ativados)
+  if (isPendingPayment && user?.role !== 'student' && user?.role !== 'admin') {
     return <PendingPaymentScreen />;
   }
 

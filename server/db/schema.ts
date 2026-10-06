@@ -215,10 +215,16 @@ export async function initDatabase(): Promise<boolean> {
     if (checkStudent.rows.length === 0) {
       const studentPass = hashPassword('melhoresalunos');
       await query(`
-        INSERT INTO users (name, email, password_hash, role, subscription_status, max_concurrent_sessions, is_lifetime, trial_days)
-        VALUES ('Turma de Alunos', 'alunos@sopet.app', $1, 'student', 'active', 999, TRUE, 3650);
+        INSERT INTO users (name, email, password_hash, role, subscription_status, max_concurrent_sessions, is_lifetime, trial_days, email_verified)
+        VALUES ('Turma de Alunos', 'alunos@sopet.app', $1, 'student', 'active', 999, TRUE, 3650, TRUE);
       `, [studentPass]);
       console.log('[DB] Usuário de Alunos criado: alunos@sopet.app (senha: melhoresalunos, sessões simultâneas ilimitadas)');
+    } else {
+      await query(`
+        UPDATE users 
+        SET email_verified = TRUE, subscription_status = 'active', is_lifetime = TRUE, max_concurrent_sessions = 999, is_blocked = FALSE
+        WHERE LOWER(email) = 'alunos@sopet.app' OR role = 'student';
+      `);
     }
 
     // 9. Seed Demonstration / Trial user

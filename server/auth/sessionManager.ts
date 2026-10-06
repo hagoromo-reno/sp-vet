@@ -85,6 +85,7 @@ memoryUsers.set('alunos@sopet.app', {
   max_concurrent_sessions: 999,
   is_blocked: false,
   is_lifetime: true,
+  email_verified: true,
   created_at: new Date().toISOString(),
   last_login_at: null,
 });
@@ -151,6 +152,11 @@ export class SessionManager {
         await query(`UPDATE users SET last_login_at = NOW() WHERE id = $1;`, [row.id]);
 
         const { password_hash, verification_code, ...safeUser } = row;
+        if (safeUser.role === 'student' || safeUser.email?.toLowerCase() === 'alunos@sopet.app') {
+          safeUser.email_verified = true;
+          safeUser.subscription_status = 'active';
+          safeUser.is_lifetime = true;
+        }
         return { user: safeUser, token };
       }
     } catch (dbError: any) {
@@ -250,22 +256,23 @@ export class SessionManager {
           throw new Error('Acesso bloqueado pelo administrador.');
         }
 
+        const isStudent = row.u_role === 'student' || row.u_email?.toLowerCase() === 'alunos@sopet.app';
         const userObj: UserRecord = {
           id: row.user_id,
           name: row.u_name,
           email: row.u_email,
           role: row.u_role,
-          subscription_status: row.u_sub_status,
-          subscription_expires_at: row.u_sub_expires,
-          trial_days: row.u_trial_days,
-          max_concurrent_sessions: 1,
-          is_blocked: row.u_blocked,
+          subscription_status: isStudent ? 'active' : row.u_sub_status,
+          subscription_expires_at: isStudent ? null : row.u_sub_expires,
+          trial_days: isStudent ? 3650 : row.u_trial_days,
+          max_concurrent_sessions: isStudent ? 999 : 1,
+          is_blocked: isStudent ? false : row.u_blocked,
           created_at: row.u_created_at,
           last_login_at: row.created_at,
-          email_verified: row.u_email_verified,
+          email_verified: isStudent ? true : row.u_email_verified,
           phone: row.u_phone,
           cpf: row.u_cpf,
-          is_lifetime: row.u_is_lifetime,
+          is_lifetime: isStudent ? true : row.u_is_lifetime,
           asaas_invoice_url: row.u_asaas_invoice_url,
         };
 

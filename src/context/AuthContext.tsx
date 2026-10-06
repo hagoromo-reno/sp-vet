@@ -188,6 +188,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isPendingPayment =
     !!user &&
     user.role !== 'admin' &&
+    user.role !== 'student' &&
     (user.subscription_status === 'pending_payment' ||
       user.subscription_status === 'inactive' ||
       !user.email_verified);
